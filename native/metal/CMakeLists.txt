@@ -15,3 +15,12 @@ target_link_libraries(gx_metal_bootstrap PUBLIC
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
   target_link_libraries(gx_metal_bootstrap PUBLIC "-framework UIKit")
 endif()
+
+option(GX_METAL_SMOKE_TESTS "Build standalone Metal bootstrap smoke tests" OFF)
+if(GX_METAL_SMOKE_TESTS)
+  enable_testing()
+  add_executable(gx_metal_smoke tests/MetalBootstrapSmoke.mm)
+  target_link_libraries(gx_metal_smoke PRIVATE gx_metal_bootstrap)
+  add_test(NAME metal_bootstrap_create_resize_destroy COMMAND gx_metal_smoke)
+  set_tests_properties(metal_bootstrap_create_resize_destroy PROPERTIES SKIP_RETURN_CODE 77)
+endif()
