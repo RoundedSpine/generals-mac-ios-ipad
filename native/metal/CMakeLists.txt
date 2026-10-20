@@ -42,14 +42,15 @@ endif()
 # Header contract compilation is distinct from runtime COM compatibility.
 set(GX_D3D8_HEADER_ROOT "" CACHE PATH "DXVK include/native root containing directx/d3d8.h")
 if(GX_D3D8_HEADER_ROOT)
-  if(NOT EXISTS "${GX_D3D8_HEADER_ROOT}/directx/d3d8.h")
-    message(FATAL_ERROR "Expected pinned DXVK header at ${GX_D3D8_HEADER_ROOT}/directx/d3d8.h")
+  if(NOT EXISTS "${GX_D3D8_HEADER_ROOT}/d3d8.h" AND NOT EXISTS "${GX_D3D8_HEADER_ROOT}/directx/d3d8.h")
+    message(FATAL_ERROR "Missing D3D8 SDK header in ${GX_D3D8_HEADER_ROOT}")
   endif()
   add_executable(gx_d3d8_header_contract tests/D3D8HeaderContract.cpp)
   target_include_directories(gx_d3d8_header_contract PRIVATE
     "${GX_D3D8_HEADER_ROOT}"
     "${GX_D3D8_HEADER_ROOT}/windows"
-    "${GX_D3D8_HEADER_ROOT}/directx")
+    "${GX_D3D8_HEADER_ROOT}/directx"
+    "${GX_D3D8_WINDOWS_ROOT}")
   if(GX_METAL_SMOKE_TESTS)
     add_test(NAME d3d8_header_contract COMMAND gx_d3d8_header_contract)
   endif()
