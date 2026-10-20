@@ -6,6 +6,7 @@ on:
     paths:
       - 'scripts/audit/inventory_d3d8.py'
       - '.github/workflows/d3d8-inventory.yml'
+      - 'scripts/audit/classify_d3d8.py'
 permissions:
   contents: read
 jobs:
@@ -17,6 +18,8 @@ jobs:
           submodules: false
       - name: Generate repository-wide D3D8 inventory
         run: python3 scripts/audit/inventory_d3d8.py --root . --out build/d3d8-inventory
+      - name: Classify API candidates
+        run: python3 scripts/audit/classify_d3d8.py build/d3d8-inventory/calls.csv --output build/d3d8-inventory/classified.csv
       - name: Publish inventory artifact
         uses: actions/upload-artifact@v4
         with:
