@@ -1,3 +1,8 @@
+# Support both standalone smoke testing and inclusion from the main engine.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  cmake_minimum_required(VERSION 3.24)
+  project(GXMetalBootstrap LANGUAGES CXX OBJCXX)
+endif()
 # Standalone native Metal proof-of-concept library.
 # Does not alter the DXVK-backed d3d8lib target.
 if(NOT APPLE)
