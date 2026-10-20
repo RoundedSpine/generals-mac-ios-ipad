@@ -37,3 +37,20 @@ if(GX_METAL_SMOKE_TESTS)
   add_test(NAME metal_bootstrap_create_resize_destroy COMMAND gx_metal_smoke)
   set_tests_properties(metal_bootstrap_create_resize_destroy PROPERTIES SKIP_RETURN_CODE 77)
 endif()
+
+# ABI checks are opt-in until the exact pinned DXVK headers are supplied.
+# Header contract compilation is distinct from runtime COM compatibility.
+set(GX_D3D8_HEADER_ROOT "" CACHE PATH "DXVK include/native root containing directx/d3d8.h")
+if(GX_D3D8_HEADER_ROOT)
+  if(NOT EXISTS "${GX_D3D8_HEADER_ROOT}/directx/d3d8.h")
+    message(FATAL_ERROR "Expected pinned DXVK header at ${GX_D3D8_HEADER_ROOT}/directx/d3d8.h")
+  endif()
+  add_executable(gx_d3d8_header_contract tests/D3D8HeaderContract.cpp)
+  target_include_directories(gx_d3d8_header_contract PRIVATE
+    "${GX_D3D8_HEADER_ROOT}"
+    "${GX_D3D8_HEADER_ROOT}/windows"
+    "${GX_D3D8_HEADER_ROOT}/directx")
+  if(GX_METAL_SMOKE_TESTS)
+    add_test(NAME d3d8_header_contract COMMAND gx_d3d8_header_contract)
+  endif()
+endif()
