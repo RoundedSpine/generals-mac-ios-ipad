@@ -44,6 +44,19 @@ def main():
      rows.append(dict(file=str(f.relative_to(root)),line=n,kind=kind,
                       method=m.group("method"),d3d_context=relevant,
                       snippet=line.strip()[:300]))
+  # Multiline call sites: allow whitespace/newlines between member access,
+  # method name and argument list. Avoid duplicates already found linewise.
+  seen={(x["line"],x["method"],x["kind"]) for x in rows if x["file"]==str(f.relative_to(root))}
+  for kind,pat in PATTERNS:
+   for match in pat.finditer(data):
+    n=data.count("\\n",0,match.start())+1
+    key=(n,match.group("method"),kind)
+    if key in seen: continue
+    seen.add(key)
+    line=data.splitlines()[n-1]
+    rows.append(dict(file=str(f.relative_to(root)),line=n,kind=kind,
+      method=match.group("method"),d3d_context=relevant,
+      snippet=line.strip()[:300]))
  rows.sort(key=lambda x:(x["file"],x["line"],x["method"]))
  with (out/"calls.csv").open("w",newline="",encoding="utf-8") as fh:
   w=csv.DictWriter(fh,fieldnames=["file","line","kind","method","d3d_context","snippet"]);w.writeheader();w.writerows(rows)
