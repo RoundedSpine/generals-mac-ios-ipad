@@ -17,8 +17,10 @@ jobs:
           set -euo pipefail
           git clone --filter=blob:none --no-checkout https://github.com/fbraz3/dxvk.git /tmp/gx-dxvk
           git -C /tmp/gx-dxvk checkout 46a3bc018bcae408d49d3c500e4e536a11f6789a
-          test -f /tmp/gx-dxvk/include/native/directx/d3d8.h
-          test -f /tmp/gx-dxvk/include/native/windows/windows_base.h
+          echo "Pinned DXVK header locations:"
+          find /tmp/gx-dxvk/include/native -iname '*d3d8*' -o -name windows_base.h | sort
+          test -f /tmp/gx-dxvk/include/native/directx/d3d8.h || { echo "::error::Missing directx/d3d8.h"; exit 1; }
+          test -f /tmp/gx-dxvk/include/native/windows/windows_base.h || { echo "::error::Missing windows/windows_base.h"; exit 1; }
       - name: Configure
         run: cmake -S native/metal -B build-metal-smoke -DGX_METAL_SMOKE_TESTS=ON -DGX_D3D8_HEADER_ROOT=/tmp/gx-dxvk/include/native
       - name: Build
