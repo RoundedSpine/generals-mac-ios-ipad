@@ -152,3 +152,12 @@ endif()
 
 feature_summary(WHAT ENABLED_FEATURES DESCRIPTION "Enabled features:")
 feature_summary(WHAT DISABLED_FEATURES DESCRIPTION "Disabled features:")
+
+# Experimental native Metal bootstrap; isolated from the production D3D8/DXVK renderer.
+option(SAGE_EXPERIMENTAL_METAL_BOOTSTRAP "Build native Metal clear/present prototype" OFF)
+if(SAGE_EXPERIMENTAL_METAL_BOOTSTRAP)
+    if(NOT APPLE)
+        message(FATAL_ERROR "SAGE_EXPERIMENTAL_METAL_BOOTSTRAP requires Apple")
+    endif()
+    add_subdirectory(native/metal)
+endif()
