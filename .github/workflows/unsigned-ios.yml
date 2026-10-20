@@ -1,0 +1,56 @@
+name: iOS unsigned engine-only IPA
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build/unsigned-engine-only-ipa
+    paths:
+      - '.github/workflows/unsigned-ios.yml'
+      - 'scripts/build/ios/package-unsigned-ipa.sh'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install build tools
+        run: |
+          brew install cmake ninja meson pkgconf xcodegen
+      - name: Prepare vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$HOME/vcpkg"
+          "$HOME/vcpkg/bootstrap-vcpkg.sh"
+          echo "VCPKG_ROOT=$HOME/vcpkg" >> "$GITHUB_ENV"
+      - name: Stage MoltenVK and fonts
+        run: |
+          ./scripts/build/ios/fetch-moltenvk.sh
+          ./scripts/build/ios/stage-fonts.sh
+      - name: Prepare Vulkan SDK environment
+        run: |
+          MVK="$HOME/GeneralsX/MoltenVK/MoltenVK/MoltenVK"
+          SDK="$RUNNER_TEMP/generals-vulkan-sdk"
+          mkdir -p "$SDK/include/vulkan" "$SDK/lib/MoltenVK.xcframework/ios-arm64"
+          find "$MVK" -name vulkan.h -print
+          if [ -d "$MVK/include/vulkan" ]; then
+            cp -R "$MVK/include/vulkan/." "$SDK/include/vulkan/"
+          fi
+          STATIC=$(find "$MVK" -path '*/ios-arm64/libMoltenVK.a' -print -quit)
+          test -n "$STATIC" || { echo "Static MoltenVK not found"; exit 1; }
+          cp "$STATIC" "$SDK/lib/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
+          echo "VULKAN_SDK=$SDK" >> "$GITHUB_ENV"
+      - name: Configure iOS engine
+        run: cmake --preset ios-vulkan
+      - name: Compile iOS engine
+        run: cmake --build build/ios-vulkan --target z_generals --parallel 3
+      - name: Package unsigned engine-only IPA
+        run: bash scripts/build/ios/package-unsigned-ipa.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneralsZH-engine-only-unsigned
+          path: build/ios-package/GeneralsZH-engine-only-unsigned.ipa
+          if-no-files-found: error
