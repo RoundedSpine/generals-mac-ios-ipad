@@ -1,0 +1,25 @@
+name: D3D8 call-site inventory
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/native-metal-renderer]
+    paths:
+      - 'scripts/audit/inventory_d3d8.py'
+      - '.github/workflows/d3d8-inventory.yml'
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Generate repository-wide D3D8 inventory
+        run: python3 scripts/audit/inventory_d3d8.py --root . --out build/d3d8-inventory
+      - name: Publish inventory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d3d8-call-inventory
+          path: build/d3d8-inventory/
+          if-no-files-found: error
