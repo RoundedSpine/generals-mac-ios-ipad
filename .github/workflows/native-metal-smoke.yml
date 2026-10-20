@@ -1,0 +1,19 @@
+name: Native Metal bootstrap smoke
+on:
+  push:
+    branches: [feature/native-metal-renderer]
+    paths:
+      - 'native/metal/**'
+      - '.github/workflows/native-metal-smoke.yml'
+  workflow_dispatch:
+jobs:
+  macos-smoke:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S native/metal -B build-metal-smoke -DGX_METAL_SMOKE_TESTS=ON
+      - name: Build
+        run: cmake --build build-metal-smoke --parallel
+      - name: Test
+        run: ctest --test-dir build-metal-smoke --output-on-failure
