@@ -11,9 +11,21 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch pinned DXVK headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/fbraz3/dxvk.git /tmp/gx-dxvk
+          git -C /tmp/gx-dxvk checkout 46a3bc018bcae408d49d3c500e4e536a11f6789a
+          test -f /tmp/gx-dxvk/include/native/directx/d3d8.h
+          test -f /tmp/gx-dxvk/include/native/windows/windows_base.h
       - name: Configure
-        run: cmake -S native/metal -B build-metal-smoke -DGX_METAL_SMOKE_TESTS=ON
+        run: cmake -S native/metal -B build-metal-smoke -DGX_METAL_SMOKE_TESTS=ON -DGX_D3D8_HEADER_ROOT=/tmp/gx-dxvk/include/native
       - name: Build
         run: cmake --build build-metal-smoke --parallel
       - name: Test
-        run: ctest --test-dir build-metal-smoke --output-on-failure
+        run: |
+          set -euo pipefail
+          ctest --test-dir build-metal-smoke -N | tee /tmp/gx-tests.txt
+          grep -q 'd3d8_header_contract' /tmp/gx-tests.txt
+          ctest --test-dir build-metal-smoke --output-on-failure
