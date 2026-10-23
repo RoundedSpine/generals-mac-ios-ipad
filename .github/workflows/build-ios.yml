@@ -2,6 +2,9 @@
 name: Build iOS unsigned IPA
 
 on:
+  push:
+    branches:
+      - ci/ios-unsigned-ipa
   workflow_dispatch:
 
 permissions:

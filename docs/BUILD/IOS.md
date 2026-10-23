@@ -4,7 +4,8 @@ The **Build iOS unsigned IPA** GitHub Actions workflow builds Zero Hour for
 arm64 iPhones and iPads running iOS 16 or later. It uses a macOS runner with
 Xcode and requires no Apple signing secrets.
 
-1. Push the workflow and packaging changes to your GitHub repository.
+1. Push the workflow and packaging changes to your GitHub repository. Pushes to
+   `ci/ios-unsigned-ipa` start a build automatically, including before merge.
 2. Open **Actions → Build iOS unsigned IPA → Run workflow** and select the branch.
    GitHub normally requires the workflow to exist on the default branch before
    showing the manual Run workflow button.
