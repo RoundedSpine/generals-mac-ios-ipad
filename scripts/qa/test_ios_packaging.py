@@ -27,6 +27,12 @@ if name == 'xcodebuild':
     (app / 'embedded.mobileprovision').write_text('profile')
     (app / 'Info.plist').write_text('<plist/>')
     (app / 'GeneralsXZH').write_text('stub')
+elif name == 'lipo':
+    # -verify_arch consumes the following arguments as architecture names.
+    # Apple lipo requires the input file before that variable-length list.
+    if len(args) != 3 or not pathlib.Path(args[0]).is_file() or args[1:] != ['-verify_arch', 'arm64']:
+        print('usage: lipo <input_file> -verify_arch <arch_type> ...', file=sys.stderr)
+        sys.exit(1)
 elif name == 'otool':
     print(args[-1] + ':')
     dep = '/usr/lib/libSystem.B.dylib'
@@ -102,6 +108,13 @@ class PackagingTest(unittest.TestCase):
         self.assertFalse(any('--sign' in call for call in calls))
         self.assertTrue(any('--remove-signature' in call for call in calls))
         self.assertTrue(any('@rpath/libSDL3.0.dylib' in call for call in calls))
+
+    def test_architecture_check_rejects_filename_after_architecture_list(self):
+        binary = self.root / 'build/ios-vulkan/GeneralsMD/GeneralsXZH.app/GeneralsXZH'
+        result = subprocess.run(['lipo', '-verify_arch', 'arm64', str(binary)],
+                                env=self.env, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('usage: lipo', result.stderr)
 
     def test_unsigned_install_is_rejected(self):
         result = self.run_package('--unsigned', '--install')

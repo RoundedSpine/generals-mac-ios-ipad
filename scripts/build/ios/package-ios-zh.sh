@@ -183,7 +183,7 @@ fi
 BINARIES=("${APP}/${APP_NAME}" "${APP}/Frameworks/"*.dylib "${APP}/Frameworks/MoltenVK.framework/MoltenVK")
 for binary in "${BINARIES[@]}"; do
     [[ -f "${binary}" ]] || continue
-    lipo -verify_arch arm64 "${binary}"
+    lipo "${binary}" -verify_arch arm64
     if [[ "${binary}" == *.dylib ]]; then
         install_name_tool -id "@rpath/$(basename "${binary}")" "${binary}"
     fi
