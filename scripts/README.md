@@ -27,6 +27,15 @@ Scripts for Linux native and Docker-based builds:
 - `deploy-macos-generals.sh` - Deploy binaries
 - `run-macos-zh.sh` - Launch the game
 
+#### `build/ios/` - iOS Device Build
+- `package-ios-zh.sh` - Package a signed app, or use `--dev --unsigned` for a sideloadable IPA (requires external signing)
+- `fetch-moltenvk.sh` - Fetch the checksum-pinned iOS MoltenVK distribution
+- `stage-fonts.sh` - Stage Liberation fonts using the game's expected names
+
+See [unsigned IPA builds](../docs/BUILD/IOS.md) for the manual GitHub Actions workflow.
+Validate packaging control flow with `python3 scripts/qa/test_ios_packaging.py`
+(Apple tools are simulated; a real device build still requires macOS/Xcode).
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 

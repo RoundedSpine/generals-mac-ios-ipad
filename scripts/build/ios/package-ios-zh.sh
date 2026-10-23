@@ -11,20 +11,27 @@
 #      provisioning profile from step 1, preserving entitlements.
 #   5. Optional: install to the first connected device via devicectl.
 #
-# Usage: ./scripts/build/ios/package-ios-zh.sh [--dev] [--install]
+# Usage: ./scripts/build/ios/package-ios-zh.sh [--dev] [--install | --unsigned]
 #   --dev      skip bundling the 2.7 GB of game assets (code-only iteration)
 #   --install  install the packaged app to the first connected device
+#   --unsigned skip provisioning/signing and emit GeneralsXZH-unsigned.ipa for sideloading
 set -euo pipefail
 
 DEV_MODE=0
 DO_INSTALL=0
+UNSIGNED=0
 for arg in "$@"; do
     case "$arg" in
         --dev)     DEV_MODE=1 ;;
         --install) DO_INSTALL=1 ;;
-        *) echo "ERROR: unknown argument '$arg' (usage: $0 [--dev] [--install])"; exit 1 ;;
+        --unsigned) UNSIGNED=1 ;;
+        *) echo "ERROR: unknown argument '$arg' (usage: $0 [--dev] [--install | --unsigned])"; exit 1 ;;
     esac
 done
+if [[ "${UNSIGNED}" == "1" && "${DO_INSTALL}" == "1" ]]; then
+    echo "ERROR: --unsigned cannot be combined with --install; sign the IPA before installing." >&2
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -52,13 +59,17 @@ echo "==> Generating Xcode project (xcodegen)"
 (cd "${IOS_DIR}" && xcodegen generate --quiet)
 
 echo "==> Building provisioning shell app"
+SIGNING_ARGS=(-allowProvisioningUpdates)
+if [[ "${UNSIGNED}" == "1" ]]; then
+    SIGNING_ARGS=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM=)
+fi
 xcodebuild -project "${IOS_DIR}/${APP_NAME}.xcodeproj" \
     -scheme "${APP_NAME}" -configuration Release \
     -destination 'generic/platform=iOS' \
     -derivedDataPath "${DERIVED}" \
     DEVELOPMENT_TEAM="${TEAM_ID}" \
     PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID}" \
-    -allowProvisioningUpdates build | tail -3
+    "${SIGNING_ARGS[@]}" build | tail -3
 
 SHELL_APP="${DERIVED}/Build/Products/Release-iphoneos/${APP_NAME}.app"
 if [[ ! -d "${SHELL_APP}" ]]; then
@@ -168,8 +179,52 @@ if [[ -f "${ICON_SRC}" ]]; then
     echo "    icon PNG fallbacks added"
 fi
 
+# GeneralsX @build Codex 24/10/2026 Normalize embedded library references and reject host dependencies.
+BINARIES=("${APP}/${APP_NAME}" "${APP}/Frameworks/"*.dylib "${APP}/Frameworks/MoltenVK.framework/MoltenVK")
+for binary in "${BINARIES[@]}"; do
+    [[ -f "${binary}" ]] || continue
+    lipo -verify_arch arm64 "${binary}"
+    if [[ "${binary}" == *.dylib ]]; then
+        install_name_tool -id "@rpath/$(basename "${binary}")" "${binary}"
+    fi
+    dependencies="$(otool -L "${binary}")"
+    while IFS= read -r dependency; do
+        case "${dependency}" in
+            /System/Library/*|/usr/lib/*) continue ;;
+        esac
+        lib_name="$(basename "${dependency}")"
+        if [[ -f "${APP}/Frameworks/${lib_name}" ]]; then
+            install_name_tool -change "${dependency}" "@rpath/${lib_name}" "${binary}"
+        elif [[ "${dependency}" == */MoltenVK.framework/MoltenVK ]]; then
+            install_name_tool -change "${dependency}" "@rpath/MoltenVK.framework/MoltenVK" "${binary}"
+        else
+            echo "ERROR: unbundled dependency ${dependency} in ${binary}" >&2
+            exit 1
+        fi
+    done < <(printf '%s\n' "${dependencies}" | tail -n +2 | sed 's/^[[:space:]]*//; s/ (compatibility version.*//')
+done
+
 # Point the executable's rpath at the embedded frameworks
 install_name_tool -add_rpath "@executable_path/Frameworks" "${APP}/${APP_NAME}" 2>/dev/null || true
+
+# GeneralsX @build Codex 24/10/2026 Produce a credential-free IPA for external sideload signing.
+if [[ "${UNSIGNED}" == "1" ]]; then
+    # Xcode/clang can leave ad-hoc signatures even with signing disabled.
+    while IFS= read -r -d '' binary; do
+        if file -b "${binary}" | grep -q 'Mach-O'; then
+            if codesign -d "${binary}" >/dev/null 2>&1; then
+                codesign --remove-signature "${binary}"
+            fi
+        fi
+    done < <(find "${APP}" -type f -print0)
+    find "${APP}" -type d -name _CodeSignature -prune -exec rm -rf {} +
+    find "${APP}" -name embedded.mobileprovision -type f -delete
+    mkdir -p "${OUT_DIR}/Payload"
+    mv "${APP}" "${OUT_DIR}/Payload/"
+    (cd "${OUT_DIR}" && ditto -c -k --keepParent Payload "${APP_NAME}-unsigned.ipa")
+    echo "==> Unsigned IPA ready: ${OUT_DIR}/${APP_NAME}-unsigned.ipa"
+    exit 0
+fi
 
 echo "==> Re-signing"
 ENTITLEMENTS="${OUT_DIR}/entitlements.plist"

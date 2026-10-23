@@ -1,0 +1,113 @@
+# GeneralsX @build Codex 24/10/2026 Build an unsigned device IPA without Apple credentials.
+name: Build iOS unsigned IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCPKG_MAX_CONCURRENCY: '3'
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+      GX_BUNDLE_ID: org.generalsx.generalszh
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check packaging behavior
+        run: python3 scripts/qa/test_ios_packaging.py
+
+      - name: Initialize the pinned iOS DXVK fork
+        run: git submodule update --init --recursive references/fbraz3-dxvk
+
+      - name: Select Xcode and install build tools
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          brew install cmake ninja meson pkg-config xcodegen glslang autoconf autoconf-archive automake libtool
+          mkdir -p logs "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      # This revision includes the manifest's FFmpeg 8.1.1#2 override.
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '08098dce081e9411889686fc3f4aecbde95fc2b1'
+
+      - name: Cache iOS dependency binaries
+        uses: actions/cache@v5
+        with:
+          path: .vcpkg-cache
+          key: ios-vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/arm64-ios.cmake', '.github/workflows/build-ios.yml') }}
+
+      - name: Fetch verified iOS MoltenVK
+        run: |
+          set -euo pipefail
+          export GX_MOLTENVK_ROOT="$RUNNER_TEMP/MoltenVK"
+          bash scripts/build/ios/fetch-moltenvk.sh
+          MVK_ROOT="$GX_MOLTENVK_ROOT/MoltenVK/MoltenVK"
+          test -f "$MVK_ROOT/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
+          test -f "$MVK_ROOT/include/vulkan/vulkan.h"
+          echo "GX_MOLTENVK=$MVK_ROOT/dynamic/MoltenVK.xcframework/ios-arm64/MoltenVK.framework" >> "$GITHUB_ENV"
+          echo "GX_MVK_ROOT=$MVK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Configure iOS device build without signing
+        run: |
+          set -euo pipefail
+          cmake --preset ios-vulkan \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -DVulkan_INCLUDE_DIR="$GX_MVK_ROOT/include" \
+            -DVulkan_LIBRARY="$GX_MVK_ROOT/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a" \
+            -DVulkan_MoltenVK_LIBRARY="$GX_MVK_ROOT/static/MoltenVK.xcframework/ios-arm64/libMoltenVK.a" \
+            -DVulkan_MoltenVK_INCLUDE_DIR="$GX_MVK_ROOT/include" \
+            2>&1 | tee logs/configure_ios.log
+
+      - name: Build Zero Hour for iPhone and iPad
+        run: |
+          set -euo pipefail
+          # DXVK's external Meson build links the in-tree SDL3 library.
+          # Make it available before Ninja starts DXVK in parallel.
+          cp build/ios-vulkan/sdl3-pkgconfig/sdl3.pc build/ios-vulkan/sdl3-pkgconfig/SDL3.pc
+          cmake --build build/ios-vulkan --target SDL3-shared --parallel 3 2>&1 | tee logs/build_sdl_ios.log
+          cmake --build build/ios-vulkan --target z_generals --parallel 3 2>&1 | tee logs/build_ios.log
+
+      - name: Package unsigned IPA without retail game assets
+        run: |
+          set -euo pipefail
+          bash scripts/build/ios/package-ios-zh.sh --dev --unsigned 2>&1 | tee logs/package_ios.log
+          unzip -t build/ios-package/GeneralsXZH-unsigned.ipa
+          test -f build/ios-package/Payload/GeneralsXZH.app/GeneralsXZH
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneralsXZH-iOS-unsigned
+          path: build/ios-package/GeneralsXZH-unsigned.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: |
+            logs/*ios.log
+            build/ios-vulkan/vcpkg-manifest-install.log
+            build/ios-vulkan/_deps/dxvk-build-macos/meson-logs/meson-log.txt
+          if-no-files-found: ignore
+          retention-days: 7

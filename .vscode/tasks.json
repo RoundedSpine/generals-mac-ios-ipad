@@ -2,6 +2,16 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "[iOS] Package unsigned IPA",
+			"type": "shell",
+			"command": "echo 'iOS packaging requires macOS and an existing ios-vulkan build'; exit 1",
+			"osx": {
+				"command": "bash scripts/build/ios/package-ios-zh.sh --dev --unsigned"
+			},
+			"options": { "cwd": "${workspaceFolder}" },
+			"problemMatcher": []
+		},
+		{
 			"label": "[Platform] Configure",
 			"type": "shell",
 			"icon": {
