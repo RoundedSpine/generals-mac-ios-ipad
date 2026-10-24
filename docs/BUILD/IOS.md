@@ -96,3 +96,17 @@ Zero Hour archives with the base game's files. New builds search this folder
 when the primary asset root is Documents. Missing texture names are logged as
 `[TEX_MISSING]`; use those reports to distinguish incomplete data from rendering
 problems rather than assuming every purple surface is a shader error.
+
+Collect base-game archives on Windows with
+[`collect-ios-base-generals.ps1`](../../scripts/build/ios/collect-ios-base-generals.ps1):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\collect-ios-base-generals.ps1 -SourceDirectory "D:\Games\Command and Conquer Generals"
+```
+
+Replace the source path with your actual **base Generals** installation. The
+script creates `Generals-Base-iOS-Transfer/ZH_Generals` on your Desktop. Copy the
+**ZH_Generals folder itself** into the iOS app's Documents directory, alongside
+the Zero Hour archives. It collects top-level `.big` files only; the base
+archive resolver does not use loose files from this secondary folder. No
+Windows executables or extra fonts are needed for this shared-archive step.
