@@ -24,6 +24,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.ammaar.generalszh
         DEVELOPMENT_TEAM: 7S264298H8
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: GeneralsXZH.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_UIRequiresFullScreen: YES
         ENABLE_BITCODE: NO

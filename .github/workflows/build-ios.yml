@@ -107,12 +107,15 @@ jobs:
           bash scripts/build/ios/package-ios-zh.sh --dev --unsigned 2>&1 | tee logs/package_ios.log
           unzip -t build/ios-package/GeneralsXZH-unsigned.ipa
           test -f build/ios-package/Payload/GeneralsXZH.app/GeneralsXZH
+          test -f build/ios-package/GeneralsXZH.entitlements
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: GeneralsXZH-iOS-unsigned
-          path: build/ios-package/GeneralsXZH-unsigned.ipa
+          path: |
+            build/ios-package/GeneralsXZH-unsigned.ipa
+            build/ios-package/GeneralsXZH.entitlements
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

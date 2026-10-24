@@ -64,3 +64,26 @@ report startup checkpoints, asset presence, the engine image path and selected
 DXVK config. Asset-free IPAs now also carry the iOS renderer config. See the
 [startup review](../WORKDIR/audit/IOS_SIDELOAD_STARTUP_REVIEW_2026-10-24.md) for
 verified defects, regression tests and remaining device-validation limits.
+
+## Memory entitlements
+
+The iOS wrapper requests both capabilities from `ios/GeneralsXZH.entitlements`:
+
+- `com.apple.developer.kernel.increased-memory-limit`
+- `com.apple.developer.kernel.extended-virtual-addressing` (EVA)
+
+The unsigned artifact includes `GeneralsXZH.entitlements` next to the IPA.
+Configure your signing tool to use those entitlements and a compatible
+provisioning profile. The file alone does not activate them: unsigned packages
+have no signed entitlement grant, and some sideloading tools strip unsupported
+keys. Verify the final signed app's entitlements when possible. On a Mac, use
+`codesign -d --entitlements :- /path/to/GeneralsXZH.app` after extracting the
+signed IPA. Requested keys in an executable signature are not by themselves
+proof that the OS granted the capability on the current device.
+
+Increased Memory Limit can raise the supported process allowance; it does not
+guarantee access to all physical RAM. EVA expands virtual address space and does
+not add physical RAM. Neither capability is a fix for invalid memory access or
+missing game assets. Under LiveContainer, the host process's entitlements and
+memory allowance matter; adding keys to the guest does not grant them to the
+host. This does not integrate GetMoreRAM or add a runtime memory-limit bypass.

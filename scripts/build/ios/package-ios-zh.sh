@@ -218,6 +218,8 @@ install_name_tool -add_rpath "@executable_path/Frameworks" "${APP}/${APP_NAME}" 
 
 # GeneralsX @build Codex 24/10/2026 Produce a credential-free IPA for external sideload signing.
 if [[ "${UNSIGNED}" == "1" ]]; then
+    # GeneralsX @build Codex 24/10/2026 Export requested capabilities for the external signing tool.
+    cp "${IOS_DIR}/GeneralsXZH.entitlements" "${OUT_DIR}/${APP_NAME}.entitlements"
     # Xcode/clang can leave ad-hoc signatures even with signing disabled.
     while IFS= read -r -d '' binary; do
         if file -b "${binary}" | grep -q 'Mach-O'; then
@@ -232,6 +234,7 @@ if [[ "${UNSIGNED}" == "1" ]]; then
     mv "${APP}" "${OUT_DIR}/Payload/"
     (cd "${OUT_DIR}" && ditto -c -k --keepParent Payload "${APP_NAME}-unsigned.ipa")
     echo "==> Unsigned IPA ready: ${OUT_DIR}/${APP_NAME}-unsigned.ipa"
+    echo "==> Requested signing entitlements: ${OUT_DIR}/${APP_NAME}.entitlements"
     exit 0
 fi
 

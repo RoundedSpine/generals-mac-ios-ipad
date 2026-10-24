@@ -3,6 +3,7 @@
 # GeneralsX @build Codex 24/10/2026 Verify unsigned IPA contents and signing isolation.
 import json
 import os
+import plistlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -62,6 +63,7 @@ class PackagingTest(unittest.TestCase):
         shutil.copy2(SCRIPT, script)
         self.script = script
         (self.root / 'ios').mkdir()
+        shutil.copy2(SCRIPT.parents[3] / 'ios/GeneralsXZH.entitlements', self.root / 'ios/GeneralsXZH.entitlements')
         config = self.root / 'ios/config'
         config.mkdir()
         (config / 'dxvk.conf').write_text('d3d9.forceSamplerTypeSpecConstants = False\n')
@@ -98,6 +100,12 @@ class PackagingTest(unittest.TestCase):
         result = self.run_package('--dev', '--unsigned')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         ipa = self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa'
+        with (ipa.parent / 'GeneralsXZH.entitlements').open('rb') as file:
+            entitlements = plistlib.load(file)
+        self.assertEqual(entitlements, {
+            'com.apple.developer.kernel.increased-memory-limit': True,
+            'com.apple.developer.kernel.extended-virtual-addressing': True,
+        })
         with zipfile.ZipFile(ipa) as archive:
             names = archive.namelist()
             base = 'Payload/GeneralsXZH.app/'
