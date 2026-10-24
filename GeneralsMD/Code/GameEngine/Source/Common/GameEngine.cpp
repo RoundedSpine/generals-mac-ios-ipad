@@ -26,6 +26,8 @@
 // Implementation of the Game Engine singleton
 // Author: Michael S. Booth, April 2001
 
+// GeneralsX @feature Codex 25/10/2026 Correlate long subsystem and presentation calls with texture timings.
+#include "slowoperation.h"
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/ActionManager.h"
@@ -969,13 +971,13 @@ void GameEngine::update()
 
 			/// @todo Move audio init, update, etc, into GameClient update
 
-			TheAudio->UPDATE();
-			TheGameClient->UPDATE();
+			{ SlowOperationTrace trace("audio-update"); TheAudio->UPDATE(); }
+			{ SlowOperationTrace trace("client-update"); TheGameClient->UPDATE(); }
 			TheMessageStream->propagateMessages();
 
 			if (TheNetwork != nullptr)
 			{
-				TheNetwork->UPDATE();
+				{ SlowOperationTrace trace("network-update"); TheNetwork->UPDATE(); }
 			}
 		}
 
@@ -986,7 +988,7 @@ void GameEngine::update()
 		if (canUpdateLogic)
 		{
 			TheGameClient->step();
-			TheGameLogic->UPDATE();
+			{ SlowOperationTrace trace("logic-update"); TheGameLogic->UPDATE(); }
 		}
 		else if (canUpdateScript)
 		{
@@ -1074,7 +1076,7 @@ void GameEngine::execute()
 				}
 			}
 
-			TheFramePacer->update();
+			{ SlowOperationTrace trace("frame-pacing"); TheFramePacer->update(); }
 
 			// NOTE: TheDisplay->draw() is called via TheGameClient->UPDATE() above.
 			// GameClient::update() dispatches TheDisplay->DRAW() each frame.

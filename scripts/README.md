@@ -42,6 +42,8 @@ Run `python3 scripts/qa/test_startup_primitives.py` for compiled allocator/path
 contract tests; these exercise real function bodies without the full engine.
 Run `python3 scripts/qa/test_unix_worker.py` for compiled worker-lifecycle,
 concurrent texture-queue and shutdown-lock tests.
+Run `python3 scripts/qa/test_hitch_diagnostics.py` for bounded trace checks and
+a controlled foreground/background-lock contention reproduction.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

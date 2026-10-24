@@ -28,6 +28,7 @@
 
 #ifndef _WIN32
 
+#include "slowoperation.h"
 #include "SDL3GameEngine.h"
 #include "OpenALAudioManager.h"
 #include "SDL3Device/GameClient/SDL3Mouse.h"
@@ -536,6 +537,8 @@ void SDL3GameEngine::update(void)
 		return;
 	}
 #endif
+	// GeneralsX @feature Codex 25/10/2026 Correlate long active frames with texture-worker timings.
+	SlowOperationTrace trace("game-update");
 	GameEngine::update();
 }
 

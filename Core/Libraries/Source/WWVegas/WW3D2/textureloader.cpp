@@ -39,6 +39,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "textureloader.h"
+#include "slowoperation.h"
 #include <cstdio>
 #include "mutex.h"
 #include "thread.h"
@@ -725,11 +726,14 @@ void TextureLoader::Request_Background_Loading(TextureBaseClass *tc)
 void TextureLoader::Request_Foreground_Loading(TextureBaseClass *tc)
 {
 	WWPROFILE(("TextureLoader::Request_Foreground_Loading()"));
+	SlowOperationTrace totalTrace("texture-foreground-request", tc->Get_Full_Path().str());
+	SlowOperationTrace foregroundWait("texture-foreground-lock", tc->Get_Full_Path().str(), 8.0);
 	// Grab the foreground lock. This prevents the foreground thread
 	// from retiring the load tasks for this texture. It also
 	// serializes calls to Request_Foreground_Loading from other
 	// threads.
 	FastCriticalSectionClass::LockClass foreground_lock(_ForegroundCriticalSection);
+	foregroundWait.Finish();
 
 	// Has the texture already been loaded?
 	if (tc->Is_Initialized()) {
@@ -757,7 +761,9 @@ void TextureLoader::Request_Foreground_Loading(TextureBaseClass *tc)
 			// halt background thread. After we're holding this lock,
 			// we know the background thread cannot begin loading
 			// mipmap levels for this texture.
+			SlowOperationTrace backgroundWait("texture-background-lock", tc->Get_Full_Path().str(), 8.0);
 			FastCriticalSectionClass::LockClass background_lock(_BackgroundCriticalSection);
+			backgroundWait.Finish();
 			_ForegroundQueue.Remove(task);
 			_BackgroundQueue.Remove(task);
 		} else {
@@ -814,6 +820,7 @@ void TextureLoader::Request_Foreground_Loading(TextureBaseClass *tc)
 
 void TextureLoader::Flush_Pending_Load_Tasks()
 {
+	SlowOperationTrace trace("texture-flush");
 	// This function can only be called from the main thread.
 	// (Only the main thread can make the DX8 calls necessary
 	// to complete texture loading. If we wanted to flush
@@ -867,6 +874,7 @@ void TextureLoader::Flush_Pending_Load_Tasks()
 
 void TextureLoader::Update(void (*network_callback)())
 {
+	SlowOperationTrace trace("texture-update");
 	WWASSERT_PRINT(Is_DX8_Thread(), "TextureLoader::Update must be called from the main thread!");
 
 	if (TextureLoadSuspended) {
@@ -1023,7 +1031,10 @@ void LoaderThreadClass::Thread_Function()
 				WWASSERT(task->Get_State() == TextureLoadTaskClass::STATE_LOAD_BEGUN);
 
 				// load mip map levels and return to foreground queue for final step.
-				task->Load();
+				{
+					SlowOperationTrace decodeTrace("texture-worker-decode", task->Peek_Texture() ? task->Peek_Texture()->Get_Full_Path().str() : nullptr);
+					task->Load();
+				}
 				_ForegroundQueue.Push_Back(task);
 			}
 		}
@@ -1213,6 +1224,7 @@ void TextureLoadTaskClass::Deinit()
 
 bool TextureLoadTaskClass::Begin_Load()
 {
+	SlowOperationTrace trace("texture-begin", Texture ? Texture->Get_Full_Path().str() : nullptr);
 	WWASSERT(TextureLoader::Is_DX8_Thread());
 
 	bool loaded = false;
@@ -1273,6 +1285,7 @@ bool TextureLoadTaskClass::Load()
 
 void TextureLoadTaskClass::End_Load()
 {
+	SlowOperationTrace trace("texture-upload", Texture ? Texture->Get_Full_Path().str() : nullptr);
 	WWASSERT(TextureLoader::Is_DX8_Thread());
 
 	Unlock_Surfaces();
@@ -1284,6 +1297,7 @@ void TextureLoadTaskClass::End_Load()
 
 void TextureLoadTaskClass::Finish_Load()
 {
+	SlowOperationTrace trace("texture-finish", Texture ? Texture->Get_Full_Path().str() : nullptr);
 	switch (State) {
 		// NOTE: fall-through below is intentional.
 

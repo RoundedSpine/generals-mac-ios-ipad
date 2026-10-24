@@ -145,3 +145,15 @@ bodies and the actual ThreadClass implementation with minimal legacy-header
 stand-ins; they do not establish device-level renderer or gameplay correctness.
 Retest map loading, texture appearance, sustained gameplay and exit behavior
 on the phone before replacing a known-working IPA.
+
+## Gameplay hitch diagnostics
+
+The investigation build writes bounded `[HITCH]` entries into the normal
+`generals-stderr.log`: texture lock waits above 8 ms and subsystem, texture and
+presentation work above 50 ms. It also logs worker starts and scheduler-priority
+results. Keep the same game files/settings, play until a few freezes occur,
+then share the log and name the map. Startup/map-loading timings are expected;
+we need gameplay timings. Nested durations overlap, and a long frame-pacing
+entry may be intentional when FPS is capped low. Diagnostics do not constitute
+a performance fix or establish that the texture worker caused the pauses.
+See the [investigation](../WORKDIR/audit/IOS_GAMEPLAY_HITCH_INVESTIGATION_2026-10-25.md).

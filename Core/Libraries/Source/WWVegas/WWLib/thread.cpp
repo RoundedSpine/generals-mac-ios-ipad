@@ -139,6 +139,7 @@ void ThreadClass::Execute()
 			throw;
 		}
 		Apply_Unix_Priority();
+		fprintf(stderr, "[THREAD_START] name=\"%s\"\n", ThreadName);
 	#else
 		WWASSERT(!handle);	// Only one thread at a time!
 		handle=_beginthread(&Internal_Thread_Function,0,this);
@@ -242,7 +243,11 @@ void ThreadClass::Apply_Unix_Priority()
 	if (pthread_getschedparam(Worker.native_handle(), &policy, &parameters) != 0) return;
 	const int minimum = sched_get_priority_min(policy);
 	const int maximum = sched_get_priority_max(policy);
-	if (minimum < 0 || maximum <= minimum) return; // Normal Unix scheduling commonly has no adjustable priority range.
+	if (minimum < 0 || maximum <= minimum) {
+		fprintf(stderr, "[THREAD_PRIORITY] name=\"%s\" requested=%d policy=%d range=%d..%d (no adjustable range)\n",
+		        ThreadName, thread_priority, policy, minimum, maximum);
+		return;
+	}
 	const int normal = minimum + (maximum - minimum) / 2;
 	int requested = normal;
 	if (thread_priority < minimum - normal) requested = minimum;
@@ -250,6 +255,7 @@ void ThreadClass::Apply_Unix_Priority()
 	else requested += thread_priority;
 	parameters.sched_priority = requested;
 	const int result = pthread_setschedparam(Worker.native_handle(), policy, &parameters);
-	if (result != 0) fprintf(stderr, "[THREAD_PRIORITY] %s: priority request not applied (%d)\n", ThreadName, result);
+	fprintf(stderr, "[THREAD_PRIORITY] name=\"%s\" requested=%d policy=%d applied=%d result=%d\n",
+	        ThreadName, thread_priority, policy, requested, result);
 }
 #endif
