@@ -30,6 +30,7 @@ Scripts for Linux native and Docker-based builds:
 #### `build/ios/` - iOS Device Build
 - `package-ios-zh.sh` - Package a signed app, or use `--dev --unsigned` for a sideloadable IPA (requires external signing)
 - `fetch-moltenvk.sh` - Fetch the checksum-pinned iOS MoltenVK distribution
+- `collect-ios-combined-data.ps1` - Collect both games and fonts into one transfer folder, with base archives separated under `ZH_Generals`
 - `collect-ios-base-generals.ps1` - Collect base Generals archives into a separate `ZH_Generals` transfer folder
 - `collect-ios-game-data.ps1` - Collect installed Zero Hour assets and fonts on Windows for transfer to the iOS app
 - `stage-fonts.sh` - Stage Liberation fonts using the game's expected names

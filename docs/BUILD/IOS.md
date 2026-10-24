@@ -110,3 +110,14 @@ script creates `Generals-Base-iOS-Transfer/ZH_Generals` on your Desktop. Copy th
 the Zero Hour archives. It collects top-level `.big` files only; the base
 archive resolver does not use loose files from this secondary folder. No
 Windows executables or extra fonts are needed for this shared-archive step.
+
+To collect **both** games in one operation, use
+[`collect-ios-combined-data.ps1`](../../scripts/build/ios/collect-ios-combined-data.ps1).
+It defaults to `D:\Command and Conquer - Generals\Command and Conquer Generals`
+and its sibling `Command and Conquer Generals Zero Hour`, with output at
+`D:\GeneralsZH-iOS-Complete`. Override `-SourceDirectory` (Zero Hour),
+`-BaseGeneralsDirectory`, `-DestinationDirectory` or `-FontsDirectory` if needed.
+It validates both installations and fonts before creating output, and refuses
+existing output folders. The explicitly selected base installation supplies
+`ZH_Generals`; an existing copy inside the Zero Hour installation is not merged.
+Copy the output folder's **contents**, preserving `ZH_Generals` and `fonts`.
