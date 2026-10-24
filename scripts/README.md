@@ -30,6 +30,7 @@ Scripts for Linux native and Docker-based builds:
 #### `build/ios/` - iOS Device Build
 - `package-ios-zh.sh` - Package a signed app, or use `--dev --unsigned` for a sideloadable IPA (requires external signing)
 - `fetch-moltenvk.sh` - Fetch the checksum-pinned iOS MoltenVK distribution
+- `collect-ios-game-data.ps1` - Collect installed Zero Hour assets and fonts on Windows for transfer to the iOS app
 - `stage-fonts.sh` - Stage Liberation fonts using the game's expected names
 
 See [unsigned IPA builds](../docs/BUILD/IOS.md) for the manual GitHub Actions workflow.

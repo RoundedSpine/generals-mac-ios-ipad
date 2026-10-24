@@ -22,6 +22,23 @@ run `bash scripts/build/ios/stage-fonts.sh` on a development machine and copy th
 resulting `fonts` directory alongside your game data. No retail data or Apple
 credentials are downloaded by this workflow.
 
+To collect game data on Windows, save
+[`collect-ios-game-data.ps1`](../../scripts/build/ios/collect-ios-game-data.ps1)
+and run it in PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\collect-ios-game-data.ps1
+```
+
+The default source is `D:\Command & Conquer Generals Zero Hour`. The script
+creates `GeneralsZH-iOS-Transfer` on your Desktop, copies all top-level `.big`
+archives plus `Data`, `Window`, `Maps` and `ZH_Generals` when present, and stages
+four fonts from the game folder or Windows Fonts. It does not change the
+installation and refuses to overwrite an existing transfer folder. Override
+`-SourceDirectory`, `-DestinationDirectory` or `-FontsDirectory` as needed.
+Copy the **contents** of the transfer folder into the app's Documents folder.
+This copies the installed data as-is; it does not remove mods or apply patches.
+
 For local packaging on a Mac, first build the `ios-vulkan` CMake preset, stage
 MoltenVK with `scripts/build/ios/fetch-moltenvk.sh`, and run:
 
