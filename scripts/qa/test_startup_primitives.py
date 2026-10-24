@@ -203,5 +203,44 @@ int main() {
         compile_and_run(harness)
 
 
+
+    def test_missing_texture_logging_uses_character_buffer(self):
+        source = (ROOT / 'Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp').read_text()
+        body = function_body(source, 'void TextureLoadTaskClass::Apply_Missing_Texture()')
+        harness = r'''
+#include <cassert>
+#include <cstdio>
+#include <string>
+#define WWASSERT(...) ((void)0)
+class StringClass {
+  std::string text;
+public:
+  StringClass() : text("missing.dds") {}
+  const char* str() const { return text.c_str(); }
+};
+struct TextureClass { StringClass path; const StringClass& Get_Full_Path() const { return path; } };
+struct MissingTexture { static void* _Get_Missing_Texture() { static int texture; return &texture; } };
+struct TextureLoader { static bool Is_DX8_Thread() { return true; } };
+class TextureLoadTaskClass {
+public:
+  TextureClass* Texture=nullptr;
+  void* D3DTexture=nullptr;
+  int Format=1;
+  unsigned Width=32, Height=32;
+  int applied=0;
+  void Apply(bool) { ++applied; }
+  void Apply_Missing_Texture();
+};
+BODY
+int main() {
+  TextureLoadTaskClass task;
+  task.Apply_Missing_Texture(); assert(task.applied==0);
+  TextureClass texture; task.Texture=&texture;
+  task.Apply_Missing_Texture(); assert(task.applied==1);
+}
+'''.replace('BODY', body)
+        compile_and_run(harness, ['-Werror=format'])
+
+
 if __name__ == '__main__':
     unittest.main()

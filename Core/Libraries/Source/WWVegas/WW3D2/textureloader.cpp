@@ -1335,7 +1335,7 @@ void TextureLoadTaskClass::Apply_Missing_Texture()
 	// GeneralsX @feature Codex 25/10/2026 Identify failed texture names without flooding the capped device log.
 	static unsigned missingTextureCount = 0;
 	if (missingTextureCount++ < 64) {
-		fprintf(stderr, "[TEX_MISSING] '%s' format=%d size=%ux%u\n", Texture->Get_Full_Path(),
+		fprintf(stderr, "[TEX_MISSING] '%s' format=%d size=%ux%u\n", Texture->Get_Full_Path().str(),
 		        static_cast<int>(Format), Width, Height);
 	}
 #endif
