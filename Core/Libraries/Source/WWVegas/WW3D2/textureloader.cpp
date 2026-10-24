@@ -39,6 +39,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "textureloader.h"
+#include <cstdio>
 #include "mutex.h"
 #include "thread.h"
 #include "wwdebug.h"
@@ -325,6 +326,12 @@ void TextureLoader::Init()
 
 	_TextureLoadThread.Execute();
 	_TextureLoadThread.Set_Priority(-4);
+#ifndef _WIN32
+	// GeneralsX @feature Codex 25/10/2026 Make an unavailable Unix loader worker visible in device logs.
+	if (!_TextureLoadThread.Is_Running()) {
+		fprintf(stderr, "[TEX_LOADER] No background worker; loading textures synchronously on the render thread\n");
+	}
+#endif
 	TextureInactiveOverrideTime = 0;
 }
 
@@ -954,6 +961,13 @@ void TextureLoader::Begin_Load_And_Queue(TextureLoadTaskClass *task)
 		return;
 	}
 
+	// GeneralsX @bugfix Codex 25/10/2026 Unix ThreadClass::Execute is a no-op; never queue textures to a nonexistent worker.
+	if (!_TextureLoadThread.Is_Running()) {
+		task->Finish_Load();
+		task->Destroy();
+		return;
+	}
+
 	if (task->Begin_Load()) {
 		// add to front of background queue. This means the
 		// background load thread will service tasks in LIFO
@@ -1316,6 +1330,15 @@ void TextureLoadTaskClass::Apply_Missing_Texture()
 	{
 		return;
 	}
+
+#ifndef _WIN32
+	// GeneralsX @feature Codex 25/10/2026 Identify failed texture names without flooding the capped device log.
+	static unsigned missingTextureCount = 0;
+	if (missingTextureCount++ < 64) {
+		fprintf(stderr, "[TEX_MISSING] '%s' format=%d size=%ux%u\n", Texture->Get_Full_Path(),
+		        static_cast<int>(Format), Width, Height);
+	}
+#endif
 
 	D3DTexture = MissingTexture::_Get_Missing_Texture();
 	if (D3DTexture == nullptr)

@@ -68,3 +68,33 @@ LiveContainer, JIT or game data cannot be declared the sole cause.
 - Only a real device can validate LiveContainer behavior, purple textures,
   audio, touch, memory usage and sustained gameplay. There is no claim that
   the repository is bug-free or that a successful IPA build proves gameplay.
+
+## Follow-up — persistent purple textures (2026-10-25)
+
+The updated direct-install log passes the early checkpoints and reaches the
+main loop with data, fonts and the shipped DXVK configuration found. The user
+still sees purple textures. The engine's MissingTexture fallback deliberately
+fills with magenta, making texture-load state a stronger lead than treating
+the final MoltenVK primitive-restart warning as a crash diagnosis.
+
+Found two additional defects:
+
+- `corei_always` propagates `_UNIX` into WWLib, whose `ThreadClass::Execute()`
+  returns without launching a worker. TextureLoader nevertheless queues
+  low-priority tasks to `_BackgroundQueue`. When no worker is running, it now
+  completes tasks through the existing `Finish_Load` synchronous path instead
+  of leaving them permanently pending. Windows' active-worker queue path is
+  retained. This favors correctness over asynchronous loading performance;
+  frame-time impact needs device testing.
+- Loading primary BIG files from cwd records an empty asset root, so the
+  base-Generals resolver skipped sibling `Generals` and nested `ZH_Generals`.
+  It now uses `.` as that fallback root. Shared base-game data is edition
+  dependent: earlier advice that the collected Zero Hour-only folder would
+  generally suffice was too confident. Keep base archives in `ZH_Generals`
+  instead of overwriting Zero Hour's root archives.
+
+Compiled tests execute the real queue-dispatch function with active/inactive
+workers and failed tasks, and the real base-asset resolver with empty/explicit
+roots. Device logs now identify the first 64 missing-texture names. These
+changes still require a fresh IPA and device validation; no fatal error or
+out-of-memory termination was established by the supplied rendering log.

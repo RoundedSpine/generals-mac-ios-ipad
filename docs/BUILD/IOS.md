@@ -87,3 +87,12 @@ not add physical RAM. Neither capability is a fix for invalid memory access or
 missing game assets. Under LiveContainer, the host process's entitlements and
 memory allowance matter; adding keys to the guest does not grant them to the
 host. This does not integrate GetMoreRAM or add a runtime memory-limit bypass.
+
+Some Zero Hour editions rely on shared base-Generals archives. If your
+installation does not already include `ZH_Generals`, place the base game's
+`.big` archives in a `ZH_Generals` subfolder alongside the Zero Hour archives
+in the app's Documents directory. Keep the two sets separate: do not overwrite
+Zero Hour archives with the base game's files. New builds search this folder
+when the primary asset root is Documents. Missing texture names are logged as
+`[TEX_MISSING]`; use those reports to distinguish incomplete data from rendering
+problems rather than assuming every purple surface is a shader error.

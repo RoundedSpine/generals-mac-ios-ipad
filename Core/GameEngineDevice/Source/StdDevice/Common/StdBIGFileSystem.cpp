@@ -464,14 +464,16 @@ static void loadBaseGeneralsAssetsForZH(TBigFileSystem* fileSystem, const AsciiS
 		return;
 	}
 
-	if (zhAssetDirectory.isNotEmpty()) {
-		AsciiString siblingGenerals = zhAssetDirectory;
+	// GeneralsX @bugfix Codex 25/10/2026 A cwd-loaded Zero Hour root is empty; still search its shared base-game assets.
+	{
+		const AsciiString assetRoot = zhAssetDirectory.isNotEmpty() ? zhAssetDirectory : AsciiString(".");
+		AsciiString siblingGenerals = assetRoot;
 		siblingGenerals.concat("/../Generals");
 		if (tryLoadBigFiles(fileSystem, siblingGenerals, "default-sibling-generals")) {
 			return;
 		}
 
-		AsciiString steamGenerals = zhAssetDirectory;
+		AsciiString steamGenerals = assetRoot;
 		steamGenerals.concat("/ZH_Generals");
 		if (tryLoadBigFiles(fileSystem, steamGenerals, "default-zh-generals")) {
 			return;
