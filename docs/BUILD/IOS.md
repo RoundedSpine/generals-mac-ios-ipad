@@ -57,3 +57,10 @@ packaging path remains the default; `--unsigned` cannot be combined with
 `--install`. Logs are uploaded even when a build fails. A successful CI build
 checks packaging, not gameplay: launch, graphics, audio, touch input and retail
 asset loading still need validation on a real device after sideloading.
+
+For startup failures, the app writes `generals-stderr.log` and retains the
+previous run as `generals-stderr-prev.log` in its Documents folder. New builds
+report startup checkpoints, asset presence, the engine image path and selected
+DXVK config. Asset-free IPAs now also carry the iOS renderer config. See the
+[startup review](../WORKDIR/audit/IOS_SIDELOAD_STARTUP_REVIEW_2026-10-24.md) for
+verified defects, regression tests and remaining device-validation limits.

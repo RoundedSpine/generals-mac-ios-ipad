@@ -62,6 +62,10 @@ class PackagingTest(unittest.TestCase):
         shutil.copy2(SCRIPT, script)
         self.script = script
         (self.root / 'ios').mkdir()
+        config = self.root / 'ios/config'
+        config.mkdir()
+        (config / 'dxvk.conf').write_text('d3d9.forceSamplerTypeSpecConstants = False\n')
+        (config / 'Options.ini').write_text('StaticGameLOD = High\n')
         build = self.root / 'build/ios-vulkan'
         for relative in (
             'GeneralsMD/GeneralsXZH.app/GeneralsXZH',
@@ -100,6 +104,8 @@ class PackagingTest(unittest.TestCase):
             self.assertEqual(archive.read(base + 'GeneralsXZH'), b'engine fixture')
             self.assertIn(base + 'Frameworks/MoltenVK.framework/MoltenVK', names)
             self.assertIn(base + 'Frameworks/libopenal.1.dylib', names)
+            self.assertIn(b'forceSamplerTypeSpecConstants = False', archive.read(base + 'dxvk.conf'))
+            self.assertIn(base + 'DefaultOptions.ini', names)
             self.assertFalse(any('_CodeSignature' in n or 'mobileprovision' in n or 'GameData/' in n for n in names))
         calls = [json.loads(line) for line in (self.root / 'tools.jsonl').read_text().splitlines()]
         xcode = next(call for call in calls if call[0] == 'xcodebuild')

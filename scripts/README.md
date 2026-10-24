@@ -36,6 +36,8 @@ Scripts for Linux native and Docker-based builds:
 See [unsigned IPA builds](../docs/BUILD/IOS.md) for the manual GitHub Actions workflow.
 Validate packaging control flow with `python3 scripts/qa/test_ios_packaging.py`
 (Apple tools are simulated; a real device build still requires macOS/Xcode).
+Run `python3 scripts/qa/test_startup_primitives.py` for compiled allocator/path
+contract tests; these exercise real function bodies without the full engine.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

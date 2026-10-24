@@ -134,7 +134,8 @@ DECLARE_PERF_TIMER(MemoryPoolInitFilling)
 
 #ifdef MEMORYPOOL_BOUNDINGWALL
 
-	#define WALLCOUNT (2)	// default setting of 8 requires 4*4*2==32 extra bytes PER BLOCK
+	// GeneralsX @bugfix Codex 24/10/2026 Preserve the allocator's 16-byte user-data alignment with debug walls enabled.
+	#define WALLCOUNT (4)	// 16 bytes on each side; an 8-byte leading wall misaligns arm64/SIMD objects.
 	#define WALLSIZE	(WALLCOUNT * sizeof(Int))
 
 #endif

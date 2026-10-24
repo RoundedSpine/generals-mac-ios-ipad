@@ -30,7 +30,9 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Check packaging behavior
-        run: python3 scripts/qa/test_ios_packaging.py
+        run: |
+          python3 scripts/qa/test_ios_packaging.py
+          python3 scripts/qa/test_startup_primitives.py
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk

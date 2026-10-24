@@ -135,6 +135,15 @@ fi
 GAME_DATA_SRC="${GX_GAME_DATA:-${HOME}/GeneralsX/GeneralsZH}"
 FONTS_SRC="${GX_FONTS:-${HOME}/GeneralsX/ios-staging/fonts}"
 CONFIG_SRC="${GX_CONFIG:-${IOS_DIR}/config}"
+# GeneralsX @bugfix Codex 24/10/2026 Code-only IPAs still need the iOS renderer defaults.
+for cfg in dxvk.conf Options.ini; do
+    if [[ ! -f "${CONFIG_SRC}/${cfg}" ]]; then
+        echo "ERROR: missing iOS runtime configuration: ${CONFIG_SRC}/${cfg}" >&2
+        exit 1
+    fi
+done
+cp "${CONFIG_SRC}/dxvk.conf" "${APP}/dxvk.conf"
+cp "${CONFIG_SRC}/Options.ini" "${APP}/DefaultOptions.ini"
 if [[ "${DEV_MODE}" != "1" ]]; then
     echo "==> Bundling game assets into the app"
     mkdir -p "${APP}/GameData"

@@ -111,8 +111,10 @@ void userMemoryManagerInitPools()
 
 	// since we're called prior to main, the cur dir might not be what
 	// we expect. so do it the hard way.
-	char buf[_MAX_PATH];
-	::GetModuleFileName(nullptr, buf, sizeof(buf));
+	// GeneralsX @bugfix Codex 24/10/2026 Long sandbox paths must not leave an uninitialized string for strrchr.
+	char buf[_MAX_PATH] = {0};
+	if (!::GetModuleFileName(nullptr, buf, sizeof(buf)))
+		return; // Keep the compiled-in pool defaults when the optional override cannot be located.
 	if (char* pEnd = strrchr(buf, '\\'))
 	{
 		*pEnd = 0;
