@@ -43,7 +43,6 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <string>
-#include <dlfcn.h>
 #endif
 #include <cstdlib>
 #include <cctype>
@@ -330,16 +329,15 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	// GeneralsX @bugfix Codex 24/10/2026 Resolve this image rather than a container host's argv[0]/main executable.
-	char iosModuleDirectory[1024] = {0};
-	Dl_info moduleInfo = {};
-	if (dladdr(reinterpret_cast<const void *>(&CreateGameEngine), &moduleInfo) != 0 && moduleInfo.dli_fname != nullptr) {
-		const char *slash = strrchr(moduleInfo.dli_fname, '/');
-		if (slash != nullptr && static_cast<size_t>(slash - moduleInfo.dli_fname) < sizeof(iosModuleDirectory)) {
-			memcpy(iosModuleDirectory, moduleInfo.dli_fname, static_cast<size_t>(slash - moduleInfo.dli_fname));
+	// GeneralsX @build Codex 25/10/2026 Use the standalone app executable for bundle-relative resources.
+	char iosAppDirectory[1024] = {0};
+	if (argc > 0 && argv[0] != nullptr) {
+		const char *slash = strrchr(argv[0], '/');
+		if (slash != nullptr && static_cast<size_t>(slash - argv[0]) < sizeof(iosAppDirectory)) {
+			memcpy(iosAppDirectory, argv[0], static_cast<size_t>(slash - argv[0]));
 		}
 	}
-	fprintf(stderr, "INFO: iOS engine image directory: %s\n", iosModuleDirectory[0] ? iosModuleDirectory : "unresolved");
+	fprintf(stderr, "INFO: iOS app directory: %s\n", iosAppDirectory[0] ? iosAppDirectory : "unresolved");
 	fprintf(stderr, "INFO: iOS startup argc=%d, game-memory=%s\n", argc,
 #ifndef DISABLE_GAMEMEMORY
 	        "custom"
@@ -358,10 +356,10 @@ int main(int argc, char* argv[])
 	{
 		const char *home = getenv("HOME");
 
-		// <bundle>/GameData, derived from the engine image rather than a host process.
+		// <bundle>/GameData, derived from the standalone executable path.
 		char bundleData[1024] = {0};
-		if (iosModuleDirectory[0] != '\0') {
-			snprintf(bundleData, sizeof(bundleData), "%s/GameData", iosModuleDirectory);
+		if (iosAppDirectory[0] != '\0') {
+			snprintf(bundleData, sizeof(bundleData), "%s/GameData", iosAppDirectory);
 		}
 
 		bool usingBundleData = false;
@@ -447,9 +445,9 @@ int main(int argc, char* argv[])
 	if (getenv("DXVK_CONFIG_FILE") == nullptr) {
 		if (access("dxvk.conf", R_OK) == 0) {
 			setenv("DXVK_CONFIG_FILE", "dxvk.conf", 0);
-		} else if (iosModuleDirectory[0] != '\0') {
+		} else if (iosAppDirectory[0] != '\0') {
 			char configPath[1200];
-			snprintf(configPath, sizeof(configPath), "%s/dxvk.conf", iosModuleDirectory);
+			snprintf(configPath, sizeof(configPath), "%s/dxvk.conf", iosAppDirectory);
 			if (access(configPath, R_OK) == 0)
 				setenv("DXVK_CONFIG_FILE", configPath, 0);
 		}
@@ -526,17 +524,7 @@ int main(int argc, char* argv[])
 
 		// Load Vulkan library for DXVK DirectX8→Vulkan translation
 		fprintf(stderr, "INFO: Loading Vulkan library...\n");
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-		// GeneralsX @bugfix Codex 24/10/2026 Load the guest app's embedded driver even when another app hosts the process.
-		char iosVulkanLibrary[1200] = {0};
-		if (iosModuleDirectory[0] != '\0') {
-			snprintf(iosVulkanLibrary, sizeof(iosVulkanLibrary), "%s/Frameworks/MoltenVK.framework/MoltenVK", iosModuleDirectory);
-		}
-		const char *vulkanLibrary = iosVulkanLibrary[0] ? iosVulkanLibrary : nullptr;
-#else
-		const char *vulkanLibrary = nullptr;
-#endif
-		if (!SDL_Vulkan_LoadLibrary(vulkanLibrary)) {
+		if (!SDL_Vulkan_LoadLibrary(nullptr)) {
 			fprintf(stderr, "WARNING: Failed to load Vulkan: %s\n", SDL_GetError());
 			fprintf(stderr, "WARNING: Continuing without Vulkan (may use software rendering)\n");
 		}

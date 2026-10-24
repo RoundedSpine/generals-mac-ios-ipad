@@ -8,12 +8,11 @@
 // GeneralsX @feature BenderAI 24/02/2026 Phase 5 macOS executable path detection
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
-#include <TargetConditionals.h>
 #endif
 
 bool GetModuleFileName(HINSTANCE hInstance, char* buffer, int size)
 {
-  // GeneralsX @bugfix Codex 24/10/2026 Fail with an empty, bounded string; hosted iOS paths can exceed MAX_PATH.
+  // GeneralsX @bugfix Codex 24/10/2026 Fail with an empty, bounded string; sandbox paths can exceed MAX_PATH.
   if (buffer == nullptr || size <= 0)
     return false;
   buffer[0] = '\0';
@@ -26,17 +25,6 @@ bool GetModuleFileName(HINSTANCE hInstance, char* buffer, int size)
   buffer[count] = '\0';
   return true;
 #elif defined(__APPLE__)
-#if TARGET_OS_IPHONE
-  // LiveContainer's main executable belongs to the host; this function is in the guest image.
-  Dl_info image = {};
-  if (dladdr(reinterpret_cast<const void *>(&GetModuleFileName), &image) == 0 || image.dli_fname == nullptr)
-    return false;
-  const size_t length = strlen(image.dli_fname);
-  if (length >= static_cast<size_t>(size))
-    return false;
-  memcpy(buffer, image.dli_fname, length + 1);
-  return true;
-#else
   uint32_t bufsize = (uint32_t)size;
   int ret = _NSGetExecutablePath(buffer, &bufsize);
   if (ret == 0) {
@@ -44,7 +32,6 @@ bool GetModuleFileName(HINSTANCE hInstance, char* buffer, int size)
   }
   buffer[0] = '\0';
   return false;
-#endif
 #else
   return false;
 #endif

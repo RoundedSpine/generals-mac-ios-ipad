@@ -79,7 +79,7 @@ int main() {
                         defines += '#define MEMORYPOOL_BOUNDINGWALL\n'
                     compile_and_run(defines + harness, [f'-DHEADER_POINTERS={pointers}'])
 
-    def test_ios_module_path_and_failure_contract(self):
+    def test_apple_executable_path_and_failure_contract(self):
         source = (ROOT / 'GeneralsMD/Code/CompatLib/Source/module_compat.cpp').read_text()
         body = function_body(source, 'bool GetModuleFileName(')
         harness = r'''
@@ -91,18 +91,22 @@ int main() {
 #define __APPLE__ 1
 #define TARGET_OS_IPHONE 1
 using HINSTANCE = void*;
-struct Dl_info { const char* dli_fname; };
-const char* guestPath = "/guest/GeneralsXZH.app/GeneralsXZH";
+const char* executablePath = "/guest/GeneralsXZH.app/GeneralsXZH";
 bool resolveImage = true;
-int dladdr(const void*, Dl_info* out) {
-  out->dli_fname = guestPath;
-  return resolveImage ? 1 : 0;
+int _NSGetExecutablePath(char* output, uint32_t* size) {
+  const auto required = std::strlen(executablePath) + 1;
+  if (!resolveImage || *size < required) {
+    *size = static_cast<uint32_t>(required);
+    return -1;
+  }
+  std::memcpy(output, executablePath, required);
+  return 0;
 }
 BODY
 int main() {
   char path[4096];
   assert(GetModuleFileName(nullptr, path, sizeof(path)));
-  assert(std::strcmp(path, guestPath) == 0);
+  assert(std::strcmp(path, executablePath) == 0);
   assert(!GetModuleFileName(nullptr, nullptr, 10));
   path[0] = 'x';
   assert(!GetModuleFileName(nullptr, path, 1));
@@ -112,12 +116,12 @@ int main() {
   assert(!GetModuleFileName(nullptr, path, sizeof(path)));
   assert(path[0] == '\0');
   resolveImage = true;
-  std::string longPath(500, 'a'); guestPath = longPath.c_str();
+  std::string longPath(500, 'a'); executablePath = longPath.c_str();
   path[0] = 'x';
   assert(!GetModuleFileName(nullptr, path, 260));
   assert(path[0] == '\0');
   assert(GetModuleFileName(nullptr, path, sizeof(path)));
-  assert(std::strcmp(path, guestPath) == 0);
+  assert(std::strcmp(path, executablePath) == 0);
 }
 '''.replace('BODY', body)
         compile_and_run(harness)

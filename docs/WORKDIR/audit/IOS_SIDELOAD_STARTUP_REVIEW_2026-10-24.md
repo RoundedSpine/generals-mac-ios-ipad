@@ -98,3 +98,16 @@ workers and failed tasks, and the real base-asset resolver with empty/explicit
 roots. Device logs now identify the first 64 missing-texture names. These
 changes still require a fresh IPA and device validation; no fatal error or
 out-of-memory termination was established by the supplied rendering log.
+
+## Standalone-only rollback — 2026-10-25
+
+The user confirmed that complete base-game assets removed both purple textures
+and crashes, then requested removal of LiveContainer changes. The hosted-image
+parts of item 3 above are now reverted: no guest-image dladdr lookup, no explicit
+guest-path SDL driver override, and no added loader-relative DXVK driver paths.
+The original executable-relative iOS DXVK patch is retained. Standalone app
+resource paths still select the packaged renderer config. The executable-path
+helper retains empty-on-failure/bounds checks but uses _NSGetExecutablePath on
+Apple platforms again. Regression tests model that API rather than dladdr.
+Earlier statements above describe the investigation history, not a claim that
+LiveContainer caused the user's asset-related failures.

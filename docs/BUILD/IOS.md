@@ -60,7 +60,7 @@ asset loading still need validation on a real device after sideloading.
 
 For startup failures, the app writes `generals-stderr.log` and retains the
 previous run as `generals-stderr-prev.log` in its Documents folder. New builds
-report startup checkpoints, asset presence, the engine image path and selected
+report startup checkpoints, asset presence, the standalone app path and selected
 DXVK config. Asset-free IPAs now also carry the iOS renderer config. See the
 [startup review](../WORKDIR/audit/IOS_SIDELOAD_STARTUP_REVIEW_2026-10-24.md) for
 verified defects, regression tests and remaining device-validation limits.
@@ -121,3 +121,8 @@ It validates both installations and fonts before creating output, and refuses
 existing output folders. The explicitly selected base installation supplies
 `ZH_Generals`; an existing copy inside the Zero Hour installation is not merged.
 Copy the output folder's **contents**, preserving `ZH_Generals` and `fonts`.
+
+The current build targets direct sideloading. LiveContainer-specific guest-image
+path handling was removed at the user's request; it is not a verified hosted-app
+configuration. Standalone bundle resource and default Vulkan loading behavior
+are retained.
