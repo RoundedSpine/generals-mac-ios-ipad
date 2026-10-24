@@ -326,12 +326,6 @@ void TextureLoader::Init()
 
 	_TextureLoadThread.Execute();
 	_TextureLoadThread.Set_Priority(-4);
-#ifndef _WIN32
-	// GeneralsX @feature Codex 25/10/2026 Make an unavailable Unix loader worker visible in device logs.
-	if (!_TextureLoadThread.Is_Running()) {
-		fprintf(stderr, "[TEX_LOADER] No background worker; loading textures synchronously on the render thread\n");
-	}
-#endif
 	TextureInactiveOverrideTime = 0;
 }
 
@@ -958,13 +952,6 @@ void TextureLoader::Begin_Load_And_Queue(TextureLoadTaskClass *task)
 	WWASSERT(Is_DX8_Thread());
 	if (task == nullptr)
 	{
-		return;
-	}
-
-	// GeneralsX @bugfix Codex 25/10/2026 Unix ThreadClass::Execute is a no-op; never queue textures to a nonexistent worker.
-	if (!_TextureLoadThread.Is_Running()) {
-		task->Finish_Load();
-		task->Destroy();
 		return;
 	}
 

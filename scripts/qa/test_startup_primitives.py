@@ -128,43 +128,6 @@ int main() {
 
 
 
-    def test_texture_tasks_complete_without_a_worker(self):
-        source = (ROOT / 'Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp').read_text()
-        body = function_body(source, 'void TextureLoader::Begin_Load_And_Queue(')
-        harness = r'''
-#include <cassert>
-#define WWASSERT(...) ((void)0)
-struct TextureLoadTaskClass {
-  int finish=0, destroy=0, begin=0, missing=0;
-  bool available=true, attached=true;
-  void Finish_Load() { ++finish; }
-  void Destroy() { ++destroy; }
-  bool Begin_Load() { ++begin; return available; }
-  void* Peek_Texture() { return attached ? this : nullptr; }
-  void Apply_Missing_Texture() { ++missing; }
-};
-struct Worker { bool active=false; bool Is_Running() { return active; } } _TextureLoadThread;
-struct Queue { int pushed=0; void Push_Front(TextureLoadTaskClass*) { ++pushed; } } _BackgroundQueue;
-class TextureLoader { public: static void Begin_Load_And_Queue(TextureLoadTaskClass*); };
-BODY
-int main() {
-  TextureLoader::Begin_Load_And_Queue(nullptr);
-  TextureLoadTaskClass synchronous;
-  TextureLoader::Begin_Load_And_Queue(&synchronous);
-  assert(synchronous.finish==1 && synchronous.destroy==1 && synchronous.begin==0);
-  assert(_BackgroundQueue.pushed==0);
-  _TextureLoadThread.active=true;
-  TextureLoadTaskClass asynchronous;
-  TextureLoader::Begin_Load_And_Queue(&asynchronous);
-  assert(asynchronous.begin==1 && asynchronous.finish==0 && asynchronous.destroy==0);
-  assert(_BackgroundQueue.pushed==1);
-  TextureLoadTaskClass failed; failed.available=false;
-  TextureLoader::Begin_Load_And_Queue(&failed);
-  assert(failed.missing==1 && failed.destroy==1 && _BackgroundQueue.pushed==1);
-}
-'''.replace('BODY', body)
-        compile_and_run(harness)
-
     def test_base_assets_are_searched_when_primary_root_is_cwd(self):
         source = (ROOT / 'Core/GameEngineDevice/Source/StdDevice/Common/StdBIGFileSystem.cpp').read_text()
         body = 'template <typename TBigFileSystem>\n' + function_body(source, 'static void loadBaseGeneralsAssetsForZH(')

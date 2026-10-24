@@ -111,3 +111,12 @@ helper retains empty-on-failure/bounds checks but uses _NSGetExecutablePath on
 Apple platforms again. Regression tests model that API rather than dladdr.
 Earlier statements above describe the investigation history, not a claim that
 LiveContainer caused the user's asset-related failures.
+
+## Texture fallback removal — 2026-10-25
+
+At the user's request, the synchronous fallback described above was removed.
+TextureLoader again follows its original Begin_Load/background queue behavior.
+The fallback-only test and activation message were removed; the shared base
+asset lookup fix and bounded missing-texture diagnostics remain. This is an
+intentional restoration of the prior behavior, not implementation of a working
+Unix background thread. Device behavior without the fallback is unverified.
