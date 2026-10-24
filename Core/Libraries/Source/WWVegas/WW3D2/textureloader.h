@@ -156,6 +156,8 @@ class SynchronizedTextureLoadTaskListClass : public TextureLoadTaskListClass
 
 	public:
 		SynchronizedTextureLoadTaskListClass();
+		// GeneralsX @bugfix Codex 25/10/2026 Empty checks participate in the same synchronization as queue mutations.
+		bool Is_Empty() const;
 
 		// See comments above for description of member functions.
 		void									Push_Front	(TextureLoadTaskClass *task);
@@ -165,7 +167,7 @@ class SynchronizedTextureLoadTaskListClass : public TextureLoadTaskListClass
 		void									Remove		(TextureLoadTaskClass *task);
 
 	private:
-		FastCriticalSectionClass		CriticalSection;
+		mutable FastCriticalSectionClass		CriticalSection;
 };
 
 /*

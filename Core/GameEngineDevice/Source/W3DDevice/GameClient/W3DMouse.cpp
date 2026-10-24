@@ -343,8 +343,11 @@ void W3DMouse::init()
 
 
 	isThread=FALSE;
+#ifndef _UNIX
+	// GeneralsX @bugfix Codex 25/10/2026 Keep legacy cursor GPU drawing off the new Unix CPU worker path.
 	if (m_currentRedrawMode == RM_DX8)
 		thread.Execute();
+#endif
 	thread.Set_Priority(0);
 
 }
@@ -664,8 +667,10 @@ void W3DMouse::setRedrawMode(RedrawMode mode)
 			initD3DAssets();	//make sure textures loaded.
 			freeW3DAssets();
 			freePolygonAssets();
+#ifndef _UNIX
 			if (!thread.Is_Running())
 				thread.Execute();
+#endif
 			m_currentW3DCursor = NONE;
 			m_currentPolygonCursor = NONE;
 			break;

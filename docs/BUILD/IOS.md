@@ -126,3 +126,22 @@ The current build targets direct sideloading. LiveContainer-specific guest-image
 path handling was removed at the user's request; it is not a verified hosted-app
 configuration. Standalone bundle resource and default Vulkan loading behavior
 are retained.
+
+## Unix texture worker
+
+Current builds implement the Unix ThreadClass worker rather than leaving its
+start/stop functions as stubs. Texture file loading can run on that worker;
+foreground texture creation/finalization stays on the render thread. The
+synchronous fallback remains removed. Queue inspection is synchronized and
+shutdown joins the worker before taking its background lock. Unix shutdown is
+cooperative: the time budget triggers a warning, not unsafe forced cancellation.
+An unresponsive worker can therefore delay shutdown. Scheduler priority changes
+are best effort and normal Unix scheduling may offer no adjustable range.
+The legacy cursor GPU-drawing worker remains disabled on Unix.
+
+Use `python3 scripts/qa/test_unix_worker.py` to run the compiled lifecycle,
+queue-concurrency and shutdown-order tests. They exercise production function
+bodies and the actual ThreadClass implementation with minimal legacy-header
+stand-ins; they do not establish device-level renderer or gameplay correctness.
+Retest map loading, texture appearance, sustained gameplay and exit behavior
+on the phone before replacing a known-working IPA.

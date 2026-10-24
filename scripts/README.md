@@ -40,6 +40,8 @@ Validate packaging control flow with `python3 scripts/qa/test_ios_packaging.py`
 (Apple tools are simulated; a real device build still requires macOS/Xcode).
 Run `python3 scripts/qa/test_startup_primitives.py` for compiled allocator/path
 contract tests; these exercise real function bodies without the full engine.
+Run `python3 scripts/qa/test_unix_worker.py` for compiled worker-lifecycle,
+concurrent texture-queue and shutdown-lock tests.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

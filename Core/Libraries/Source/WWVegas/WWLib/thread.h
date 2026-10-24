@@ -20,6 +20,13 @@
 
 #include "always.h"
 #include "Vector.h"
+#ifdef _UNIX
+// GeneralsX @feature Codex 25/10/2026 Own and join Unix workers instead of treating volatile flags as synchronization.
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#endif
 
 struct _EXCEPTION_POINTERS;
 
@@ -34,7 +41,9 @@ struct _EXCEPTION_POINTERS;
 // If the flag is false you must exit the asap. Stop() is the function that
 // will clear the flag and expect you to exit from the thread. If you are
 // not exiting in certain time (defined as a parameter to Stop()) it will
-// force-kill the thread to prevent the program from halting.
+// Windows may force-kill it; Unix waits for cooperative completion to avoid
+// freeing resources while a worker still uses them. Derived destructors must
+// call Stop() before destroying state accessed by Thread_Function().
 //
 // ****************************************************************************
 
@@ -52,7 +61,7 @@ public:
 	// Thread priority 0 is normal, positive numbers are higher and normal and negative are lower.
 	void Set_Priority(int priority);
 
-	// Stop thread execution. Kill after ms milliseconds if not responding.
+	// Stop thread execution. Windows may kill after ms; Unix warns then joins cooperatively.
 	void Stop(unsigned ms=3000);
 
 	// Put current thread sleep for ms milliseconds (can be called from any thread, ThreadClass or other)
@@ -78,19 +87,36 @@ protected:
 	// User defined thread function. The thread function should check for "running" flag every now and then
 	// and exit the thread if running is false.
 	virtual void Thread_Function() = 0;
+#ifdef _UNIX
+	std::atomic<bool> running;
+#else
 	volatile bool running;
+#endif
 
 	// Name of thread.
 	char ThreadName[64];
 
 	// ID of thread.
+#ifdef _UNIX
+	std::atomic<unsigned> ThreadID;
+#else
 	unsigned ThreadID;
+#endif
 
 	// Exception handler for this thread.
 	ExceptionHandlerType ExceptionHandler;
 
 private:
 	static void __cdecl Internal_Thread_Function(void*);
+#ifdef _UNIX
+	std::atomic<unsigned long> handle;
+	std::thread Worker;
+	std::mutex LifecycleMutex;
+	std::mutex ExitMutex;
+	std::condition_variable ExitCondition;
+	void Apply_Unix_Priority();
+#else
 	volatile unsigned long handle;
+#endif
 	int thread_priority;
 };

@@ -165,6 +165,13 @@ SynchronizedTextureLoadTaskListClass::SynchronizedTextureLoadTaskListClass()
 {
 }
 
+// GeneralsX @bugfix Codex 25/10/2026 The texture worker and render thread must not race on the queue sentinel.
+bool SynchronizedTextureLoadTaskListClass::Is_Empty() const
+{
+	FastCriticalSectionClass::LockClass lock(CriticalSection);
+	return TextureLoadTaskListClass::Is_Empty();
+}
+
 void SynchronizedTextureLoadTaskListClass::Push_Front(TextureLoadTaskClass *task)
 {
 	FastCriticalSectionClass::LockClass lock(CriticalSection);
@@ -179,11 +186,6 @@ void SynchronizedTextureLoadTaskListClass::Push_Back(TextureLoadTaskClass *task)
 
 TextureLoadTaskClass *SynchronizedTextureLoadTaskListClass::Pop_Front()
 {
-	// this duplicates code inside base class, but saves us an unnecessary lock.
-	if (Is_Empty()) {
-		return nullptr;
-	}
-
 	FastCriticalSectionClass::LockClass lock(CriticalSection);
 	return TextureLoadTaskListClass::Pop_Front();
 
@@ -191,11 +193,6 @@ TextureLoadTaskClass *SynchronizedTextureLoadTaskListClass::Pop_Front()
 
 TextureLoadTaskClass *SynchronizedTextureLoadTaskListClass::Pop_Back()
 {
-	// this duplicates code inside base class, but saves us an unnecessary lock.
-	if (Is_Empty()) {
-		return nullptr;
-	}
-
 	FastCriticalSectionClass::LockClass lock(CriticalSection);
 	return TextureLoadTaskListClass::Pop_Back();
 }
@@ -235,6 +232,9 @@ public:
 #else
 	LoaderThreadClass(const char *thread_name = "Texture loader thread") : ThreadClass(thread_name) {}
 #endif
+
+	// GeneralsX @bugfix Codex 25/10/2026 Stop before the derived object and its virtual worker entry disappear.
+	~LoaderThreadClass() override { Stop(); }
 
 	virtual void Thread_Function() override;
 } _TextureLoadThread;
@@ -332,8 +332,9 @@ void TextureLoader::Init()
 
 void TextureLoader::Deinit()
 {
-	FastCriticalSectionClass::LockClass lock(_BackgroundCriticalSection);
+	// GeneralsX @bugfix Codex 25/10/2026 Do not join while holding the lock the worker needs to finish its current load.
 	_TextureLoadThread.Stop();
+	FastCriticalSectionClass::LockClass lock(_BackgroundCriticalSection);
 
 	ThumbnailManagerClass::Deinit();
 	TextureLoadTaskClass::Delete_Free_Pool();
