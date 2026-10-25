@@ -38,6 +38,8 @@ public:
 	FramePacer();
 	~FramePacer();
 
+	// GeneralsX @feature Codex 25/10/2026 Accept display-callback elapsed time without a sleeping frame limiter.
+	void updateExternal(Real elapsedSeconds);
 	void update(); ///< Signal that the app/render update is done and wait for the fps limit if applicable.
 
 	void setFramesPerSecondLimit( Int fps ); ///< Set the update fps limit.

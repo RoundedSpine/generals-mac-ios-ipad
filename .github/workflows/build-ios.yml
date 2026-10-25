@@ -35,6 +35,7 @@ jobs:
           python3 scripts/qa/test_startup_primitives.py
           python3 scripts/qa/test_unix_worker.py
           python3 scripts/qa/test_hitch_diagnostics.py
+          python3 scripts/qa/test_ios_native_callbacks.py
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk

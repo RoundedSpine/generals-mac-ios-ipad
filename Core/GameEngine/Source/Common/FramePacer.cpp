@@ -56,6 +56,12 @@ FramePacer::~FramePacer()
 #endif
 }
 
+// GeneralsX @feature Codex 25/10/2026 Native frame callbacks own cadence; record elapsed time only.
+void FramePacer::updateExternal(Real elapsedSeconds)
+{
+	m_updateTime = elapsedSeconds > 0.0f ? elapsedSeconds : 1.0f / (Real)BaseFps;
+}
+
 void FramePacer::update()
 {
 	// TheSuperHackers @bugfix xezon 05/08/2025 Re-implements the frame rate limiter

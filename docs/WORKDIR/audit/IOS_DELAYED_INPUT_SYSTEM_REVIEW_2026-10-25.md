@@ -316,3 +316,64 @@ Objective-C helper syntax check using the iOS SDK on macOS CI; Linux skips this
 one check. Full production SDL compilation is still performed by the IPA build.
 No phone improvement is claimed: this build measures native delivery so the
 next scheduling decision is based on independent clock evidence.
+
+## Native UIKit evidence and iOS callback-loop implementation
+
+A subsequent 280,374-byte device log independently captured native event and
+UITouch ages of 16720.87 ms at callback entry. Callback-to-watch remained <=0.19
+ms, watch-to-poll <=16 ms and mouse queue consumption <=25.12 ms. There was no
+matching long poll gap. This rules out SDL clock conversion alone for that
+captured old-touch burst and justifies testing native inter-frame run-loop
+ownership. The prior delay-free log did not prove resolution; the failure is
+intermittent. Native logging later reached its cap, so this evidence concerns
+the captured portion.
+
+Implemented iOS-only SDL_MAIN_USE_CALLBACKS in SDL3Main.cpp. SDL_AppInit performs
+the existing launcher bootstrap and engine initialization, then returns; the
+SDK's native CADisplayLink backend owns subsequent event/frame scheduling.
+Shared InitializeGameEngine/ShutdownGameEngine helpers preserve the existing
+GameMain desktop and replay paths. Launcher resources stay alive until
+SDL_AppQuit, which uses the existing window/SDL/Version/memory cleanup sequence
+and final _exit. If engine init failed partway through, the current destructor
+cannot safely run (it dereferences subsystems unconditionally); that failure
+logs and exits instead of trying unsafe partial teardown.
+
+SDL_AppEvent dispatches through the extracted existing processSDL3Event handler.
+The normal callback path never SDL_PollEvents again; SDL already owns queue
+consumption. SDL-owned text is consumed synchronously. Off-main callbacks are
+marshaled through a mutex-protected bounded 256-event mailbox, copying the text
+payload that the handler consumes; main processing drains outside that lock.
+Lifecycle atomics still gate rendering immediately. Foreground iteration
+reconciles mouse focus on main. Mailbox exhaustion or callback exceptions fail
+explicitly rather than silently dropping state or unwinding into SDL.
+
+SDL_AppIterate performs at most one normal engine update per eligible native
+callback. NativeFrameCadence uses SDL nanoseconds, honors the current render
+limit without sleeping, tolerates small display-callback jitter, advances
+missed deadlines without a catch-up loop, and resets while inactive. The shared
+FramePacer receives elapsed time through updateExternal; the original sleeping
+frame-pacer update remains on the desktop loop. Background callback iterations
+return without SDL_Delay or graphics calls. Existing touch gesture timer checks
+continue during eligible frames. A startup IOS_MAIN_LOOP marker identifies the
+new mode; callback-frame-gap/input-frame-service timings replace misleading
+manual-poll labels in this path. Native/SDL queue probes remain.
+
+This is a scheduling experiment, not yet a confirmed cure. Blocking map loads,
+script callbacks, GPU calls or file work inside one update can still block the
+main thread. Native cadence is constrained by the device's display callbacks
+and can differ from the old loop. The iOS callback path targets interactive
+play; it rejects headless/replay simulation launch flags. Desktop headless and
+replay simulation keep GameMain. Legacy execute-loop debug benchmark/profiling
+wrappers are not entered by the iOS callback path; normal engine update and
+subsystem diagnostics still run. Rendering/gameplay/pause/exit behavior needs
+phone validation even after CI compilation.
+
+Added compiled actual-body tests for SDL_AppInit/Event/Iterate/Quit, including
+init/event/frame exceptions, pause/resume cadence and avoiding unsafe partial
+teardown; actual deferred mailbox text ownership, full-buffer handling and
+processing outside locks; actual input service proving no manual SDL polling
+in native mode while long-press checks remain; shared startup/shutdown retaining
+desktop execute and replay simulation; and cadence under 120 Hz callbacks with
+jitter, frame limits, late frames, rate changes, reset and clock rewind. These
+stand-ins cannot verify CADisplayLink/UIKit behavior. The existing macOS CI
+build must compile/link the full iOS application and native probe.

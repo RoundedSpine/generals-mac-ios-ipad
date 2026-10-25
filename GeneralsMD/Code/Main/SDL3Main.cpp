@@ -35,9 +35,11 @@
 #include <TargetConditionals.h>
 #endif
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-// On iOS, SDL renames main() to SDL_main and provides its own UIApplicationMain
-// bootstrap; the app lifecycle (suspend/resume, window) is owned by SDL.
+// GeneralsX @feature Codex 25/10/2026 Let SDL return to UIApplicationMain between display callbacks.
+// iOS startup, events, frames and teardown use SDL_App*; desktop keeps main().
+#define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL_main.h>
+#include "nativeframecadence.h"
 #include <cerrno>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -57,6 +59,9 @@
 #include "Common/CriticalSection.h"
 #include "Common/GlobalData.h"
 #include "Common/GameEngine.h"
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#include "Common/FramePacer.h"
+#endif
 #include "Common/GameMemory.h"
 #include "Common/Debug.h"
 #include "Common/version.h"  // GeneralsX @bugfix BenderAI 14/02/2026 Version class + TheVersion extern
@@ -245,7 +250,60 @@ GameEngine *CreateGameEngine(void)
  * @param argv Command line arguments
  * @return Exit code (0 = success)
  */
+// GeneralsX @refactor Codex 25/10/2026 Keep launcher resources alive until native callback shutdown.
+static bool s_launcherMemoryInitialized = false;
+static void ShutdownSDL3Launcher(int exitcode)
+{
+	// Cleanup SDL3 resources
+	if (TheSDL3Window) {
+		SDL_DestroyWindow(TheSDL3Window);
+		TheSDL3Window = nullptr;
+		ApplicationHWnd = nullptr;
+	}
+	SDL_Quit();
+
+	// GeneralsX @bugfix BenderAI 14/02/2026 Cleanup Version singleton
+	if (TheVersion) {
+		delete TheVersion;
+		TheVersion = nullptr;
+	}
+
+	// GeneralsX @bugfix BenderAI 19/02/2026 Shutdown memory manager BEFORE nulling critical
+	// sections. Without this, global pool destructors (ObjectPoolClass) crash during atexit()
+	// because they call ::operator delete after the memory manager is already gone (SIGSEGV).
+	// Matches WinMain.cpp cleanup order: TheVersion -> shutdownMemoryManager -> null critSecs.
+	if (s_launcherMemoryInitialized) {
+		shutdownMemoryManager();
+		s_launcherMemoryInitialized = false;
+	}
+
+	// Cleanup critical sections (after memory manager, which may use them during shutdown)
+	TheAsciiStringCriticalSection = nullptr;
+	TheUnicodeStringCriticalSection = nullptr;
+	TheDmaCriticalSection = nullptr;
+	TheMemoryPoolCriticalSection = nullptr;
+	TheDebugLogCriticalSection = nullptr;
+
+	fprintf(stderr, "\nExiting with code %d\n", exitcode);
+
+	// GeneralsX @bugfix BenderAI 25/02/2026 — use _exit() to skip C++ global destructors.
+	// On macOS, __cxa_finalize_ranges runs ObjectPoolClass<X,256> global dtors after main() returns.
+	// Those dtors crash with a corrupted BlockListHead (SIGSEGV at 0x4ade32ec4ade0018) because
+	// pool block memory was already reused/overwritten during game shutdown.
+	// Windows never had this problem — ExitProcess() terminates without running C++ global dtors.
+	// _exit() matches that behavior. Explicit cleanup already done above (SDL_Quit, shutdownMemoryManager).
+	_exit(exitcode);
+}
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+extern void InitializeGameEngine();
+extern void ShutdownGameEngine();
+static bool s_nativeEngineReady = false;
+static int InitializeNativeGameLaunch(int argc, char* argv[])
+#else
 int main(int argc, char* argv[])
+#endif
+
 {
 	int exitcode = 1;
 
@@ -474,6 +532,7 @@ int main(int argc, char* argv[])
 		// GeneralsX @feature Codex 24/10/2026 Record startup boundaries before operations that may fail without an OS crash report.
 		fprintf(stderr, "INFO: Startup: initializing memory manager\n");
 		initMemoryManager();
+		s_launcherMemoryInitialized = true;
 		fprintf(stderr, "INFO: Startup: memory manager initialized\n");
 
 		// GeneralsX @bugfix BenderAI 14/02/2026 Initialize Version singleton
@@ -605,10 +664,21 @@ int main(int argc, char* argv[])
 #endif
 		}
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		if (isHeadlessMode || !TheGlobalData->m_simulateReplays.empty()) {
+			fprintf(stderr, "FATAL: iOS callback mode requires an interactive game\n");
+			return 1;
+		}
+		InitializeGameEngine();
+		s_nativeEngineReady = true;
+		static_cast<SDL3GameEngine*>(TheGameEngine)->enableNativeCallbacks();
+		fprintf(stderr, "[IOS_MAIN_LOOP] native SDL main callbacks enabled; no manual polling or frame sleeps\n");
+		exitcode = 0;
+#else
 		// Call cross-platform game entry point
 		exitcode = GameMain();
-
 		fprintf(stderr, "INFO: GameMain() returned with code %d\n", exitcode);
+#endif
 
 	} catch (const std::exception& e) {
 		fprintf(stderr, "FATAL: Unhandled exception in main(): %s\n", e.what());
@@ -618,42 +688,93 @@ int main(int argc, char* argv[])
 		exitcode = 1;
 	}
 
-	// Cleanup SDL3 resources
-	if (TheSDL3Window) {
-		SDL_DestroyWindow(TheSDL3Window);
-		TheSDL3Window = nullptr;
-		ApplicationHWnd = nullptr;
-	}
-	SDL_Quit();
-
-	// GeneralsX @bugfix BenderAI 14/02/2026 Cleanup Version singleton
-	if (TheVersion) {
-		delete TheVersion;
-		TheVersion = nullptr;
-	}
-
-	// GeneralsX @bugfix BenderAI 19/02/2026 Shutdown memory manager BEFORE nulling critical
-	// sections. Without this, global pool destructors (ObjectPoolClass) crash during atexit()
-	// because they call ::operator delete after the memory manager is already gone (SIGSEGV).
-	// Matches WinMain.cpp cleanup order: TheVersion -> shutdownMemoryManager -> null critSecs.
-	shutdownMemoryManager();
-
-	// Cleanup critical sections (after memory manager, which may use them during shutdown)
-	TheAsciiStringCriticalSection = nullptr;
-	TheUnicodeStringCriticalSection = nullptr;
-	TheDmaCriticalSection = nullptr;
-	TheMemoryPoolCriticalSection = nullptr;
-	TheDebugLogCriticalSection = nullptr;
-
-	fprintf(stderr, "\nExiting with code %d\n", exitcode);
-
-	// GeneralsX @bugfix BenderAI 25/02/2026 — use _exit() to skip C++ global destructors.
-	// On macOS, __cxa_finalize_ranges runs ObjectPoolClass<X,256> global dtors after main() returns.
-	// Those dtors crash with a corrupted BlockListHead (SIGSEGV at 0x4ade32ec4ade0018) because
-	// pool block memory was already reused/overwritten during game shutdown.
-	// Windows never had this problem — ExitProcess() terminates without running C++ global dtors.
-	// _exit() matches that behavior. Explicit cleanup already done above (SDL_Quit, shutdownMemoryManager).
-	_exit(exitcode);
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	return exitcode; // SDL_AppQuit owns teardown after callbacks stop.
+#else
+	ShutdownSDL3Launcher(exitcode);
+	return exitcode;
+#endif
 }
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+static NativeFrameCadence s_nativeCadence;
+
+SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
+{
+	*appstate = nullptr;
+	try {
+		if (InitializeNativeGameLaunch(argc, argv) != 0) return SDL_APP_FAILURE;
+		*appstate = TheGameEngine;
+		s_nativeCadence.Reset();
+		return SDL_APP_CONTINUE;
+	} catch (const std::exception& error) {
+		fprintf(stderr, "FATAL: native initialization exception: %s\n", error.what());
+		return SDL_APP_FAILURE;
+	} catch (...) {
+		fprintf(stderr, "FATAL: unknown native initialization exception\n");
+		return SDL_APP_FAILURE;
+	}
+}
+
+SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event)
+{
+	if (event->type == SDL_EVENT_TERMINATING) return SDL_APP_SUCCESS;
+	if (!appstate) return SDL_APP_CONTINUE;
+	try {
+		auto* engine = static_cast<SDL3GameEngine*>(appstate);
+		if (!SDL_IsMainThread()) {
+			if (engine->deferNativeEvent(*event)) return SDL_APP_CONTINUE;
+			fprintf(stderr, "FATAL: native deferred-event mailbox full\n");
+			return SDL_APP_FAILURE;
+		}
+		engine->drainNativeEvents();
+		engine->processSDL3Event(*event);
+		return engine->getQuitting() ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;
+	} catch (...) {
+		fprintf(stderr, "FATAL: exception processing native SDL event\n");
+		return SDL_APP_FAILURE;
+	}
+}
+
+SDL_AppResult SDLCALL SDL_AppIterate(void* appstate)
+{
+	try {
+		auto* engine = static_cast<SDL3GameEngine*>(appstate);
+		if (!engine) return SDL_APP_SUCCESS;
+		engine->drainNativeEvents();
+		if (engine->getQuitting()) return SDL_APP_SUCCESS;
+		if (!engine->nativeFrameReady()) { s_nativeCadence.Reset(); return SDL_APP_CONTINUE; }
+		double elapsed = 0.0;
+		const int fps = TheFramePacer->getActualFramesPerSecondLimit();
+		if (!s_nativeCadence.Advance(SDL_GetTicksNS(), fps > 0 ? static_cast<unsigned>(fps) : 0, elapsed)) return SDL_APP_CONTINUE;
+		TheFramePacer->updateExternal(static_cast<Real>(elapsed));
+		engine->update();
+		return engine->getQuitting() ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;
+	} catch (const std::exception& error) {
+		fprintf(stderr, "FATAL: native frame exception: %s\n", error.what());
+		return SDL_APP_FAILURE;
+	} catch (...) {
+		fprintf(stderr, "FATAL: unknown native frame exception\n");
+		return SDL_APP_FAILURE;
+	}
+}
+
+void SDLCALL SDL_AppQuit(void*, SDL_AppResult result)
+{
+	// GameEngine's destructor assumes all subsystems exist. A failed init cannot
+	// safely run it; exit lets iOS release the partial process instead.
+	if (TheGameEngine && !s_nativeEngineReady) {
+		fprintf(stderr, "FATAL: native initialization incomplete; skipping unsafe engine teardown\n");
+		_exit(1);
+	}
+	try {
+		ShutdownGameEngine();
+	} catch (...) {
+		fprintf(stderr, "FATAL: exception shutting down native engine\n");
+		_exit(1);
+	}
+	ShutdownSDL3Launcher(result == SDL_APP_FAILURE ? 1 : 0);
+}
+#endif
 
 #endif // !_WIN32

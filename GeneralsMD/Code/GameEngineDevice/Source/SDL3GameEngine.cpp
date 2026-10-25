@@ -602,7 +602,7 @@ void SDL3GameEngine::update(void)
 	// across repeated suspend/switcher cycles, crashes MoltenVK. Keep polling so
 	// we still catch the resume events; just don't touch the GPU.
 	if (iosShouldPauseRendering()) {
-		SDL_Delay(50);
+		if (!m_UsesNativeCallbacks) SDL_Delay(50);
 		return;
 	}
 #endif
@@ -652,11 +652,11 @@ void SDL3GameEngine::setIsActive(Bool isActive)
  */
 void SDL3GameEngine::pollSDL3Events(void)
 {
-	SlowOperationTrace pollTrace("input-poll", nullptr, 20.0);
+	SlowOperationTrace pollTrace(m_UsesNativeCallbacks ? "input-frame-service" : "input-poll", nullptr, 20.0);
 	static Uint64 lastPoll = 0;
 	const Uint64 now = SDL_GetTicksNS();
 	if (lastPoll && now >= lastPoll && now - lastPoll >= 100000000) {
-		TraceInputTiming("poll-gap", 0, lastPoll, now, 0, true);
+		TraceInputTiming(m_UsesNativeCallbacks ? "callback-frame-gap" : "poll-gap", 0, lastPoll, now, 0, true);
 	}
 	lastPoll = now;
 	if (!m_SDLWindow) {
@@ -666,134 +666,8 @@ void SDL3GameEngine::pollSDL3Events(void)
 	updateTextInputState();
 
 	SDL_Event event;
-	while (SDL_PollEvent(&event)) {
-		switch (event.type) {
-			case SDL_EVENT_QUIT:
-				m_quitting = true;
-				break;
-
-			case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-				m_quitting = true;
-				break;
-
-			case SDL_EVENT_WINDOW_FOCUS_GAINED:
-				m_IsActive = true;
-				if (TheMouse) {
-					TheMouse->regainFocus();
-					TheMouse->refreshCursorCapture();
-				}
-				break;
-
-			case SDL_EVENT_WINDOW_FOCUS_LOST:
-				m_IsActive = false;
-				if (m_IsTextInputActive) {
-					SDL_StopTextInput(m_SDLWindow);
-					m_IsTextInputActive = false;
-					m_TextInputFocusWindow = nullptr;
-				}
-				if (TheMouse) {
-					TheMouse->loseFocus();
-				}
-				break;
-
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-			// App suspension/resume: mirror the desktop focus handling so audio
-			// and mouse state pause cleanly (the render gate lives in update()).
-			case SDL_EVENT_DID_ENTER_BACKGROUND:
-				m_IsActive = false;
-				if (TheMouse) {
-					TheMouse->loseFocus();
-				}
-				break;
-
-			case SDL_EVENT_DID_ENTER_FOREGROUND:
-				m_IsActive = true;
-				if (TheMouse) {
-					TheMouse->regainFocus();
-					TheMouse->refreshCursorCapture();
-				}
-				break;
-#endif
-
-			case SDL_EVENT_WINDOW_MOUSE_ENTER:
-				if (TheMouse) {
-					TheMouse->onCursorMovedInside();
-				}
-				break;
-
-			case SDL_EVENT_WINDOW_MOUSE_LEAVE:
-				if (TheMouse) {
-					TheMouse->onCursorMovedOutside();
-				}
-				break;
-
-			case SDL_EVENT_KEY_DOWN:
-			case SDL_EVENT_KEY_UP:
-				// Fighter19 pattern: direct addSDLEvent() call
-				// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
-				if (TheKeyboard) {
-					SDL3Keyboard* keyboard = dynamic_cast<SDL3Keyboard*>(TheKeyboard);
-					if (keyboard) {
-						keyboard->addSDLEvent(&event);
-					}
-				}
-				break;
-
-			case SDL_EVENT_TEXT_INPUT:
-				forwardTextInputEvent(event.text.text);
-				break;
-
-			case SDL_EVENT_MOUSE_MOTION:
-			case SDL_EVENT_MOUSE_BUTTON_DOWN:
-			case SDL_EVENT_MOUSE_BUTTON_UP:
-			case SDL_EVENT_MOUSE_WHEEL:
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-				// Belt-and-braces: drop SDL's own touch-synthesized mouse events.
-				// The gesture translator owns all touch->mouse conversion; double
-				// delivery would produce phantom second clicks.
-				if (event.motion.which == SDL_TOUCH_MOUSEID) {
-					break;
-				}
-#endif
-				// Fighter19 pattern: direct addSDLEvent() call with raw SDL_Event
-				// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
-				if (TheMouse) {
-					SDL3Mouse* mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
-					if (mouse) {
-						mouse->addSDLEvent(&event);
-					}
-				}
-				break;
-
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-			case SDL_EVENT_FINGER_DOWN:
-			case SDL_EVENT_FINGER_MOTION:
-			case SDL_EVENT_FINGER_UP:
-			case SDL_EVENT_FINGER_CANCELED:
-				tracePolledTouchQueue(event);
-				TraceInputTiming("touch-delivery", event.type, event.common.timestamp,
-				                 SDL_GetTicksNS(), 0,
-				                 event.type != SDL_EVENT_FINGER_MOTION, static_cast<int>(s_touch.phase));
-				if (TheMouse && m_SDLWindow) {
-					SDL3Mouse* mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
-					if (mouse) {
-						SlowOperationTrace touchTrace("touch-translate", nullptr, 20.0);
-						handleTouchEvent(mouse, m_SDLWindow, event);
-					}
-				}
-				break;
-#endif
-
-			case SDL_EVENT_WINDOW_RESIZED:
-				handleWindowEvent(event.window);
-				break;
-
-			default:
-				// Ignore other events for now
-				break;
-		}
-
-		updateTextInputState();
+	while (!m_UsesNativeCallbacks && SDL_PollEvent(&event)) {
+		processSDL3Event(event);
 	}
 
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -804,6 +678,178 @@ void SDL3GameEngine::pollSDL3Events(void)
 			updateTouchLongPress(touchMouse, m_SDLWindow);
 		}
 	}
+#endif
+}
+
+// GeneralsX @feature Codex 25/10/2026 Process each callback event once; never retain borrowed SDL payloads.
+void SDL3GameEngine::processSDL3Event(SDL_Event event)
+{
+	if (!m_SDLWindow) return;
+	switch (event.type) {
+		case SDL_EVENT_QUIT:
+			m_quitting = true;
+			break;
+
+		case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+			m_quitting = true;
+			break;
+
+		case SDL_EVENT_WINDOW_FOCUS_GAINED:
+			m_IsActive = true;
+			if (TheMouse) {
+				TheMouse->regainFocus();
+				TheMouse->refreshCursorCapture();
+			}
+			break;
+
+		case SDL_EVENT_WINDOW_FOCUS_LOST:
+			m_IsActive = false;
+			if (m_IsTextInputActive) {
+				SDL_StopTextInput(m_SDLWindow);
+				m_IsTextInputActive = false;
+				m_TextInputFocusWindow = nullptr;
+			}
+			if (TheMouse) {
+				TheMouse->loseFocus();
+			}
+			break;
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		// App suspension/resume: mirror the desktop focus handling so audio
+		// and mouse state pause cleanly (the render gate lives in update()).
+		case SDL_EVENT_DID_ENTER_BACKGROUND:
+			m_IsActive = false;
+			if (TheMouse) {
+				TheMouse->loseFocus();
+			}
+			break;
+
+		case SDL_EVENT_DID_ENTER_FOREGROUND:
+			m_IsActive = true;
+			if (TheMouse) {
+				TheMouse->regainFocus();
+				TheMouse->refreshCursorCapture();
+			}
+			break;
+#endif
+
+		case SDL_EVENT_WINDOW_MOUSE_ENTER:
+			if (TheMouse) {
+				TheMouse->onCursorMovedInside();
+			}
+			break;
+
+		case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+			if (TheMouse) {
+				TheMouse->onCursorMovedOutside();
+			}
+			break;
+
+		case SDL_EVENT_KEY_DOWN:
+		case SDL_EVENT_KEY_UP:
+			// Fighter19 pattern: direct addSDLEvent() call
+			// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
+			if (TheKeyboard) {
+				SDL3Keyboard* keyboard = dynamic_cast<SDL3Keyboard*>(TheKeyboard);
+				if (keyboard) {
+					keyboard->addSDLEvent(&event);
+				}
+			}
+			break;
+
+		case SDL_EVENT_TEXT_INPUT:
+			forwardTextInputEvent(event.text.text);
+			break;
+
+		case SDL_EVENT_MOUSE_MOTION:
+		case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		case SDL_EVENT_MOUSE_BUTTON_UP:
+		case SDL_EVENT_MOUSE_WHEEL:
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+			// Belt-and-braces: drop SDL's own touch-synthesized mouse events.
+			// The gesture translator owns all touch->mouse conversion; double
+			// delivery would produce phantom second clicks.
+			if (event.motion.which == SDL_TOUCH_MOUSEID) {
+				break;
+			}
+#endif
+			// Fighter19 pattern: direct addSDLEvent() call with raw SDL_Event
+			// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
+			if (TheMouse) {
+				SDL3Mouse* mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
+				if (mouse) {
+					mouse->addSDLEvent(&event);
+				}
+			}
+			break;
+
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+		case SDL_EVENT_FINGER_DOWN:
+		case SDL_EVENT_FINGER_MOTION:
+		case SDL_EVENT_FINGER_UP:
+		case SDL_EVENT_FINGER_CANCELED:
+			tracePolledTouchQueue(event);
+			TraceInputTiming("touch-delivery", event.type, event.common.timestamp,
+			                 SDL_GetTicksNS(), 0,
+			                 event.type != SDL_EVENT_FINGER_MOTION, static_cast<int>(s_touch.phase));
+			if (TheMouse && m_SDLWindow) {
+				SDL3Mouse* mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
+				if (mouse) {
+					SlowOperationTrace touchTrace("touch-translate", nullptr, 20.0);
+					handleTouchEvent(mouse, m_SDLWindow, event);
+				}
+			}
+			break;
+#endif
+
+		case SDL_EVENT_WINDOW_RESIZED:
+			handleWindowEvent(event.window);
+			break;
+
+		default:
+			// Ignore other events for now
+			break;
+	}
+
+	updateTextInputState();
+}
+
+// GeneralsX @feature Codex 25/10/2026 Marshal off-main callback events without retaining SDL text pointers.
+bool SDL3GameEngine::deferNativeEvent(const SDL_Event& event)
+{
+	std::lock_guard<std::mutex> lock(m_nativeEventMutex);
+	if (m_nativeEvents.size() >= 256) return false;
+	m_nativeEvents.emplace_back(event);
+	return true;
+}
+
+void SDL3GameEngine::drainNativeEvents()
+{
+	std::vector<DeferredNativeEvent> events;
+	{
+		std::lock_guard<std::mutex> lock(m_nativeEventMutex);
+		events.swap(m_nativeEvents);
+	}
+	for (auto& pending : events) {
+		if (pending.event.type == SDL_EVENT_TEXT_INPUT) pending.event.text.text = pending.text.c_str();
+		processSDL3Event(pending.event);
+	}
+}
+
+Bool SDL3GameEngine::nativeFrameReady()
+{
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	const Bool active = !iosShouldPauseRendering();
+	if (m_IsActive != active) {
+		m_IsActive = active;
+		if (TheMouse) {
+			if (active) { TheMouse->regainFocus(); TheMouse->refreshCursorCapture(); }
+			else TheMouse->loseFocus();
+		}
+	}
+	return active;
+#else
+	return TRUE;
 #endif
 }
 

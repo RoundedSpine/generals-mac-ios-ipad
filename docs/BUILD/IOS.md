@@ -168,3 +168,20 @@ share `generals-stderr.log` immediately after delayed clicks occur. Native
 output caps at 256 records; unknown/future ages are shown as -1. See the
 [input review](../WORKDIR/audit/IOS_DELAYED_INPUT_SYSTEM_REVIEW_2026-10-25.md)
 for interpretation and validation limits.
+
+## Native iOS frame-callback experiment
+
+The current IPA uses SDL's iOS main callbacks, returning control to the native
+run loop between engine updates. Startup logs `[IOS_MAIN_LOOP]`. Event handling
+uses SDL_AppEvent; native frame callbacks use a nonblocking render-rate gate,
+not the desktop sleeping frame limiter. Original SDL UIKit pump source and
+native touch diagnostics are retained. This is an unverified responsiveness
+experiment: individual loading/rendering calls can still stall a frame.
+
+After installing, test delayed clicks on the main menu, sustained gameplay,
+text input, background/resume and normal exit. Share the log promptly after a
+delay; the native diagnostic output is bounded. iOS callback mode supports
+interactive play, not headless/replay simulation launch flags. Desktop/headless
+builds retain the original loop. Use `python3 scripts/qa/test_ios_native_callbacks.py`
+for compiled callback/cadence/event-ownership/lifecycle stand-in checks; device
+behavior requires the macOS-built IPA.

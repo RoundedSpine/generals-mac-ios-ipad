@@ -33,17 +33,32 @@
 #include "Common/ReplaySimulation.h"
 
 
+// GeneralsX @refactor Codex 25/10/2026 Share startup/shutdown with iOS callbacks while retaining the desktop loop.
+void InitializeGameEngine()
+{
+	// initialize the game engine using factory function
+	TheFramePacer = new FramePacer();
+	TheFramePacer->enableFramesPerSecondLimit(TRUE);
+	TheGameEngine = CreateGameEngine();
+	TheGameEngine->init();
+}
+
+void ShutdownGameEngine()
+{
+	// The loop/callbacks have stopped; retain the existing subsystem shutdown order.
+	delete TheFramePacer;
+	TheFramePacer = nullptr;
+	delete TheGameEngine;
+	TheGameEngine = nullptr;
+}
+
 /**
  * This is the entry point for the game system.
  */
 Int GameMain()
 {
 	int exitcode = 0;
-	// initialize the game engine using factory function
-	TheFramePacer = new FramePacer();
-	TheFramePacer->enableFramesPerSecondLimit(TRUE);
-	TheGameEngine = CreateGameEngine();
-	TheGameEngine->init();
+	InitializeGameEngine();
 
 	if (!TheGlobalData->m_simulateReplays.empty())
 	{
@@ -55,11 +70,7 @@ Int GameMain()
 		TheGameEngine->execute();
 	}
 
-	// since execute() returned, we are exiting the game
-	delete TheFramePacer;
-	TheFramePacer = nullptr;
-	delete TheGameEngine;
-	TheGameEngine = nullptr;
+	ShutdownGameEngine();
 
 	return exitcode;
 }

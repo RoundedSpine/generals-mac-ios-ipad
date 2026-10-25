@@ -34,6 +34,9 @@
 #include "Common/LocalFileSystem.h"
 #include "Common/ArchiveFileSystem.h"
 #include <SDL3/SDL.h>
+#include <mutex>
+#include <string>
+#include <vector>
 
 // EXTERNALS
 // GeneralsX @feature felipebraz 16/02/2026
@@ -85,6 +88,13 @@ public:
 	virtual Bool isActive(void);
 	virtual void setIsActive(Bool isActive);
 
+	// GeneralsX @feature Codex 25/10/2026 SDL_AppEvent and native iteration share the existing event handler.
+	void processSDL3Event(SDL_Event event);
+	bool deferNativeEvent(const SDL_Event& event);
+	void drainNativeEvents();
+	void enableNativeCallbacks() { m_UsesNativeCallbacks = true; }
+	Bool nativeFrameReady();
+
 	// Factory methods (override GameEngine)
 	virtual LocalFileSystem *createLocalFileSystem(void);
 	virtual ArchiveFileSystem *createArchiveFileSystem(void);
@@ -103,6 +113,16 @@ public:
 	virtual SDL_Window* getSDLWindow(void) const { return m_SDLWindow; }
 
 protected:
+	bool m_UsesNativeCallbacks = false;
+	struct DeferredNativeEvent {
+		SDL_Event event;
+		std::string text;
+		explicit DeferredNativeEvent(const SDL_Event& input) : event(input) {
+			if (input.type == SDL_EVENT_TEXT_INPUT && input.text.text) text = input.text.text;
+		}
+	};
+	std::mutex m_nativeEventMutex;
+	std::vector<DeferredNativeEvent> m_nativeEvents;
 	SDL_Window*		m_SDLWindow;
 	Bool			m_IsInitialized;
 	Bool			m_IsActive;
