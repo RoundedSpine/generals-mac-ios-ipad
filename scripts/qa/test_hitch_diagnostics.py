@@ -65,6 +65,34 @@ int main() {
         self.assertEqual(result.stderr.count('phase='), 2048)
         self.assertEqual(result.stderr.count('further input messages suppressed'), 1)
 
+    def test_source_cleanup_preserves_order_and_reports_delete_wait(self):
+        source = (ROOT / 'Core/GameEngineDevice/Source/OpenALAudioDevice/OpenALAudioManager.cpp').read_text()
+        start = source.index('void OpenALAudioManager::releaseOpenALHandles(')
+        function = source[start:source.index('\n}', start) + 2]
+        result = run_cpp(r'''#include "slowoperation.h"
+#include <cassert>
+using ALuint=unsigned;
+int step=0;
+struct Stream { ~Stream() { assert(step++==1); } };
+struct Decoder { ~Decoder() { assert(step++==2); } };
+enum { PAT_INVALID=-1 };
+struct PlayingAudio { ALuint m_source=42; Stream* m_stream=new Stream; Decoder* m_ffmpegFile=new Decoder; int m_type=0; };
+void alDeleteSources(int n, ALuint* source) {
+  assert(n==1 && *source==42 && step++==0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(25));
+}
+struct OpenALAudioManager { void releaseOpenALHandles(PlayingAudio*); };
+BODY
+int main() {
+  OpenALAudioManager manager; PlayingAudio playing;
+  manager.releaseOpenALHandles(&playing);
+  assert(step==3 && playing.m_source==0 && !playing.m_stream && !playing.m_ffmpegFile && playing.m_type==PAT_INVALID);
+  manager.releaseOpenALHandles(&playing); assert(step==3);
+}
+'''.replace('BODY', function))
+        self.assertEqual(result.stderr.count('phase=audio-source-delete'), 1)
+        self.assertIn('phase=audio-release-handles', result.stderr)
+
     def test_audio_update_preserves_order_and_attributes_slow_requests(self):
         source = (ROOT / 'Core/GameEngineDevice/Source/OpenALAudioDevice/OpenALAudioManager.cpp').read_text()
         start = source.index('void OpenALAudioManager::update()')

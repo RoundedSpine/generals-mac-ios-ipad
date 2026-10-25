@@ -134,3 +134,58 @@ proof of a touch-specific fault. SDL timestamps do not measure physical contact
 to OS delivery or final command execution. Down/up events intentionally log even
 when fast; a shared 2048-record limit bounds input output. Existing 8 MB stderr
 limit still applies. No queue, gesture or dispatch policy is changed.
+
+## Audio investigation of the 66,829-byte follow-up log
+
+Across approximately 804 seconds of recorded timings, audio-playing exceeded
+20 ms 220 times (median of those records 24.72 ms, maximum 98.90 ms).
+Audio-requests exceeded 20 ms 76 times (thresholded median 23.165 ms, maximum
+52.73 ms). These medians describe slow records only, not typical frames.
+There were 20 sample-cache records (maximum 48.94 ms), one sample-decode
+record (23.76 ms), and no stream-refill or texture-lock timing records.
+No INPUT records exist, so this log cannot diagnose the touch-event path.
+
+The 98.90 ms playing-list stall has no nested >=20 ms sample-cache, decode
+or stream-refill record. Therefore a single large instrumented decode/refill
+is not established as its cause; many smaller operations, uninstrumented work,
+OpenAL synchronization and OS descheduling remain possible.
+
+Code paths reviewed:
+
+- `processPlayingList` polls every 2D/3D sound, advances finished portions,
+  updates 3D positions and releases finished sources on the game thread.
+  Completion searches the list again via findPlayingAudioFrom, then may load
+  another sample. Bursts of completions can accumulate work.
+- New sound effects allocate sources with alGenSources; releaseOpenALHandles
+  deletes them with alDeleteSources. There is no source pool in this backend.
+- The pinned OpenAL Soft 1.24.2 implementation takes a source mutex for source
+  APIs. alDeleteSources calls FreeSource; if a voice is still associated,
+  FreeSource sends a Stop via SendVoiceChanges, which calls device->waitForMix.
+  This establishes a possible blocking path, not that every stopped source
+  takes it or that a measured phone stall did. Source playback also uses voice
+  changes. Reference: https://github.com/kcat/openal-soft/blob/1.24.2/al/source.cpp
+- `processRequestList` processes all eligible requests without a time budget.
+  Request playback can open a file, initialize FFmpeg, decode a whole sample,
+  upload it and initialize a source synchronously. The cache timer includes
+  that entire path; it is not a measurement of decoding alone.
+- Samples remain cached when their reference count reaches zero; closeBuffer
+  does not immediately evict them. Eviction occurs under the fixed 14 MiB
+  accounting limit, so repeated filenames do not alone establish cache thrash.
+  Accounting uses original file size after decode rather than decoded PCM
+  size; it is not a reliable estimate of actual audio buffer memory.
+- Stream refills also decode synchronously, but none individually crossed
+  20 ms in this sample. The log does not justify moving all audio to a worker.
+
+Added separate 2D/3D/stream-list scopes, completion and handle-cleanup scopes
+(20 ms), plus source-state query and source-deletion scopes (8 ms). All use the
+existing bounded HITCH logger. Update order, source lifetimes, cache policy,
+voice priority and gameplay timing remain unchanged. The cleanup harness
+executes the actual function body with an injected 25 ms OpenAL deletion wait,
+checks cleanup order and repeated-cleanup safety, and verifies attribution;
+it does not simulate the real OpenAL mixer or benchmark iOS.
+
+The evidence supports audio as a contributor to short hitches, not a proven
+explanation for multi-second control loss. A source pool or audio worker would
+change ownership/stop/reuse behavior and needs stronger device attribution
+before implementation. The new build retains the touch traces so both leads
+can be evaluated in the same session.

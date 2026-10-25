@@ -101,6 +101,8 @@ enum { INFINITE_LOOP_COUNT = 1000000 };
 
 static inline bool sourceIsStopped(ALuint source)
 {
+	// GeneralsX @feature Codex 25/10/2026 Measure OpenAL state polling separately from sound completion.
+	SlowOperationTrace trace("audio-source-state", nullptr, 8.0);
 	ALenum state;
 	alGetSourcei(source, AL_SOURCE_STATE, &state);
 	
@@ -1190,9 +1192,11 @@ PlayingAudio* OpenALAudioManager::allocatePlayingAudio(void)
 //-------------------------------------------------------------------------------------------------
 void OpenALAudioManager::releaseOpenALHandles(PlayingAudio* release)
 {
+	// GeneralsX @feature Codex 25/10/2026 Separate source deletion from stream and decoder destruction.
+	SlowOperationTrace trace("audio-release-handles", nullptr, 20.0);
 	if (release->m_source)
 	{
-		alDeleteSources(1, &release->m_source);
+		{ SlowOperationTrace trace("audio-source-delete", nullptr, 8.0); alDeleteSources(1, &release->m_source); }
 		release->m_source = 0;
 	}
 	if (release->m_stream)
@@ -1633,6 +1637,8 @@ Bool OpenALAudioManager::isCurrentlyPlaying(AudioHandle handle)
 //-------------------------------------------------------------------------------------------------
 void OpenALAudioManager::notifyOfAudioCompletion(UnsignedInt audioCompleted, UnsignedInt flags)
 {
+	// GeneralsX @feature Codex 25/10/2026 Completion may synchronously load the next sound portion.
+	SlowOperationTrace trace("audio-completion", nullptr, 20.0);
 	PlayingAudio* playing = findPlayingAudioFrom(audioCompleted, flags);
 	if (!playing) {
 		DEBUG_CRASH(("Audio has completed playing, but we can't seem to find it. - jkmcd"));
@@ -2396,6 +2402,7 @@ void OpenALAudioManager::processPlayingList(void)
 	std::list<PlayingAudio*>::iterator it;
 	PlayingAudio* playing;
 
+	SlowOperationTrace audio_playing_2d("audio-playing-2d", nullptr, 20.0);
 	for (it = m_playingSounds.begin(); it != m_playingSounds.end(); /* empty */) {
 		playing = (*it);
 		if (!playing)
@@ -2434,6 +2441,8 @@ void OpenALAudioManager::processPlayingList(void)
 		}
 	}
 
+	audio_playing_2d.Finish();
+	SlowOperationTrace audio_playing_3d("audio-playing-3d", nullptr, 20.0);
 	for (it = m_playing3DSounds.begin(); it != m_playing3DSounds.end(); )
 	{
 		playing = (*it);
@@ -2515,6 +2524,8 @@ void OpenALAudioManager::processPlayingList(void)
 		}
 	}
 
+	audio_playing_3d.Finish();
+	SlowOperationTrace audio_playing_streams("audio-playing-streams", nullptr, 20.0);
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ) {
 		playing = (*it);
 		if (!playing)
@@ -2549,6 +2560,8 @@ void OpenALAudioManager::processPlayingList(void)
 			++it;
 		}
 	}
+
+	audio_playing_streams.Finish();
 
 	// GeneralsX @bugfix 14/06/2026 Backstop (belt-and-braces): the proper fix is the EOF
 	// propagation in OpenALAudioStream (a finished one-shot now reaches AL_STOPPED so the
