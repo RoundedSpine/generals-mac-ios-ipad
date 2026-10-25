@@ -31,6 +31,11 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// GeneralsX @feature Codex 25/10/2026 Trace UI input delivery and gates without changing behavior.
+#ifdef _UNIX
+#include "inputtiming.h"
+#endif
+
 #include <stdio.h>
 
 #include "Common/Debug.h"
@@ -833,6 +838,13 @@ WinInputReturnCode GameWindowManager::winProcessMouseEvent( GameWindowMessage ms
 																														ICoord2D *mousePos,
 																														void *data )
 {
+#ifdef _UNIX
+	if (msg == GWM_LEFT_DOWN || msg == GWM_LEFT_UP || msg == GWM_RIGHT_DOWN || msg == GWM_RIGHT_UP) {
+		const int gates = (m_mouseCaptor ? 1 : 0) | (m_modalHead ? 2 : 0) | (m_grabWindow ? 4 : 0);
+		TraceInputTiming("window-dispatch", static_cast<unsigned>(msg), 0, 0, 0, true, gates);
+	}
+#endif
+
 	WinInputReturnCode returnCode = WIN_INPUT_NOT_USED;
 	Bool objectTooltip = FALSE;
 	UnsignedInt packedMouseCoords;

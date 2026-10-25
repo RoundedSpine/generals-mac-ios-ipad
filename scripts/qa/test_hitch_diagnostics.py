@@ -65,6 +65,56 @@ int main() {
         self.assertEqual(result.stderr.count('phase='), 2048)
         self.assertEqual(result.stderr.count('further input messages suppressed'), 1)
 
+    def test_actual_touch_translator_defers_taps_and_distinguishes_long_press(self):
+        source = (ROOT / 'GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp').read_text()
+        start = source.index('struct TouchState {')
+        body = source[start:source.index('} // anonymous namespace', start)]
+        result = run_cpp(r'''#include <cassert>
+#include <cmath>
+#include <cstring>
+#include <vector>
+using Uint64=unsigned long long; using Uint32=unsigned; using Uint8=unsigned char;
+using SDL_FingerID=long long; using SDL_WindowID=unsigned;
+enum { SDL_EVENT_FINGER_DOWN=1, SDL_EVENT_FINGER_UP, SDL_EVENT_FINGER_MOTION,
+       SDL_EVENT_FINGER_CANCELED, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_BUTTON_DOWN,
+       SDL_EVENT_MOUSE_BUTTON_UP, SDL_EVENT_MOUSE_WHEEL, SDL_BUTTON_LEFT=10, SDL_BUTTON_RIGHT=11 };
+struct SDL_Window {};
+struct SDL_Event {
+  unsigned type=0;
+  struct { long long fingerID=0; float x=0,y=0; } tfinger;
+  struct { unsigned windowID=0; float x=0,y=0; } motion;
+  struct { unsigned windowID=0; unsigned char button=0; bool down=false; int clicks=0; float x=0,y=0; } button;
+  struct { unsigned windowID=0; float x=0,y=0,mouse_x=0,mouse_y=0; } wheel;
+};
+#define SDL_zero(x) x = SDL_Event{}
+Uint64 ticks=100;
+Uint64 SDL_GetTicks() { return ticks; }
+void SDL_GetWindowSize(SDL_Window*, int* w,int* h) { *w=1000;*h=500; }
+unsigned SDL_GetWindowID(SDL_Window*) { return 1; }
+float SDL_sqrtf(float x) { return std::sqrt(x); }
+float SDL_fabsf(float x) { return std::fabs(x); }
+struct SDL3Mouse { std::vector<SDL_Event> events; void addSDLEvent(SDL_Event* e) { events.push_back(*e); } };
+BODY
+int main() {
+ SDL3Mouse mouse; SDL_Window window; SDL_Event finger;
+ finger.type=SDL_EVENT_FINGER_DOWN; finger.tfinger.fingerID=1; finger.tfinger.x=.5f;finger.tfinger.y=.5f;
+ handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==1 && mouse.events[0].type==SDL_EVENT_MOUSE_MOTION);
+ ticks+=100; updateTouchLongPress(&mouse,&window); assert(mouse.events.size()==1);
+ finger.type=SDL_EVENT_FINGER_UP;handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==4 && mouse.events[2].button.button==SDL_BUTTON_LEFT && !mouse.events[3].button.down);
+ mouse.events.clear();finger.type=SDL_EVENT_FINGER_DOWN;handleTouchEvent(&mouse,&window,finger);
+ ticks+=599; updateTouchLongPress(&mouse,&window); assert(mouse.events.size()==1);
+ ticks+=1;updateTouchLongPress(&mouse,&window);
+ assert(mouse.events.size()==4 && mouse.events[2].button.button==SDL_BUTTON_RIGHT);
+ finger.type=SDL_EVENT_FINGER_UP;handleTouchEvent(&mouse,&window,finger);assert(mouse.events.size()==4);
+ mouse.events.clear();finger.type=SDL_EVENT_FINGER_DOWN;handleTouchEvent(&mouse,&window,finger);
+ finger.type=SDL_EVENT_FINGER_CANCELED;handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==1 && s_touch.phase==TouchState::IDLE);
+}
+'''.replace('BODY', body))
+        self.assertEqual(result.returncode, 0)
+
     def test_source_cleanup_preserves_order_and_reports_delete_wait(self):
         source = (ROOT / 'Core/GameEngineDevice/Source/OpenALAudioDevice/OpenALAudioManager.cpp').read_text()
         start = source.index('void OpenALAudioManager::releaseOpenALHandles(')

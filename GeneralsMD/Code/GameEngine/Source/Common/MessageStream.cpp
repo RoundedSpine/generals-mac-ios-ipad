@@ -28,6 +28,9 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+// GeneralsX @feature Codex 25/10/2026 Trace UI input delivery and gates without changing behavior.
+#include "slowoperation.h"
+
 #include "Common/MessageStream.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -1073,6 +1076,7 @@ Bool isInvalidDebugCommand( GameMessage::Type t )
  */
 void MessageStream::propagateMessages()
 {
+	SlowOperationTrace trace("message-propagation", nullptr, 20.0);
 	MessageStream::TranslatorData *ss;
 	GameMessage *msg, *next;
 
@@ -1087,7 +1091,8 @@ void MessageStream::propagateMessages()
 #endif
 				)
 			{
-				GameMessageDisposition disp = ss->m_translator->translateGameMessage(msg);
+				GameMessageDisposition disp;
+				{ SlowOperationTrace translateTrace("message-translator", nullptr, 20.0); disp = ss->m_translator->translateGameMessage(msg); }
 				next = msg->next();
 				if (disp == DESTROY_MESSAGE)
 				{
