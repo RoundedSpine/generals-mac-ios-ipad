@@ -205,3 +205,68 @@ blindly. A future investigation should examine UIKit callback delivery and the
 classic SDL_main/manual nested run-loop integration, with physical contact/OS
 queue timing distinguished from SDL's translated timestamp. This rollback
 restores the previous behavior; it is not a fix for the original delayed taps.
+
+## Next-step investigation after rollback
+
+Reviewed SDL 3.4.2's UIKit touch view, app delegate, event pump and iOS main
+callbacks, plus the engine's startup/execute/cleanup boundaries.
+
+Current path: SDL's postFinishLaunch invokes SDL_main, which calls GameMain;
+GameMain initializes the engine, runs execute's while-loop, then destroys the
+frame pacer and engine. SDL3Main subsequently destroys its window, quits SDL,
+destroys Version and shuts down engine memory. While the loop runs, UIKit is
+serviced through SDL's nested manual CFRunLoop pump. The frame limiter sleeps
+without returning to UIApplicationMain's outer run loop. This is SDL's supported
+classic entry path, so its mere use is not evidence of a defect.
+
+SDL's callback entry is architecturally different. SDL_EnterAppMainCallbacks
+returns out of SDL_main after initialization and installs CADisplayLink;
+SDL_IterateMainCallbacks performs event handling and one SDL_AppIterate call
+per invocation. This would let the native run loop own inter-frame scheduling.
+It is a credible alternative to test if loop servicing is implicated. It is
+not a drop-in wrapper around GameMain: GameMain and SDL3Main must separate
+initialization, one-frame execution and cleanup, preserve shutdown ownership,
+and avoid both duplicate polling and a sleeping frame limiter inside display
+callbacks. Legacy/headless behavior and lifecycle gates need to remain intact.
+
+**Recommended immediate next step: one thin native UIKit timestamp probe, with
+upstream pump behavior retained.** In the SDL touch callbacks, record callback
+entry uptime alongside both UIEvent.timestamp and each UITouch.timestamp,
+plus SDL_GetTicksNS. Prefer a fixed-size buffer drained during polling rather
+than synchronous logging in UIKit. Keep original event/touch timestamps and
+run-loop policy unchanged; use a guarded iOS-only dependency diagnostic patch.
+Capture touch begin/end/cancel, bounded motion and finger identity so values
+can be paired with the existing watcher records. This requires an Objective-C
+CI build; host stand-ins cannot establish UIKit semantics.
+
+Why this is needed: current prequeue_ms compares SDL's converted event timestamp
+to SDL_GetTicksNS. UIKit_GetEventTimestamp initializes and adjusts a static
+clock offset. The view currently supplies UIEvent.timestamp to the finger path,
+whereas some pointer paths use UITouch.timestamp. Existing traces do not
+independently verify that conversion or per-touch/event timestamp equivalence.
+The user clearly observes real delayed responses, but locating every part of
+that delay solely from converted timestamps was too strong. Queue residence
+is the directly paired SDL-clock measurement; it remains fast.
+
+Decision criteria:
+
+- Callback entry uptime minus UITouch.timestamp is large, and agrees with
+  UIEvent age: delivery to the view is genuinely late. Next test native SDL
+  frame callbacks and inspect edge/system-gesture behavior. That migration is
+  a scheduling experiment, not an already-proven cure.
+- Callback touch age is small but event age or converted SDL age is large:
+  investigate event reuse/coalescing or clock conversion before modifying the
+  loop. Do not replace timestamps with "now" to conceal delayed delivery.
+- All native/SDL arrival ages are small but response is late: trace the already
+  instrumented gesture/UI route, including 600 ms long press and menu gates.
+
+Do not implement another arbitrary run-loop duration or put rendering on a
+background thread as a substitute for this measurement. Preserve the rollback
+IPA as the baseline and use short, comparable main-menu tests. No new production
+behavior change or new diagnostic IPA was introduced in this investigation.
+
+References (pinned SDL 3.4.2):
+- https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/video/uikit/SDL_uikitview.m
+- https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/video/uikit/SDL_uikitevents.m
+- https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/video/uikit/SDL_uikitappdelegate.m
+- https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/main/ios/SDL_sysmain_callbacks.m
