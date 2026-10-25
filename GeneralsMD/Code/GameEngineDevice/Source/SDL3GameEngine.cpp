@@ -69,6 +69,7 @@ extern GameWindowManager *TheWindowManager;
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #include <atomic>
 #include "touchqueuetiming.h"
+#include "uikittouchtiming.h"
 
 // ---------------------------------------------------------------------------
 // iOS app lifecycle
@@ -127,6 +128,12 @@ static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 
 // GeneralsX @feature Codex 25/10/2026 Separate upstream touch delivery delay from SDL queue residence.
 static TouchQueueTiming s_touchQueueTiming;
+static UIKitTouchTiming s_uikitTouchTiming;
+static void recordUIKitTouch(const GXUIKitTouchSample* sample)
+{
+	if (sample) s_uikitTouchTiming.Record(*sample);
+}
+static GXUIKitTouchProbe s_uikitTouchProbe{recordUIKitTouch};
 static bool s_touchQueueWatchInstalled = false;
 
 static bool SDLCALL iosTouchQueueWatcher(void*, SDL_Event* event)
@@ -154,6 +161,13 @@ static void tracePolledTouchQueue(const SDL_Event& event)
 	const bool matched = s_touchQueueTiming.Take(event.type, event.common.timestamp,
 	                     static_cast<uint64_t>(event.tfinger.fingerID),
 	                     static_cast<uint64_t>(event.tfinger.touchID), entry, overwritten);
+	GXUIKitTouchSample native;
+	uint64_t nativeOverwritten = 0;
+	const bool nativeMatched = s_uikitTouchTiming.Take(event.type, event.common.timestamp,
+	                          static_cast<uint64_t>(event.tfinger.fingerID), native, nativeOverwritten);
+	TraceUIKitTouchTiming(nativeMatched ? &native : nullptr, event.type, event.common.timestamp,
+	                     polled, matched ? entry.arrival : 0, nativeOverwritten,
+	                     event.type != SDL_EVENT_FINGER_MOTION);
 	TraceTouchQueueTiming(matched ? &entry : nullptr, event.type, event.common.timestamp,
 	                     polled, overwritten, event.type != SDL_EVENT_FINGER_MOTION);
 }
@@ -484,6 +498,7 @@ SDL3GameEngine::SDL3GameEngine()
 SDL3GameEngine::~SDL3GameEngine()
 {
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	SDL_ClearProperty(SDL_GetGlobalProperties(), GX_UIKIT_TOUCH_PROBE_PROPERTY);
 	if (s_touchQueueWatchInstalled) {
 		SDL_RemoveEventWatch(iosTouchQueueWatcher, nullptr);
 		s_touchQueueWatchInstalled = false;
@@ -542,6 +557,10 @@ void SDL3GameEngine::init(void)
 	// Lifecycle events can fire outside the poll cycle on iOS; catch them
 	// immediately so rendering halts before the process is suspended.
 	SDL_AddEventWatch(iosLifecycleWatcher, nullptr);
+	const bool nativeProbeInstalled = SDL_SetPointerProperty(SDL_GetGlobalProperties(),
+	                                 GX_UIKIT_TOUCH_PROBE_PROPERTY, &s_uikitTouchProbe);
+	fprintf(stderr, "[UIKIT_TOUCH] bridge installed=%d; upstream event pump retained\n", nativeProbeInstalled ? 1 : 0);
+	if (!nativeProbeInstalled) fprintf(stderr, "[UIKIT_TOUCH] bridge error: %s\n", SDL_GetError());
 	if (!s_touchQueueWatchInstalled) {
 		s_touchQueueWatchInstalled = SDL_AddEventWatch(iosTouchQueueWatcher, nullptr);
 		fprintf(stderr, "[TOUCH_QUEUE] watcher installed=%d\n", s_touchQueueWatchInstalled ? 1 : 0);

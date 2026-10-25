@@ -157,3 +157,14 @@ we need gameplay timings. Nested durations overlap, and a long frame-pacing
 entry may be intentional when FPS is capped low. Diagnostics do not constitute
 a performance fix or establish that the texture worker caused the pauses.
 See the [investigation](../WORKDIR/audit/IOS_GAMEPLAY_HITCH_INVESTIGATION_2026-10-25.md).
+
+## Native touch timing diagnostic
+
+The current diagnostic build keeps SDL's original UIKit event pump and adds
+`[UIKIT_TOUCH]` records. These compare native event/touch timestamps with callback
+entry uptime, alongside the existing `[TOUCH_QUEUE]` timings. This is a
+measurement build, not a responsiveness fix. Test the main menu briefly and
+share `generals-stderr.log` immediately after delayed clicks occur. Native
+output caps at 256 records; unknown/future ages are shown as -1. See the
+[input review](../WORKDIR/audit/IOS_DELAYED_INPUT_SYSTEM_REVIEW_2026-10-25.md)
+for interpretation and validation limits.

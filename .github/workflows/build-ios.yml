@@ -47,6 +47,9 @@ jobs:
           brew install cmake ninja meson pkg-config xcodegen glslang autoconf autoconf-archive automake libtool
           mkdir -p logs "$VCPKG_DEFAULT_BINARY_CACHE"
 
+      - name: Validate native UIKit touch probe
+        run: python3 scripts/qa/test_ios_uikit_probe.py
+
       # This revision includes the manifest's FFmpeg 8.1.1#2 override.
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11

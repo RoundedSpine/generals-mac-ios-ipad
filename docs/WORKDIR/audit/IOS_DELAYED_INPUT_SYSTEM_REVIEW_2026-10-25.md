@@ -270,3 +270,49 @@ References (pinned SDL 3.4.2):
 - https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/video/uikit/SDL_uikitevents.m
 - https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/video/uikit/SDL_uikitappdelegate.m
 - https://github.com/libsdl-org/SDL/blob/release-3.4.2/src/main/ios/SDL_sysmain_callbacks.m
+
+## Implemented native callback boundary diagnostic
+
+Added an iOS-only, guarded FetchContent patch to SDL_uikitview.m. Each finger
+callback captures SDL_GetTicksNS and NSProcessInfo.systemUptime immediately on
+entry. Before its existing SDL_SendTouch/SDL_SendTouchMotion call, it records
+UIEvent.timestamp, UITouch.timestamp and touch kind, using the same normalized
+SDL timestamp already required by that send. Conversion still occurs exactly
+once and the original SDL event arguments/order are preserved. The patch does
+not alter SDL_uikitevents.m, event pumping, gestures, or native run-loop policy.
+
+A shared C-compatible data bridge is registered through a namespaced SDL global
+pointer property. The native callback invokes a fixed-size app-side recorder;
+there is no logging in the callback. Native samples pair by type, converted
+source timestamp and finger identity (FIFO for duplicate keys). The 2048-slot
+buffer is mutex protected and reports overwrites. The property is cleared on
+engine destruction; bridge storage has static lifetime. Layout orders 64-bit
+fields ahead of 32-bit fields to avoid differing four/eight-byte struct packing
+across legacy C++ and Objective-C units.
+
+On polling, independent bounded [UIKIT_TOUCH] records report:
+
+- event_age_ms and touch_age_ms: callback entry uptime minus the original
+  event/touch timestamps, without SDL clock conversion;
+- converted_age_ms: callback entry SDL clock minus converted SDL source time;
+- callback_to_watch_ms: entry to the existing SDL queue watcher;
+- original uptime/event_time/touch_time, source_ns/callback_ns/poll_ns,
+  matched, kind and overwrite count, for cross-checking assumptions.
+
+Unknown/future ages are -1. Edge events always log; matched fast motion is
+suppressed unless one measured stage reaches 50 ms. The independent native log
+cap is 256 records plus one suppression message. Matching failures are explicit;
+no inference should be made from unknown durations. Reading native timestamps
+later in a callback can matter if UIKit mutates touch objects; entry uptime is
+captured first and future readings are not silently clamped into plausible ages.
+Native finger contact-to-OS latency is still not measured.
+
+Validation: patch idempotence and changed-context rejection; exact recovery of
+original fixture callbacks after removing diagnostic inserts; one conversion
+per send; stable C bridge layout under four-byte packing; native clock arithmetic
+and unknown ages; FIFO, overflow and 3000 cross-thread pairings; independent log
+cap. Applied/reviewed the patch against actual pinned SDL source. Added an
+Objective-C helper syntax check using the iOS SDK on macOS CI; Linux skips this
+one check. Full production SDL compilation is still performed by the IPA build.
+No phone improvement is claimed: this build measures native delivery so the
+next scheduling decision is based on independent clock evidence.
