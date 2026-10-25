@@ -171,7 +171,7 @@ int main() {
 
 
 
-    def test_missing_texture_logging_uses_character_buffer(self):
+    def test_missing_texture_fallback_handles_detached_task(self):
         source = (ROOT / 'Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp').read_text()
         body = function_body(source, 'void TextureLoadTaskClass::Apply_Missing_Texture()')
         harness = r'''

@@ -40,8 +40,6 @@
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL_main.h>
 #include "nativeframecadence.h"
-#include "nativeframetrace.h"
-#include "slowoperation.h"
 #include <cerrno>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -397,14 +395,6 @@ int main(int argc, char* argv[])
 			memcpy(iosAppDirectory, argv[0], static_cast<size_t>(slash - argv[0]));
 		}
 	}
-	fprintf(stderr, "INFO: iOS app directory: %s\n", iosAppDirectory[0] ? iosAppDirectory : "unresolved");
-	fprintf(stderr, "INFO: iOS startup argc=%d, game-memory=%s\n", argc,
-#ifndef DISABLE_GAMEMEMORY
-	        "custom"
-#else
-	        "system"
-#endif
-	);
 
 	// The engine resolves all game data relative to the working directory.
 	// Preferred layout: assets ship read-only INSIDE the signed app bundle
@@ -496,10 +486,6 @@ int main(int argc, char* argv[])
 				}
 			}
 		}
-		fprintf(stderr, "INFO: iOS assets: INIZH.big=%s, Data=%s, fonts/arial.ttf=%s\n",
-		        access("INIZH.big", R_OK) == 0 ? "present" : "absent",
-		        access("Data", R_OK) == 0 ? "present" : "absent",
-		        access("fonts/arial.ttf", R_OK) == 0 ? "present" : "absent");
 	}
 	// GeneralsX @bugfix Codex 24/10/2026 Use the shipped iOS shader workaround in asset-free sideload builds too.
 	if (getenv("DXVK_CONFIG_FILE") == nullptr) {
@@ -512,7 +498,6 @@ int main(int argc, char* argv[])
 				setenv("DXVK_CONFIG_FILE", configPath, 0);
 		}
 	}
-	fprintf(stderr, "INFO: iOS DXVK config: %s\n", getenv("DXVK_CONFIG_FILE") ? getenv("DXVK_CONFIG_FILE") : "default discovery");
 
 
 #endif
@@ -531,26 +516,19 @@ int main(int argc, char* argv[])
 		TheDebugLogCriticalSection = &critSec5;
 
 		// Initialize memory manager early (required by NEW operator)
-		// GeneralsX @feature Codex 24/10/2026 Record startup boundaries before operations that may fail without an OS crash report.
-		fprintf(stderr, "INFO: Startup: initializing memory manager\n");
 		initMemoryManager();
 		s_launcherMemoryInitialized = true;
-		fprintf(stderr, "INFO: Startup: memory manager initialized\n");
 
 		// GeneralsX @bugfix BenderAI 14/02/2026 Initialize Version singleton
 		// GameEngine::init() calls updateWindowTitle() which uses TheVersion
 		// Must be created before GameMain() to avoid nullptr dereference
-		fprintf(stderr, "INFO: Startup: constructing Version\n");
 		TheVersion = NEW Version;
-		fprintf(stderr, "INFO: Startup: Version constructed\n");
 
 		// Parse command line (CommandLine class handles argc/argv internally)
 		// TheSuperHackers @build felipebraz 10/02/2026 Phase 1.5
 		// Store argc/argv for CommandLine parser to access via _NSGetArgc/_NSGetArgv or /proc/self/cmdline
 		// For now, let CommandLine::parseCommandLineForStartup() handle this
-		fprintf(stderr, "INFO: Startup: parsing startup command line\n");
 		CommandLine::parseCommandLineForStartup();
-		fprintf(stderr, "INFO: Startup: startup command line parsed\n");
 
 		// GeneralsX @bugfix Copilot 17/05/2026 Skip SDL3 window bootstrap for CLI/headless replay execution.
 		const bool isHeadlessMode = (TheGlobalData != nullptr && TheGlobalData->m_headless);
@@ -674,7 +652,6 @@ int main(int argc, char* argv[])
 		InitializeGameEngine();
 		s_nativeEngineReady = true;
 		static_cast<SDL3GameEngine*>(TheGameEngine)->enableNativeCallbacks();
-		fprintf(stderr, "[IOS_MAIN_LOOP] native SDL main callbacks enabled; no manual polling or frame sleeps\n");
 		exitcode = 0;
 #else
 		// Call cross-platform game entry point
@@ -700,7 +677,6 @@ int main(int argc, char* argv[])
 
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 static NativeFrameCadence s_nativeCadence;
-static NativeFrameTrace s_nativeFrameTrace;
 
 SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 {
@@ -709,8 +685,6 @@ SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 		if (InitializeNativeGameLaunch(argc, argv) != 0) return SDL_APP_FAILURE;
 		*appstate = TheGameEngine;
 		s_nativeCadence.Reset();
-		s_nativeFrameTrace.Reset();
-		fprintf(stderr, "[NATIVE_FRAME] diagnostics enabled; callback and gate policies unchanged\n");
 		return SDL_APP_CONTINUE;
 	} catch (const std::exception& error) {
 		fprintf(stderr, "FATAL: native initialization exception: %s\n", error.what());
@@ -723,7 +697,6 @@ SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 
 SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event)
 {
-	SlowOperationTrace eventTime("native-event-callback", nullptr, 20.0);
 	if (event->type == SDL_EVENT_TERMINATING) return SDL_APP_SUCCESS;
 	if (!appstate) return SDL_APP_CONTINUE;
 	try {
@@ -744,29 +717,21 @@ SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event)
 
 SDL_AppResult SDLCALL SDL_AppIterate(void* appstate)
 {
-	NativeFrameTrace::Scope callbackScope(s_nativeFrameTrace, []() -> uint64_t { return SDL_GetTicksNS(); });
-	SlowOperationTrace callbackTime("native-callback", nullptr, 50.0);
 	try {
 		auto* engine = static_cast<SDL3GameEngine*>(appstate);
 		if (!engine) return SDL_APP_SUCCESS;
-		s_nativeFrameTrace.Mark("event-drain");
-		{ SlowOperationTrace trace("native-event-drain", nullptr, 20.0); engine->drainNativeEvents(); }
+		engine->drainNativeEvents();
 		if (engine->getQuitting()) return SDL_APP_SUCCESS;
-		s_nativeFrameTrace.Mark("focus-gate");
-		bool ready;
-		{ SlowOperationTrace trace("native-focus-gate", nullptr, 20.0); ready = engine->nativeFrameReady(); }
+		const bool ready = engine->nativeFrameReady();
 		if (!ready) {
-			s_nativeFrameTrace.Gate(SDL_GetTicksNS(), true, engine->nativePauseReasons(), 0, s_nativeCadence.Deadline());
 			s_nativeCadence.Reset();
 			return SDL_APP_CONTINUE;
 		}
 		double elapsed = 0.0;
 		const int fps = TheFramePacer->getActualFramesPerSecondLimit();
 		if (!s_nativeCadence.Advance(SDL_GetTicksNS(), fps > 0 ? static_cast<unsigned>(fps) : 0, elapsed)) {
-			s_nativeFrameTrace.Gate(SDL_GetTicksNS(), false, engine->nativePauseReasons(), fps, s_nativeCadence.Deadline());
 			return SDL_APP_CONTINUE;
 		}
-		s_nativeFrameTrace.Update(SDL_GetTicksNS(), engine->nativePauseReasons(), fps, s_nativeCadence.Deadline());
 		TheFramePacer->updateExternal(static_cast<Real>(elapsed));
 		engine->update();
 		return engine->getQuitting() ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;

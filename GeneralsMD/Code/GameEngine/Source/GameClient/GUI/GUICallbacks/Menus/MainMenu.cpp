@@ -30,11 +30,6 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// GeneralsX @feature Codex 25/10/2026 Trace UI input delivery and gates without changing behavior.
-#ifdef _UNIX
-#include "inputtiming.h"
-#endif
-
 #include "gamespy/ghttp/ghttp.h"
 
 #include "Lib/BaseType.h"
@@ -1372,11 +1367,6 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 
 			GameWindow *control = (GameWindow *)mData1;
 			Int controlID = control->winGetWindowId();
-#ifdef _UNIX
-			const int gates = (dontAllowTransitions ? 1 : 0) | (buttonPushed ? 2 : 0) | (campaignSelected ? 4 : 0);
-			TraceInputTiming("mainmenu-selected", static_cast<unsigned>(controlID), 0, 0, 0, true, gates);
-#endif
-
 
 			if(buttonPushed)
 				break;

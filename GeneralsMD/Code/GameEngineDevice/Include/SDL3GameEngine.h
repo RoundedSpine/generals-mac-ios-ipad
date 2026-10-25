@@ -94,7 +94,6 @@ public:
 	void drainNativeEvents();
 	void enableNativeCallbacks() { m_UsesNativeCallbacks = true; }
 	Bool nativeFrameReady();
-	unsigned nativePauseReasons() const;
 
 	// Factory methods (override GameEngine)
 	virtual LocalFileSystem *createLocalFileSystem(void);

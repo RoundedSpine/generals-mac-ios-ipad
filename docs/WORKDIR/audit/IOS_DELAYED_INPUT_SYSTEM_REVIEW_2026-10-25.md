@@ -424,3 +424,25 @@ verifies that diagnostic additions preserve the atomic pause flags and do not
 log unrelated events. Existing actual callback/body tests cover routing and
 cadence decisions with the new traces. No new scheduling experiment is included;
 the purpose is to identify which branch accounts for the remaining episode.
+
+## 2026-10-26: Diagnostics removed for baseline validation
+
+At the user's request, removed investigation-only runtime instrumentation:
+HITCH scopes; INPUT/UIKIT_TOUCH/TOUCH_QUEUE/NATIVE_FRAME/NATIVE_LIFECYCLE records;
+worker start/priority traces; startup checkpoints and missing-texture name
+output; diagnostic clocks, counters, buffers, mutexes, event watcher and bridge;
+and the iOS-only SDL UIKit probe patch and FetchContent hook. SDL now builds
+from its unmodified pinned source. Ordinary application logging and fatal/error
+reporting remain. Previous sections describe historical investigation builds.
+
+Retained native iOS SDL callbacks, nonblocking cadence and elapsed-time updates,
+existing lifecycle guards, deferred text ownership, gestures and routing,
+background worker lifecycle/locks, base asset lookup, startup correctness,
+packaging and entitlements. Removed only the read-only diagnostic cadence getter
+and pause-reason accessor. Probe-specific tests/files/CI commands were removed;
+the actual gesture regression and shared C++ harness remain with functional
+callback, event ownership, pacing, startup, worker and packaging checks.
+
+The latest user reports no delays with the instrumented build. This cleanup is
+not itself proof of a fix or a measured performance gain. Confirm responsiveness,
+normal gameplay and background/resume on the next IPA with diagnostics absent.

@@ -34,7 +34,6 @@ jobs:
           python3 scripts/qa/test_ios_packaging.py
           python3 scripts/qa/test_startup_primitives.py
           python3 scripts/qa/test_unix_worker.py
-          python3 scripts/qa/test_hitch_diagnostics.py
           python3 scripts/qa/test_ios_native_callbacks.py
 
       - name: Initialize the pinned iOS DXVK fork
@@ -47,9 +46,6 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-path
           brew install cmake ninja meson pkg-config xcodegen glslang autoconf autoconf-archive automake libtool
           mkdir -p logs "$VCPKG_DEFAULT_BINARY_CACHE"
-
-      - name: Validate native UIKit touch probe
-        run: python3 scripts/qa/test_ios_uikit_probe.py
 
       # This revision includes the manifest's FFmpeg 8.1.1#2 override.
       - name: Set up vcpkg

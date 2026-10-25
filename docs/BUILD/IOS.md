@@ -146,49 +146,24 @@ stand-ins; they do not establish device-level renderer or gameplay correctness.
 Retest map loading, texture appearance, sustained gameplay and exit behavior
 on the phone before replacing a known-working IPA.
 
-## Gameplay hitch diagnostics
+## Native iOS frame callbacks
 
-The investigation build writes bounded `[HITCH]` entries into the normal
-`generals-stderr.log`: texture lock waits above 8 ms and subsystem, texture and
-presentation work above 50 ms. It also logs worker starts and scheduler-priority
-results. Keep the same game files/settings, play until a few freezes occur,
-then share the log and name the map. Startup/map-loading timings are expected;
-we need gameplay timings. Nested durations overlap, and a long frame-pacing
-entry may be intentional when FPS is capped low. Diagnostics do not constitute
-a performance fix or establish that the texture worker caused the pauses.
-See the [investigation](../WORKDIR/audit/IOS_GAMEPLAY_HITCH_INVESTIGATION_2026-10-25.md).
+The current IPA uses SDL's native iOS frame callbacks and returns control to the
+native run loop between engine updates. Event handling uses SDL_AppEvent;
+frames use a nonblocking render-rate gate instead of a sleeping limiter. Input
+routing, touch gestures, lifecycle pause/resume, worker threads and shutdown
+fixes are retained.
 
-## Native touch timing diagnostic
+Investigation-only timers, touch/queue probes, diagnostic buffers, worker-status
+messages and startup checkpoints have been removed. SDL is built from its
+unmodified pinned source, without the UIKit diagnostic patch. Normal application
+logging and error reporting remain. Prior findings are retained in the
+[input investigation history](../WORKDIR/audit/IOS_DELAYED_INPUT_SYSTEM_REVIEW_2026-10-25.md).
 
-The current diagnostic build keeps SDL's original UIKit event pump and adds
-`[UIKIT_TOUCH]` records. These compare native event/touch timestamps with callback
-entry uptime, alongside the existing `[TOUCH_QUEUE]` timings. This is a
-measurement build, not a responsiveness fix. Test the main menu briefly and
-share `generals-stderr.log` immediately after delayed clicks occur. Native
-output caps at 256 records; unknown/future ages are shown as -1. See the
-[input review](../WORKDIR/audit/IOS_DELAYED_INPUT_SYSTEM_REVIEW_2026-10-25.md)
-for interpretation and validation limits.
-
-## Native iOS frame-callback experiment
-
-The current IPA uses SDL's iOS main callbacks, returning control to the native
-run loop between engine updates. Startup logs `[IOS_MAIN_LOOP]`. Event handling
-uses SDL_AppEvent; native frame callbacks use a nonblocking render-rate gate,
-not the desktop sleeping frame limiter. Original SDL UIKit pump source and
-native touch diagnostics are retained. This is an unverified responsiveness
-experiment: individual loading/rendering calls can still stall a frame.
-
-After installing, test delayed clicks on the main menu, sustained gameplay,
-text input, background/resume and normal exit. Share the log promptly after a
-delay; the native diagnostic output is bounded. iOS callback mode supports
-interactive play, not headless/replay simulation launch flags. Desktop/headless
-builds retain the original loop. Use `python3 scripts/qa/test_ios_native_callbacks.py`
-for compiled callback/cadence/event-ownership/lifecycle stand-in checks; device
-behavior requires the macOS-built IPA.
-
-The latest diagnostic also emits `[NATIVE_FRAME]` for long callback gaps and
-frame-update skips, plus `[NATIVE_LIFECYCLE]` pause flags (1=backgrounded,
-2=inactive). These distinguish missing display callbacks from lifecycle/cadence
-returns without changing their policies. Their separate output limits remain
-available after the touch logs reach their caps. Collect the log promptly after
-an episode and note any app backgrounding or system overlay activity.
+Verify menu responsiveness, gameplay, text input, background/resume and exit on
+the phone. The removal of instrumentation needs device validation because the
+probes could influence timing. iOS callback mode supports interactive play;
+desktop/headless builds retain the original loop. Run
+`python3 scripts/qa/test_ios_native_callbacks.py` for compiled callback/cadence,
+event-ownership, gesture and lifecycle checks. These stand-ins do not replace a
+full macOS/Xcode build or device testing.

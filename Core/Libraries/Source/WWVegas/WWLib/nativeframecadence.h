@@ -7,7 +7,6 @@ class NativeFrameCadence
     uint64_t Last = 0, Next = 0;
     unsigned Rate = 0;
 public:
-    uint64_t Deadline() const { return Next; }
     void Reset() { Last = Next = 0; Rate = 0; }
     bool Advance(uint64_t now, unsigned fps, double& elapsed)
     {

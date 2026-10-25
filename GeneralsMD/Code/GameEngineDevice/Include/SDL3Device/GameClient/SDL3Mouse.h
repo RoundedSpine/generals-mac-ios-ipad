@@ -100,8 +100,6 @@ private:
 	static const UnsignedInt MAX_SDL3_MOUSE_EVENTS = 256;
 	
 	SDL_Event m_eventBuffer[MAX_SDL3_MOUSE_EVENTS];
-	// GeneralsX @feature Codex 25/10/2026 Diagnostic enqueue times are separate from gameplay event timestamps.
-	Uint64 m_eventEnqueueTicks[MAX_SDL3_MOUSE_EVENTS] = {};
 	UnsignedInt m_nextFreeIndex;  // Write position (insert new events here)
 	UnsignedInt m_nextGetIndex;   // Read position (retrieve events from here)
 

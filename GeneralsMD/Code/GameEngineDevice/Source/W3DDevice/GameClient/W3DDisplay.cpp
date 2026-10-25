@@ -35,9 +35,6 @@ static void drawFramerateBar();
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <numeric>
-
-// GeneralsX @feature Codex 25/10/2026 Refine device hitch attribution without changing update order.
-#include "slowoperation.h"
 #include <stdlib.h>
 #include <windows.h>
 // GeneralsX @bugfix BenderAI 13/02/2026 - io.h is Windows-specific, use unistd.h on Linux
@@ -2061,7 +2058,7 @@ AGAIN:
 	WW3D::Update_Logic_Frame_Time(TheFramePacer->getLogicTimeStepMilliseconds());
 
 	// TheSuperHackers @info This binds the WW3D update to the logic update.
-	{ SlowOperationTrace trace("render-sync", nullptr, 20.0); WW3D::Sync(TheGameLogic->hasUpdated()); }
+	WW3D::Sync(TheGameLogic->hasUpdated());
 
 	static Int now;
 	now=timeGetTime();
@@ -2100,11 +2097,11 @@ AGAIN:
 			//Can't render into textures while rendering to screen so these textures need to be updated
 			//before we enter main rendering loop.
 			if (TheW3DProjectedShadowManager)
-				{ SlowOperationTrace trace("render-shadow-targets", nullptr, 20.0); TheW3DProjectedShadowManager->updateRenderTargetTextures(); }
+				TheW3DProjectedShadowManager->updateRenderTargetTextures();
 		}
 
 		// Switch to offscreen RT AFTER pre-render (shadows/water) completes, BEFORE main render.
-		{ SlowOperationTrace trace("render-offscreen-target", nullptr, 20.0); DX8Wrapper::Pillarbox_Begin(); }
+		DX8Wrapper::Pillarbox_Begin();
 
 		Debug_Statistics::End_Statistics();	//record number of polygons rendered in RenderTargetTextures.
 
@@ -2129,7 +2126,7 @@ AGAIN:
 					TheInGameUI->draw();
 					if( TheMouse )
 						TheMouse->draw();	//keep applying the current cursor style so it remains hidden if needed.
-					{ SlowOperationTrace trace("render-end", nullptr, 20.0); WW3D::End_Render(); }
+					WW3D::End_Render();
 					continue;
 				}
 				couldRender = true;
@@ -2138,10 +2135,10 @@ AGAIN:
 					Debug_Statistics::Record_DX8_Polys_And_Vertices(numRenderTargetPolygons,numRenderTargetVertices,ShaderClass::_PresetOpaqueShader);
 
 				// draw all views of the world
-				{ SlowOperationTrace trace("render-world", nullptr, 20.0); drawViews(); }
+				drawViews();
 
 				// draw the user interface
-				{ SlowOperationTrace trace("render-ui", nullptr, 20.0); TheInGameUI->DRAW(); }
+				TheInGameUI->DRAW();
 
 				// end of video example code
 
@@ -2227,7 +2224,7 @@ AGAIN:
 				}
 #endif
 				// render is all done!
-				{ SlowOperationTrace trace("render-end", nullptr, 20.0); WW3D::End_Render(); }
+				WW3D::End_Render();
 			}
 			else
 			{

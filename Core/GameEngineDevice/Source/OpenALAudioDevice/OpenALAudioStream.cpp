@@ -1,7 +1,4 @@
 #include "OpenALAudioDevice/OpenALAudioStream.h"
-
-// GeneralsX @feature Codex 25/10/2026 Refine device hitch attribution without changing update order.
-#include "slowoperation.h"
 #include "OpenALAudioDevice/OpenALAudioManager.h"
 #include <AL/alext.h>
 
@@ -77,7 +74,6 @@ bool OpenALAudioStream::bufferData(uint8_t *data, size_t data_size, ALenum forma
 
 void OpenALAudioStream::update()
 {
-    SlowOperationTrace trace("audio-stream-refill", nullptr, 20.0);
     ALint sourceState;
     alGetSourcei(m_source, AL_SOURCE_STATE, &sourceState);
 

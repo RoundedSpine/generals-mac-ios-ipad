@@ -28,10 +28,7 @@
 
 #ifndef _WIN32
 
-#include "slowoperation.h"
 
-// GeneralsX @feature Codex 25/10/2026 Trace input latency and queue pressure without changing dispatch.
-#include "inputtiming.h"
 #include "SDL3GameEngine.h"
 #include "OpenALAudioManager.h"
 #include "SDL3Device/GameClient/SDL3Mouse.h"
@@ -68,9 +65,6 @@ extern GameWindowManager *TheWindowManager;
 
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #include <atomic>
-#include "touchqueuetiming.h"
-#include "uikittouchtiming.h"
-#include "nativeframetrace.h"
 
 // ---------------------------------------------------------------------------
 // iOS app lifecycle
@@ -103,7 +97,6 @@ static inline bool iosShouldPauseRendering()
 
 static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 {
-	bool lifecycleEvent = true;
 	switch (event->type) {
 		case SDL_EVENT_WILL_ENTER_BACKGROUND:
 		case SDL_EVENT_DID_ENTER_BACKGROUND:
@@ -123,57 +116,9 @@ static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 			s_appInactive.store(false);
 			break;
 		default:
-			lifecycleEvent = false;
 			break;
 	}
-	if (lifecycleEvent) TraceNativeLifecycle(event->type, (s_appBackgrounded.load() ? 1u : 0u) | (s_appInactive.load() ? 2u : 0u), SDL_GetTicksNS());
 	return true;
-}
-
-// GeneralsX @feature Codex 25/10/2026 Separate upstream touch delivery delay from SDL queue residence.
-static TouchQueueTiming s_touchQueueTiming;
-static UIKitTouchTiming s_uikitTouchTiming;
-static void recordUIKitTouch(const GXUIKitTouchSample* sample)
-{
-	if (sample) s_uikitTouchTiming.Record(*sample);
-}
-static GXUIKitTouchProbe s_uikitTouchProbe{recordUIKitTouch};
-static bool s_touchQueueWatchInstalled = false;
-
-static bool SDLCALL iosTouchQueueWatcher(void*, SDL_Event* event)
-{
-	switch (event->type) {
-		case SDL_EVENT_FINGER_DOWN:
-		case SDL_EVENT_FINGER_MOTION:
-		case SDL_EVENT_FINGER_UP:
-		case SDL_EVENT_FINGER_CANCELED:
-			s_touchQueueTiming.Record(event->type, event->common.timestamp,
-			                         static_cast<uint64_t>(event->tfinger.fingerID),
-			                         static_cast<uint64_t>(event->tfinger.touchID), SDL_GetTicksNS());
-			break;
-		default:
-			break;
-	}
-	return true; // SDL ignores watcher return values; do not filter or modify events.
-}
-
-static void tracePolledTouchQueue(const SDL_Event& event)
-{
-	const Uint64 polled = SDL_GetTicksNS();
-	TouchQueueTiming::Entry entry;
-	uint64_t overwritten = 0;
-	const bool matched = s_touchQueueTiming.Take(event.type, event.common.timestamp,
-	                     static_cast<uint64_t>(event.tfinger.fingerID),
-	                     static_cast<uint64_t>(event.tfinger.touchID), entry, overwritten);
-	GXUIKitTouchSample native;
-	uint64_t nativeOverwritten = 0;
-	const bool nativeMatched = s_uikitTouchTiming.Take(event.type, event.common.timestamp,
-	                          static_cast<uint64_t>(event.tfinger.fingerID), native, nativeOverwritten);
-	TraceUIKitTouchTiming(nativeMatched ? &native : nullptr, event.type, event.common.timestamp,
-	                     polled, matched ? entry.arrival : 0, nativeOverwritten,
-	                     event.type != SDL_EVENT_FINGER_MOTION);
-	TraceTouchQueueTiming(matched ? &entry : nullptr, event.type, event.common.timestamp,
-	                     polled, overwritten, event.type != SDL_EVENT_FINGER_MOTION);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,13 +446,6 @@ SDL3GameEngine::SDL3GameEngine()
  */
 SDL3GameEngine::~SDL3GameEngine()
 {
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-	SDL_ClearProperty(SDL_GetGlobalProperties(), GX_UIKIT_TOUCH_PROBE_PROPERTY);
-	if (s_touchQueueWatchInstalled) {
-		SDL_RemoveEventWatch(iosTouchQueueWatcher, nullptr);
-		s_touchQueueWatchInstalled = false;
-	}
-#endif
 	if (m_SDLWindow && m_IsTextInputActive) {
 		SDL_StopTextInput(m_SDLWindow);
 		m_IsTextInputActive = false;
@@ -561,17 +499,6 @@ void SDL3GameEngine::init(void)
 	// Lifecycle events can fire outside the poll cycle on iOS; catch them
 	// immediately so rendering halts before the process is suspended.
 	SDL_AddEventWatch(iosLifecycleWatcher, nullptr);
-	const bool nativeProbeInstalled = SDL_SetPointerProperty(SDL_GetGlobalProperties(),
-	                                 GX_UIKIT_TOUCH_PROBE_PROPERTY, &s_uikitTouchProbe);
-	fprintf(stderr, "[UIKIT_TOUCH] bridge installed=%d; upstream event pump retained\n", nativeProbeInstalled ? 1 : 0);
-	if (!nativeProbeInstalled) fprintf(stderr, "[UIKIT_TOUCH] bridge error: %s\n", SDL_GetError());
-	if (!s_touchQueueWatchInstalled) {
-		s_touchQueueWatchInstalled = SDL_AddEventWatch(iosTouchQueueWatcher, nullptr);
-		fprintf(stderr, "[TOUCH_QUEUE] watcher installed=%d\n", s_touchQueueWatchInstalled ? 1 : 0);
-		if (!s_touchQueueWatchInstalled) {
-			fprintf(stderr, "[TOUCH_QUEUE] watcher error: %s\n", SDL_GetError());
-		}
-	}
 #endif
 
 	fprintf(stderr, "INFO: SDL3GameEngine using pre-initialized window\n");
@@ -610,8 +537,6 @@ void SDL3GameEngine::update(void)
 		return;
 	}
 #endif
-	// GeneralsX @feature Codex 25/10/2026 Correlate long active frames with texture-worker timings.
-	SlowOperationTrace trace("game-update");
 	GameEngine::update();
 }
 
@@ -656,13 +581,6 @@ void SDL3GameEngine::setIsActive(Bool isActive)
  */
 void SDL3GameEngine::pollSDL3Events(void)
 {
-	SlowOperationTrace pollTrace(m_UsesNativeCallbacks ? "input-frame-service" : "input-poll", nullptr, 20.0);
-	static Uint64 lastPoll = 0;
-	const Uint64 now = SDL_GetTicksNS();
-	if (lastPoll && now >= lastPoll && now - lastPoll >= 100000000) {
-		TraceInputTiming(m_UsesNativeCallbacks ? "callback-frame-gap" : "poll-gap", 0, lastPoll, now, 0, true);
-	}
-	lastPoll = now;
 	if (!m_SDLWindow) {
 		return;
 	}
@@ -792,14 +710,9 @@ void SDL3GameEngine::processSDL3Event(SDL_Event event)
 		case SDL_EVENT_FINGER_MOTION:
 		case SDL_EVENT_FINGER_UP:
 		case SDL_EVENT_FINGER_CANCELED:
-			tracePolledTouchQueue(event);
-			TraceInputTiming("touch-delivery", event.type, event.common.timestamp,
-			                 SDL_GetTicksNS(), 0,
-			                 event.type != SDL_EVENT_FINGER_MOTION, static_cast<int>(s_touch.phase));
 			if (TheMouse && m_SDLWindow) {
 				SDL3Mouse* mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
 				if (mouse) {
-					SlowOperationTrace touchTrace("touch-translate", nullptr, 20.0);
 					handleTouchEvent(mouse, m_SDLWindow, event);
 				}
 			}
@@ -838,16 +751,6 @@ void SDL3GameEngine::drainNativeEvents()
 		if (pending.event.type == SDL_EVENT_TEXT_INPUT) pending.event.text.text = pending.text.c_str();
 		processSDL3Event(pending.event);
 	}
-}
-
-// GeneralsX @feature Codex 25/10/2026 Expose diagnostic pause reasons without changing lifecycle decisions.
-unsigned SDL3GameEngine::nativePauseReasons() const
-{
-#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-	return (s_appBackgrounded.load() ? 1u : 0u) | (s_appInactive.load() ? 2u : 0u);
-#else
-	return 0;
-#endif
 }
 
 Bool SDL3GameEngine::nativeFrameReady()

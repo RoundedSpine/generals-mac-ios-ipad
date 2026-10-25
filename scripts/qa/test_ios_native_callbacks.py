@@ -3,7 +3,7 @@
 # GeneralsX @test Codex 25/10/2026 Validate callback ownership, pacing and lifecycle before device comparison.
 from pathlib import Path
 import unittest
-from test_hitch_diagnostics import run_cpp, ROOT
+from compiled_harness import run_cpp, ROOT
 
 MAIN = ROOT / 'GeneralsMD/Code/Main/SDL3Main.cpp'
 ENGINE = ROOT / 'GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp'
@@ -49,8 +49,6 @@ int main() {
             'SDL_AppResult SDLCALL SDL_AppIterate(', 'void SDLCALL SDL_AppQuit('])
         run_cpp(r'''
 #include "nativeframecadence.h"
-#include "nativeframetrace.h"
-#include "slowoperation.h"
 #include <cassert>
 #include <cstdio>
 #include <stdexcept>
@@ -69,7 +67,6 @@ struct SDL3GameEngine {
  bool quitting=false,ready=true,throwFrame=false,throwEvent=false;int events=0,frames=0;std::vector<SDL_Event> pending;
  bool getQuitting() { return quitting; }
  bool nativeFrameReady() { return ready; }
- unsigned nativePauseReasons() const { return ready ? 0u : 2u; }
  bool deferNativeEvent(const SDL_Event& e) { pending.push_back(e);return true; }
  void processSDL3Event(SDL_Event) { if(throwEvent)throw std::runtime_error("event");++events; }
  void drainNativeEvents() { assert(onMain);for(auto e:pending)processSDL3Event(e);pending.clear(); }
@@ -83,7 +80,6 @@ void ShutdownSDL3Launcher(int code) { launcherExit=code; }
 void test_exit(int) { throw std::runtime_error("exit"); }
 #define _exit test_exit
 NativeFrameCadence s_nativeCadence;
-NativeFrameTrace s_nativeFrameTrace;
 BODY
 int main() {
  void* state=&engine;initResult=1;
@@ -145,14 +141,10 @@ int main() {
     def test_actual_frame_input_service_skips_manual_polling_in_native_mode(self):
         body = function(ENGINE.read_text(), 'void SDL3GameEngine::pollSDL3Events(')
         run_cpp(r'''
-#include "slowoperation.h"
 #include <cassert>
 #define TARGET_OS_IPHONE 1
-using Uint64=uint64_t;
 struct SDL_Event {};
 int polls=0,longPress=0;bool haveEvent=true;
-uint64_t SDL_GetTicksNS() { return 1000000000; }
-void TraceInputTiming(const char*,unsigned,uint64_t,uint64_t,unsigned,bool) {}
 bool SDL_PollEvent(SDL_Event*) { ++polls;if(haveEvent){haveEvent=false;return true;}return false; }
 struct Mouse { virtual ~Mouse(){} };struct SDL3Mouse:Mouse {} mouse;Mouse* TheMouse=&mouse;
 void updateTouchLongPress(SDL3Mouse*,void*) { ++longPress; }
@@ -169,70 +161,56 @@ int main() {
 }
 '''.replace('BODY', body))
 
-    def test_frame_trace_distinguishes_outside_gap_pause_and_long_callback(self):
-        result = run_cpp(r'''#include "nativeframetrace.h"
-uint64_t now=1000000000;
-uint64_t clockNow() { return now; }
-int main() {
- NativeFrameTrace trace;
- { NativeFrameTrace::Scope scope(trace,clockNow);trace.Update(now,0,60,now+16666666);now+=1000000; }
- now+=2000000000;
- { NativeFrameTrace::Scope scope(trace,clockNow);trace.Gate(now,true,2,0,0);now+=1000000; }
- now+=16000000;
- { NativeFrameTrace::Scope scope(trace,clockNow);trace.Gate(now,true,2,0,0);now+=1000000; }
- now+=16000000;
- { NativeFrameTrace::Scope scope(trace,clockNow);trace.Update(now,0,60,now+16666666);now+=200000000; }
-}
-''')
-        self.assertIn('phase=callback-gap', result.stderr)
-        self.assertIn('outside_ms=2000.00', result.stderr)
-        self.assertIn('phase=gate-change', result.stderr)
-        self.assertIn('reason=lifecycle pause_bits=2', result.stderr)
-        self.assertIn('phase=update-resumed', result.stderr)
-        self.assertIn('phase=callback-long', result.stderr)
-
-    def test_frame_gate_and_lifecycle_output_have_separate_caps(self):
-        result = run_cpp(r'''#include "nativeframetrace.h"
-int main() {
- NativeFrameTrace trace;
- trace.Enter(1000000000);trace.Update(1000000000,0,1,2000000000);trace.Exit(1000000000);
- trace.Enter(1200000000);trace.Gate(1200000000,false,0,1,2000000000);trace.Exit(1200000000);
- for(uint64_t i=2;i<400;++i) {
-   uint64_t now=1000000000+i*1000000000;
-   trace.Enter(now);trace.Gate(now,false,0,1,now+1000000000);trace.Exit(now);
- }
- for(int i=0;i<70;++i) TraceNativeLifecycle(10,2,1000000000+i);
-}
-''')
-        self.assertIn('phase=update-skipped', result.stderr)
-        self.assertIn('reason=cadence pause_bits=0 fps=1 deadline_ns=2000000000', result.stderr)
-        self.assertEqual(result.stderr.count('[NATIVE_FRAME] t='), 256)
-        self.assertEqual(result.stderr.count('further frame messages suppressed'), 1)
-        self.assertEqual(result.stderr.count('[NATIVE_LIFECYCLE] t='), 64)
-        self.assertEqual(result.stderr.count('further lifecycle messages suppressed'), 1)
-
-    def test_actual_lifecycle_watcher_keeps_atomic_pause_decisions(self):
-        body = function(ENGINE.read_text(), 'static bool SDLCALL iosLifecycleWatcher(')
-        result = run_cpp(r'''#include "nativeframetrace.h"
-#include <cassert>
-#define SDLCALL
-struct SDL_Event { unsigned type; };
-enum { SDL_EVENT_WILL_ENTER_BACKGROUND=1,SDL_EVENT_DID_ENTER_BACKGROUND,
- SDL_EVENT_DID_ENTER_FOREGROUND,SDL_EVENT_WINDOW_FOCUS_LOST,SDL_EVENT_WINDOW_FOCUS_GAINED };
-std::atomic<bool> s_appBackgrounded{false},s_appInactive{false};
-uint64_t SDL_GetTicksNS() { return 1000000000; }
+    def test_actual_touch_translator_defers_taps_and_distinguishes_long_press(self):
+        source = (ROOT / 'GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp').read_text()
+        start = source.index('struct TouchState {')
+        body = source[start:source.index('} // anonymous namespace', start)]
+        result = run_cpp(r'''#include <cassert>
+#include <cmath>
+#include <cstring>
+#include <vector>
+using Uint64=unsigned long long; using Uint32=unsigned; using Uint8=unsigned char;
+using SDL_FingerID=long long; using SDL_WindowID=unsigned;
+enum { SDL_EVENT_FINGER_DOWN=1, SDL_EVENT_FINGER_UP, SDL_EVENT_FINGER_MOTION,
+       SDL_EVENT_FINGER_CANCELED, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_BUTTON_DOWN,
+       SDL_EVENT_MOUSE_BUTTON_UP, SDL_EVENT_MOUSE_WHEEL, SDL_BUTTON_LEFT=10, SDL_BUTTON_RIGHT=11 };
+struct SDL_Window {};
+struct SDL_Event {
+  unsigned type=0;
+  struct { long long fingerID=0; float x=0,y=0; } tfinger;
+  struct { unsigned windowID=0; float x=0,y=0; } motion;
+  struct { unsigned windowID=0; unsigned char button=0; bool down=false; int clicks=0; float x=0,y=0; } button;
+  struct { unsigned windowID=0; float x=0,y=0,mouse_x=0,mouse_y=0; } wheel;
+};
+#define SDL_zero(x) x = SDL_Event{}
+Uint64 ticks=100;
+Uint64 SDL_GetTicks() { return ticks; }
+void SDL_GetWindowSize(SDL_Window*, int* w,int* h) { *w=1000;*h=500; }
+unsigned SDL_GetWindowID(SDL_Window*) { return 1; }
+float SDL_sqrtf(float x) { return std::sqrt(x); }
+float SDL_fabsf(float x) { return std::fabs(x); }
+struct SDL3Mouse { std::vector<SDL_Event> events; void addSDLEvent(SDL_Event* e) { events.push_back(*e); } };
 BODY
 int main() {
- SDL_Event e{SDL_EVENT_WILL_ENTER_BACKGROUND};assert(iosLifecycleWatcher(nullptr,&e));assert(s_appBackgrounded && !s_appInactive);
- e.type=SDL_EVENT_WINDOW_FOCUS_LOST;iosLifecycleWatcher(nullptr,&e);assert(s_appBackgrounded && s_appInactive);
- e.type=SDL_EVENT_DID_ENTER_FOREGROUND;iosLifecycleWatcher(nullptr,&e);assert(!s_appBackgrounded && s_appInactive);
- e.type=SDL_EVENT_WINDOW_FOCUS_GAINED;iosLifecycleWatcher(nullptr,&e);assert(!s_appBackgrounded && !s_appInactive);
- e.type=99;assert(iosLifecycleWatcher(nullptr,&e));
+ SDL3Mouse mouse; SDL_Window window; SDL_Event finger;
+ finger.type=SDL_EVENT_FINGER_DOWN; finger.tfinger.fingerID=1; finger.tfinger.x=.5f;finger.tfinger.y=.5f;
+ handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==1 && mouse.events[0].type==SDL_EVENT_MOUSE_MOTION);
+ ticks+=100; updateTouchLongPress(&mouse,&window); assert(mouse.events.size()==1);
+ finger.type=SDL_EVENT_FINGER_UP;handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==4 && mouse.events[2].button.button==SDL_BUTTON_LEFT && !mouse.events[3].button.down);
+ mouse.events.clear();finger.type=SDL_EVENT_FINGER_DOWN;handleTouchEvent(&mouse,&window,finger);
+ ticks+=599; updateTouchLongPress(&mouse,&window); assert(mouse.events.size()==1);
+ ticks+=1;updateTouchLongPress(&mouse,&window);
+ assert(mouse.events.size()==4 && mouse.events[2].button.button==SDL_BUTTON_RIGHT);
+ finger.type=SDL_EVENT_FINGER_UP;handleTouchEvent(&mouse,&window,finger);assert(mouse.events.size()==4);
+ mouse.events.clear();finger.type=SDL_EVENT_FINGER_DOWN;handleTouchEvent(&mouse,&window,finger);
+ finger.type=SDL_EVENT_FINGER_CANCELED;handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==1 && s_touch.phase==TouchState::IDLE);
 }
 '''.replace('BODY', body))
-        self.assertEqual(result.stderr.count('[NATIVE_LIFECYCLE]'), 4)
-        for flags in range(4):
-            self.assertIn('pause_bits=' + str(flags), result.stderr)
+        self.assertEqual(result.returncode, 0)
+
 
     def test_shared_engine_lifecycle_retains_desktop_and_replay_paths(self):
         source = (ROOT / 'GeneralsMD/Code/GameEngine/Source/Common/GameMain.cpp').read_text()

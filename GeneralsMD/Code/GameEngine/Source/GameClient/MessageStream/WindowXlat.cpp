@@ -48,11 +48,6 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
-// GeneralsX @feature Codex 25/10/2026 Trace UI input delivery and gates without changing behavior.
-#ifdef _UNIX
-#include "inputtiming.h"
-#endif
-
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/MessageStream.h"
 #include "GameClient/GameWindowManager.h"
@@ -175,20 +170,6 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 	GameMessageDisposition disp = KEEP_MESSAGE;
 	Bool forceKeepMessage = FALSE;
 	WinInputReturnCode returnCode = WIN_INPUT_NOT_USED;
-
-#ifdef _UNIX
-	const Bool traceButton = msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN ||
-	                        msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP ||
-	                        msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN ||
-	                        msg->getType() == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_UP;
-	if (traceButton) {
-		const int gates = ((TheTacticalView && TheTacticalView->isMouseLocked()) ? 1 : 0) |
-		                  ((TheInGameUI && TheInGameUI->isScrolling()) ? 2 : 0) |
-		                  ((TheInGameUI && !TheInGameUI->getInputEnabled()) ? 4 : 0) |
-		                  ((TheShell && TheShell->isShellActive()) ? 8 : 0);
-		TraceInputTiming("window-translator", static_cast<unsigned>(msg->getType()), 0, 0, 0, true, gates);
-	}
-#endif
 
 	if (TheTacticalView && TheTacticalView->isMouseLocked())
 	{

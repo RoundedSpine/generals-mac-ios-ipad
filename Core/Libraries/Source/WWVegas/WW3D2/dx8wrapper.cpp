@@ -50,8 +50,6 @@
 #define WINVER 0x0500 // Required to access GetMonitorInfo in VC6.
 #endif
 
-// GeneralsX @feature Codex 25/10/2026 Correlate long subsystem and presentation calls with texture timings.
-#include "slowoperation.h"
 #include "dx8wrapper.h"
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -2046,10 +2044,7 @@ void DX8Wrapper::End_Scene(bool flip_frames)
 		HRESULT hr;
 		{
 			WWPROFILE("DX8Device::Present()");
-			{
-				SlowOperationTrace presentTrace("gpu-present");
-				hr=_Get_D3D_Device8()->Present(nullptr, nullptr, nullptr, nullptr);
-			}
+			hr=_Get_D3D_Device8()->Present(nullptr, nullptr, nullptr, nullptr);
 		}
 
 		DX8_RECORD_DX8_CALLS();
@@ -2125,10 +2120,7 @@ void DX8Wrapper::Flip_To_Primary()
 				}
 			} else {
 				WWDEBUG_SAY(("Flipping: %ld", FrameCount));
-				{
-				SlowOperationTrace presentTrace("gpu-present");
 				hr = _Get_D3D_Device8()->Present(nullptr, nullptr, nullptr, nullptr);
-			}
 
 				if (SUCCEEDED(hr)) {
 					IsDeviceLost=false;

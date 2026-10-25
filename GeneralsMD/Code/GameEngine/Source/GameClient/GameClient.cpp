@@ -29,9 +29,6 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <stdexcept>
-
-// GeneralsX @feature Codex 25/10/2026 Refine device hitch attribution without changing update order.
-#include "slowoperation.h"
 #include <cstdio>
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 #include "GameClient/GameClient.h"
@@ -615,7 +612,7 @@ void GameClient::update()
 	}
 
 	// Update the Eva stuff
-	{ SlowOperationTrace trace("client-eva", nullptr, 20.0); TheEva->UPDATE(); }
+	TheEva->UPDATE();
 
 	// update the mouse
 	if( TheMouse )
@@ -640,19 +637,19 @@ void GameClient::update()
 	if(TheGlobalData->m_playIntro || TheGlobalData->m_afterIntro)
 	{
 		// redraw all views, update the GUI
-		{ SlowOperationTrace trace("client-display-update", nullptr, 20.0); TheDisplay->UPDATE(); }
-		{ SlowOperationTrace trace("client-display-draw", nullptr, 20.0); TheDisplay->DRAW(); }
+		TheDisplay->UPDATE();
+		TheDisplay->DRAW();
 		return;
 	}
 
 	// update the window system itself
 	{
-		{ SlowOperationTrace trace("client-windows", nullptr, 20.0); TheWindowManager->UPDATE(); }
+		TheWindowManager->UPDATE();
 	}
 
 	// update the video player
 	{
-		{ SlowOperationTrace trace("client-video", nullptr, 20.0); TheVideoPlayer->UPDATE(); }
+		TheVideoPlayer->UPDATE();
 	}
 
 	const Bool freezeTime = TheGameEngine->isTimeFrozen() || TheGameEngine->isGameHalted();
@@ -661,7 +658,6 @@ void GameClient::update()
 
 	if (!freezeTime)
 	{
-		SlowOperationTrace trace("client-drawables", nullptr, 20.0);
 		Int numPlayers = ThePlayerList->getPlayerCount();
 		Int numNonLocalPlayers = 0;
 		Int nonLocalPlayerIndices[MAX_PLAYER_COUNT];
@@ -763,12 +759,12 @@ void GameClient::update()
 
 	// update the terrain visuals
 	{
-		{ SlowOperationTrace trace("client-terrain", nullptr, 20.0); TheTerrainVisual->UPDATE(); }
+		TheTerrainVisual->UPDATE();
 	}
 
 	// update display
 	{
-		{ SlowOperationTrace trace("client-display-update", nullptr, 20.0); TheDisplay->UPDATE(); }
+		TheDisplay->UPDATE();
 	}
 
 	{
@@ -777,22 +773,22 @@ void GameClient::update()
 	// redraw all views, update the GUI
 	//if(TheGameLogic->getFrame() >= 2)
 
-		{ SlowOperationTrace trace("client-display-draw", nullptr, 20.0); TheDisplay->DRAW(); }
+		TheDisplay->DRAW();
 	}
 
 	{
 		// let display string factory handle its update
-		{ SlowOperationTrace trace("client-display-strings", nullptr, 20.0); TheDisplayStringManager->update(); }
+		TheDisplayStringManager->update();
 	}
 
 	{
 		// update the shell
-		{ SlowOperationTrace trace("client-shell", nullptr, 20.0); TheShell->UPDATE(); }
+		TheShell->UPDATE();
 	}
 
 	{
 		// update the in game UI
-		{ SlowOperationTrace trace("client-ui", nullptr, 20.0); TheInGameUI->UPDATE(); }
+		TheInGameUI->UPDATE();
 	}
 }
 
