@@ -157,3 +157,17 @@ we need gameplay timings. Nested durations overlap, and a long frame-pacing
 entry may be intentional when FPS is capped low. Diagnostics do not constitute
 a performance fix or establish that the texture worker caused the pauses.
 See the [investigation](../WORKDIR/audit/IOS_GAMEPLAY_HITCH_INVESTIGATION_2026-10-25.md).
+
+
+## UIKit touch-delivery experiment
+
+The current diagnostic IPA includes an iOS-only SDL default-run-loop pump
+experiment: one requested 1 ms slice with continued source handling, replacing
+the original 2 microsecond early-return slices. This is unverified on the phone
+and can add frame time; it is not a confirmed performance fix. The startup log
+contains `[IOS_EVENT_PUMP]`. `[TOUCH_QUEUE]` retains separate upstream and SDL
+queue ages. After installing, reproduce the delayed clicks on the main menu
+and share the log immediately, along with whether responsiveness changed.
+The [input review](../WORKDIR/audit/IOS_DELAYED_INPUT_SYSTEM_REVIEW_2026-10-25.md)
+explains the evidence and limitations. The experiment is applied only to the
+iOS SDL FetchContent dependency; Linux/macOS builds keep upstream behavior.

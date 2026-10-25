@@ -23,10 +23,19 @@ if(SAGE_USE_SDL3)
     set(SDL3_URL "https://github.com/libsdl-org/SDL/releases/download/release-${SDL3_VERSION}/SDL3-${SDL3_VERSION}.tar.gz")
     set(SDL3_URL_HASH "SHA256=ef39a2e3f9a8a78296c40da701967dd1b0d0d6e267e483863ce70f8a03b4050c")
     
+    # GeneralsX @build Codex 25/10/2026 Keep the touch-delivery experiment restricted to iOS.
+    set(_sdl3_ios_patch_args)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        list(APPEND _sdl3_ios_patch_args PATCH_COMMAND
+            "${CMAKE_COMMAND}" "-DSDL3_SOURCE_DIR=<SOURCE_DIR>"
+            -P "${CMAKE_CURRENT_LIST_DIR}/patch-sdl3-ios-event-pump.cmake")
+    endif()
+
     FetchContent_Declare(
         SDL3
         URL ${SDL3_URL}
         URL_HASH ${SDL3_URL_HASH}
+        ${_sdl3_ios_patch_args}
     )
     
     # Configure SDL3 build options
