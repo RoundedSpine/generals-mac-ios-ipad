@@ -1,5 +1,8 @@
 #include "OpenALAudioCache.h"
 
+// GeneralsX @feature Codex 25/10/2026 Refine device hitch attribution without changing update order.
+#include "slowoperation.h"
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
@@ -21,6 +24,7 @@ OpenALAudioFileCache::OpenALAudioFileCache() : m_maxSize(14*1024*1024), m_curren
 
 Bool OpenALAudioFileCache::decodeFFmpeg(OpenAudioFile* file)
 {
+	SlowOperationTrace trace("audio-sample-decode", nullptr, 20.0);
 	std::vector<uint8_t> audioData;
 	auto on_frame = [&audioData](AVFrame* frame, int stream_idx, int stream_type, void* user_data) {
 		OpenAudioFile* file = static_cast<OpenAudioFile*>(user_data);
@@ -118,6 +122,7 @@ ALuint OpenALAudioFileCache::getBufferForFile(const OpenFileInfo &fileInfo)
 		}
 	}
 
+	SlowOperationTrace trace("audio-sample-cache", strToFind.str(), 20.0);
 	auto it = m_openFiles.find(strToFind);
 
 	if (it != m_openFiles.end()) {

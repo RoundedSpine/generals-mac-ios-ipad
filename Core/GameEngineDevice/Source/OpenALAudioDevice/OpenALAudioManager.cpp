@@ -39,6 +39,9 @@
 /*---------------------------------------------------------------------------*/
 
 #include "Lib/BaseType.h"
+
+// GeneralsX @feature Codex 25/10/2026 Refine device hitch attribution without changing update order.
+#include "slowoperation.h"
 #include "OpenALAudioDevice/OpenALAudioManager.h"
 #include "OpenALAudioDevice/OpenALAudioStream.h"
 #include "OpenALAudioCache.h"
@@ -543,12 +546,12 @@ void OpenALAudioManager::reset()
 //-------------------------------------------------------------------------------------------------
 void OpenALAudioManager::update()
 {
-	AudioManager::update();
-	setDeviceListenerPosition();
-	processRequestList();
-	processPlayingList();
-	processFadingList();
-	processStoppedList();
+	{ SlowOperationTrace trace("audio-base", nullptr, 20.0); AudioManager::update(); }
+	{ SlowOperationTrace trace("audio-listener", nullptr, 20.0); setDeviceListenerPosition(); }
+	{ SlowOperationTrace trace("audio-requests", nullptr, 20.0); processRequestList(); }
+	{ SlowOperationTrace trace("audio-playing", nullptr, 20.0); processPlayingList(); }
+	{ SlowOperationTrace trace("audio-fading", nullptr, 20.0); processFadingList(); }
+	{ SlowOperationTrace trace("audio-stopped", nullptr, 20.0); processStoppedList(); }
 }
 
 //-------------------------------------------------------------------------------------------------

@@ -88,3 +88,27 @@ previous log if the current launch overwrote it). Record which map, approximate
 time since gameplay started, whether the camera was moving, and whether the
 same behavior occurs on the older working IPA. This lets us target a measured
 bottleneck rather than changing several unrelated systems at once.
+
+## First USA mission: device log follow-up
+
+The supplied 35,353-byte generals-stderr.log records client-update 119.18 ms,
+audio-update 52.05 ms and GPU presentation 68.28/104.17 ms. Logic updates of
+1765.70, 2210.29 and 1329.76 ms occur near startup/reset/score-screen activity;
+these are not established as normal gameplay stalls. No texture timing or
+network-update records occur. Only two worker starts are present. The texture
+worker reports requested -4, policy 1, applied 27, result 0: the scheduler call
+succeeded, which does not establish effective background QoS. Missing
+exredsmokepuff.tga is reported once. Shutdown is orderly with exit code 0.
+Absence of thresholded records does not exclude shorter operations accumulating
+within a frame, or uninstrumented work. This sample does not implicate texture
+lock contention or establish a root cause for every reported freeze.
+
+Follow-up diagnostics split client windows/video/drawables/terrain/display,
+strings/shell/UI/EVA; renderer sync, shadow targets, offscreen target, world,
+UI and End_Render; and the active Core OpenAL backend's base/listener/request/
+playing/fading/stopped stages. Sample cache/decode and stream refill are also
+timed. These finer scopes use 20 ms thresholds and the existing shared bounded
+logger; outer scopes retain 50 ms thresholds. Nested times overlap. No loading,
+rendering, audio or scheduler ordering changes are made. The alternate unused
+GeneralsMD audio stub is deliberately untouched. Local compilation harnesses do
+not replace full iOS compilation or device measurement.

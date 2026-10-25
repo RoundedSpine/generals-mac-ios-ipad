@@ -46,6 +46,30 @@ int main() { for(int i=0;i<1100;++i) { SlowOperationTrace trace("cap", nullptr, 
         self.assertEqual(result.stderr.count('phase=cap'), 1024)
         self.assertEqual(result.stderr.count('further timing messages suppressed'), 1)
 
+    def test_audio_update_preserves_order_and_attributes_slow_requests(self):
+        source = (ROOT / 'Core/GameEngineDevice/Source/OpenALAudioDevice/OpenALAudioManager.cpp').read_text()
+        start = source.index('void OpenALAudioManager::update()')
+        function = source[start:source.index('\n}', start) + 2]
+        result = run_cpp(r'''#include "slowoperation.h"
+#include <cassert>
+int sequence=0;
+struct AudioManager { void update() { assert(sequence++==0); } };
+struct OpenALAudioManager : AudioManager {
+  void update();
+  void setDeviceListenerPosition() { assert(sequence++==1); }
+  void processRequestList() {
+    assert(sequence++==2);
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  }
+  void processPlayingList() { assert(sequence++==3); }
+  void processFadingList() { assert(sequence++==4); }
+  void processStoppedList() { assert(sequence++==5); }
+};
+BODY
+int main() { OpenALAudioManager audio; audio.update(); assert(sequence==6); }
+'''.replace('BODY', function))
+        self.assertIn('phase=audio-requests', result.stderr)
+
     def test_foreground_request_can_block_on_background_decode_lock(self):
         source = (ROOT / 'Core/Libraries/Source/WWVegas/WW3D2/textureloader.cpp').read_text()
         start = source.index('void TextureLoader::Request_Foreground_Loading(')
