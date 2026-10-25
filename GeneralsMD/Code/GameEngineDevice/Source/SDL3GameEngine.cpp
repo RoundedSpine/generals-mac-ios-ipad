@@ -544,7 +544,6 @@ void SDL3GameEngine::init(void)
 	SDL_AddEventWatch(iosLifecycleWatcher, nullptr);
 	if (!s_touchQueueWatchInstalled) {
 		s_touchQueueWatchInstalled = SDL_AddEventWatch(iosTouchQueueWatcher, nullptr);
-		fprintf(stderr, "[IOS_EVENT_PUMP] experimental default-mode slice=1ms return_after_source=false\n");
 		fprintf(stderr, "[TOUCH_QUEUE] watcher installed=%d\n", s_touchQueueWatchInstalled ? 1 : 0);
 		if (!s_touchQueueWatchInstalled) {
 			fprintf(stderr, "[TOUCH_QUEUE] watcher error: %s\n", SDL_GetError());

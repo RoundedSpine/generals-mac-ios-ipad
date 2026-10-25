@@ -178,51 +178,30 @@ calculations, unknown timestamps, bounded output and the actual SDL watcher
 function body preserving event fields. Full SDL/UIKit integration and the
 next device measurements still require the IPA built by macOS CI.
 
-## Queue-boundary result and controlled UIKit pump experiment
+## Rejected UIKit pump experiment: device regression
 
-The next 106,052-byte phone log reports watcher installed=1. All 108 printed
-TOUCH_QUEUE records matched; overwritten=0 and no diagnostic cap was reached.
-Maximum prequeue age was 4106.26 ms, whereas maximum watch-to-poll residence
-was 1.93 ms. A burst contains successive touch-down/up pairs with progressively
-smaller upstream ages (4.1 seconds down to hundreds of milliseconds), then fast
-delivery resumes. No matching multi-second poll gap occurs during that burst.
-This establishes the measured delay before the SDL watcher boundary, rather
-than in the game's mouse ring. It does not distinguish UIKit internals, run-loop
-servicing and OS gesture delivery by itself.
+The 1 ms/no-early-return pump experiment (3b20cb01a) was installed, confirmed by
+its IOS_EVENT_PUMP startup marker. The user reports worse responsiveness. In
+the 94,265-byte log all 88 printed queue records matched with zero overwrites:
+maximum prequeue age 8201.44 ms, queue residence 6.10 ms. Seventy records had
+prequeue age >=500 ms. The preceding upstream-pump sample had 108 matched
+records, maximum prequeue 4106.26 ms, queue residence 1.93 ms and 12 records
+>=500 ms. These are thresholded/unmatched-duration sessions, not a controlled
+latency-distribution benchmark, but both the report and observed bursts reject
+this change as a useful fix. No comparable multi-second processing/polling
+stall explains the burst in this sample.
 
-Inspected the pinned SDL 3.4.2 UIKit app delegate, event pump, touch view and
-view controller. The classic SDL_main path calls the engine inside the app
-delegate's postFinishLaunch call, with UIKit_EventPumpEnabled=true while it
-runs. UIKit_PumpEvents manually services the default and tracking run-loop
-modes in two-microsecond slices, returning after each handled source. The game
-runs a continuous engine loop; frame-limit nanosleep does not service UIKit.
-Touch callbacks preserve OS event timestamps. The upstream SDL development
-branch inspected on 2026-10-25 retains the same pump control flow, so a general
-version bump is not an evidenced solution.
+Reverted the iOS SDL pump modification, its FetchContent hook, startup marker
+and experiment-specific tests/documentation. Retained all touch queue-boundary
+and UI diagnostics. The classic upstream 2 microsecond/return-after-source pump
+is restored. The removed experiment's patch was guarded/idempotent and had
+local stand-in tests; those tests never established device responsiveness.
 
-A **controlled experiment**, not a confirmed root-cause fix, changes the default
-mode pump to one CFRunLoopRunInMode invocation requesting 0.001 seconds with
-returnAfterSourceHandled=false. This allows continued servicing during that
-slice instead of returning immediately for each source. The existing tracking
-mode, lifecycle gate, GL context restoration, gestures, event delivery and
-engine frame loop remain intact. Individual callbacks can exceed the requested
-duration: it is not a hard one-millisecond timeout. An additional wait of roughly
-one millisecond per pump invocation is a possible frame-time cost, especially
-when uncapped; the patch is not claimed to improve rendering performance.
-
-The patch is applied through iOS-only SDL FetchContent PATCH_COMMAND using
-cmake/patch-sdl3-ios-event-pump.cmake. It is idempotent, requires the reviewed
-upstream context and fails configuration on a mismatch. Linux/macOS SDL source
-is not patched. No dependency source files in build/_deps are edited manually.
-The startup marker [IOS_EVENT_PUMP] identifies the experiment; existing paired
-touch measurements remain for comparison. The distinct source patch and build
-marker make this experiment reviewable and reversible.
-
-Tests check idempotence, unchanged tracking mode/unrelated text, rejection of
-unrecognized upstream context, and the patched pump's execution with stubbed CF
-calls (one default slice, unchanged tracking drain, disabled gate respected).
-The patch was also applied to the actual downloaded pinned SDL event source.
-These checks do not execute UIKit or prove that the slice resolves starvation.
-A short main-menu phone reproduction must show whether prequeue bursts disappear;
-if they persist, discard this hypothesis rather than increasing delays blindly
-or claiming success from compilation alone.
+The changed default-mode duration and return behavior were tested together, so
+this does not isolate which change mattered, nor prove starvation or show that
+an even shorter/longer delay would fix it. The strongest established boundary
+remains late delivery before the SDL watcher. Do not increase pump durations
+blindly. A future investigation should examine UIKit callback delivery and the
+classic SDL_main/manual nested run-loop integration, with physical contact/OS
+queue timing distinguished from SDL's translated timestamp. This rollback
+restores the previous behavior; it is not a fix for the original delayed taps.

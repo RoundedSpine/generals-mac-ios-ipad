@@ -44,8 +44,6 @@ Run `python3 scripts/qa/test_unix_worker.py` for compiled worker-lifecycle,
 concurrent texture-queue and shutdown-lock tests.
 Run `python3 scripts/qa/test_hitch_diagnostics.py` for bounded trace checks and
 a controlled foreground/background-lock contention reproduction.
-Run `python3 scripts/qa/test_ios_event_pump.py` for guarded UIKit pump patching
-and compiled CF run-loop stand-in checks (requires CMake and a C++ compiler).
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
