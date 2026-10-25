@@ -112,3 +112,25 @@ logger; outer scopes retain 50 ms thresholds. Nested times overlap. No loading,
 rendering, audio or scheduler ordering changes are made. The alternate unused
 GeneralsMD audio stub is deliberately untouched. Local compilation harnesses do
 not replace full iOS compilation or device measurement.
+
+## Touch responsiveness follow-up
+
+The user reports taps sometimes stop while motion continues, and sometimes the
+scene jumps ahead. This does not establish whether input or whole-frame work
+stalls. Added bounded [INPUT] records sharing HITCH's steady-clock t, with SDL
+source_ns for event correlation and age_ms calculated only within SDL's clock.
+Raw touch down/up/cancel are recorded; motion is recorded only when >=50 ms old.
+The state field captures the gesture phase before dispatch (see TouchState enum for numeric values).
+Mouse button enqueue/consume and all full-buffer drops are recorded; motion
+queue stages are recorded only when old. Queue depth is before the operation.
+Mouse consumption measures queue residence with a separate per-slot enqueue
+time, preserving all gameplay event timestamps. Enqueue/delivery ages use SDL
+source timestamps; synthetic event source timestamps remain unknown (age=-1).
+Raw touch-delivery records must be consulted for upstream latency.
+
+Poll intervals >=100 ms and poll/gesture processing >=20 ms are logged. Poll
+gaps include loading, lifecycle pauses and OS descheduling, so they are not
+proof of a touch-specific fault. SDL timestamps do not measure physical contact
+to OS delivery or final command execution. Down/up events intentionally log even
+when fast; a shared 2048-record limit bounds input output. Existing 8 MB stderr
+limit still applies. No queue, gesture or dispatch policy is changed.

@@ -46,6 +46,25 @@ int main() { for(int i=0;i<1100;++i) { SlowOperationTrace trace("cap", nullptr, 
         self.assertEqual(result.stderr.count('phase=cap'), 1024)
         self.assertEqual(result.stderr.count('further timing messages suppressed'), 1)
 
+    def test_input_age_handles_unknown_future_and_bounded_output(self):
+        result = run_cpp(r'''#include "inputtiming.h"
+int main() {
+  TraceInputTiming("unknown", 1, 0, 100000000, 0);
+  TraceInputTiming("future", 1, 200000000, 100000000, 0);
+  TraceInputTiming("fast", 1, 100000000, 101000000, 0);
+  TraceInputTiming("delayed", 2, 100000000, 175000000, 7);
+  TraceInputTiming("button", 3, 0, 100000000, 4, true);
+  for(int i=0;i<2100;++i) TraceInputTiming("burst", 4, 1, 2, 255, true);
+}
+''')
+        self.assertNotIn('phase=unknown', result.stderr)
+        self.assertNotIn('phase=future', result.stderr)
+        self.assertNotIn('phase=fast', result.stderr)
+        self.assertIn('source_ns=100000000 age_ms=75.00 depth=7', result.stderr)
+        self.assertIn('age_ms=-1.00 depth=4', result.stderr)
+        self.assertEqual(result.stderr.count('phase='), 2048)
+        self.assertEqual(result.stderr.count('further input messages suppressed'), 1)
+
     def test_audio_update_preserves_order_and_attributes_slow_requests(self):
         source = (ROOT / 'Core/GameEngineDevice/Source/OpenALAudioDevice/OpenALAudioManager.cpp').read_text()
         start = source.index('void OpenALAudioManager::update()')

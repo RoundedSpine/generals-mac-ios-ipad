@@ -29,6 +29,9 @@
 #ifndef _WIN32
 
 #include "slowoperation.h"
+
+// GeneralsX @feature Codex 25/10/2026 Trace input latency and queue pressure without changing dispatch.
+#include "inputtiming.h"
 #include "SDL3GameEngine.h"
 #include "OpenALAudioManager.h"
 #include "SDL3Device/GameClient/SDL3Mouse.h"
@@ -583,6 +586,13 @@ void SDL3GameEngine::setIsActive(Bool isActive)
  */
 void SDL3GameEngine::pollSDL3Events(void)
 {
+	SlowOperationTrace pollTrace("input-poll", nullptr, 20.0);
+	static Uint64 lastPoll = 0;
+	const Uint64 now = SDL_GetTicksNS();
+	if (lastPoll && now >= lastPoll && now - lastPoll >= 100000000) {
+		TraceInputTiming("poll-gap", 0, lastPoll, now, 0, true);
+	}
+	lastPoll = now;
 	if (!m_SDLWindow) {
 		return;
 	}
@@ -694,9 +704,13 @@ void SDL3GameEngine::pollSDL3Events(void)
 			case SDL_EVENT_FINGER_MOTION:
 			case SDL_EVENT_FINGER_UP:
 			case SDL_EVENT_FINGER_CANCELED:
+				TraceInputTiming("touch-delivery", event.type, event.common.timestamp,
+				                 SDL_GetTicksNS(), 0,
+				                 event.type != SDL_EVENT_FINGER_MOTION, static_cast<int>(s_touch.phase));
 				if (TheMouse && m_SDLWindow) {
 					SDL3Mouse* mouse = dynamic_cast<SDL3Mouse*>(TheMouse);
 					if (mouse) {
+						SlowOperationTrace touchTrace("touch-translate", nullptr, 20.0);
 						handleTouchEvent(mouse, m_SDLWindow, event);
 					}
 				}

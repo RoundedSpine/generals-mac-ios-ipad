@@ -29,6 +29,9 @@
 
 // GeneralsX @bugfix BenderAI 13/02/2026 Fix include path (fighter19 pattern)
 #include "SDL3Device/GameClient/SDL3Mouse.h"
+
+// GeneralsX @feature Codex 25/10/2026 Trace input latency and queue pressure without changing dispatch.
+#include "inputtiming.h"
 #include <cstdio>
 #include <cstring>
 
@@ -587,6 +590,12 @@ UnsignedByte SDL3Mouse::getMouseEvent(MouseIO *result, Bool flush)
 		return MOUSE_NONE;
 	}
 
+	// Queue residence uses separate diagnostic ticks; preserve gameplay timestamps.
+	const SDL_Event& pending = m_eventBuffer[m_nextGetIndex];
+	TraceInputTiming("mouse-consume", pending.type, m_eventEnqueueTicks[m_nextGetIndex], SDL_GetTicksNS(),
+	                 (m_nextFreeIndex + MAX_SDL3_MOUSE_EVENTS - m_nextGetIndex) % MAX_SDL3_MOUSE_EVENTS,
+	                 pending.type == SDL_EVENT_MOUSE_BUTTON_DOWN || pending.type == SDL_EVENT_MOUSE_BUTTON_UP);
+
 	// Translate SDL_Event to MouseIO
 	// GeneralsX @refactor felipebraz 16/02/2026 Use unified translateEvent()
 	translateEvent(m_nextGetIndex, result);
@@ -842,12 +851,19 @@ void SDL3Mouse::addSDLEvent(SDL_Event *event)
 	// Check if buffer is full
 	UnsignedInt nextFreeIndex = (m_nextFreeIndex + 1) % MAX_SDL3_MOUSE_EVENTS;
 	if (nextFreeIndex == m_nextGetIndex) {
+		TraceInputTiming("mouse-drop-full", event->type, event->common.timestamp, SDL_GetTicksNS(),
+		                 MAX_SDL3_MOUSE_EVENTS - 1, true);
 		// GeneralsX @bugfix BenderAI 18/02/2026 Temporarily disable debug logging (Phase 1.8)
 		// fprintf(stderr, "WARNING: SDL3Mouse::addSDLEvent() buffer full (dropped event)\n");
 		return;
 	}
 
+	TraceInputTiming("mouse-enqueue", event->type, event->common.timestamp, SDL_GetTicksNS(),
+	                 (m_nextFreeIndex + MAX_SDL3_MOUSE_EVENTS - m_nextGetIndex) % MAX_SDL3_MOUSE_EVENTS,
+	                 event->type == SDL_EVENT_MOUSE_BUTTON_DOWN || event->type == SDL_EVENT_MOUSE_BUTTON_UP);
+
 	// Copy entire event to buffer
+	m_eventEnqueueTicks[m_nextFreeIndex] = SDL_GetTicksNS();
 	m_eventBuffer[m_nextFreeIndex] = *event;
 
 	// GeneralsX @bugfix BenderAI 18/02/2026 Temporarily disable debug logging (Phase 1.8)
