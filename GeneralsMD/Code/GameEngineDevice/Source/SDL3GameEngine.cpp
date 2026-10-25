@@ -68,6 +68,7 @@ extern GameWindowManager *TheWindowManager;
 
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #include <atomic>
+#include "touchqueuetiming.h"
 
 // ---------------------------------------------------------------------------
 // iOS app lifecycle
@@ -122,6 +123,39 @@ static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 			break;
 	}
 	return true;
+}
+
+// GeneralsX @feature Codex 25/10/2026 Separate upstream touch delivery delay from SDL queue residence.
+static TouchQueueTiming s_touchQueueTiming;
+static bool s_touchQueueWatchInstalled = false;
+
+static bool SDLCALL iosTouchQueueWatcher(void*, SDL_Event* event)
+{
+	switch (event->type) {
+		case SDL_EVENT_FINGER_DOWN:
+		case SDL_EVENT_FINGER_MOTION:
+		case SDL_EVENT_FINGER_UP:
+		case SDL_EVENT_FINGER_CANCELED:
+			s_touchQueueTiming.Record(event->type, event->common.timestamp,
+			                         static_cast<uint64_t>(event->tfinger.fingerID),
+			                         static_cast<uint64_t>(event->tfinger.touchID), SDL_GetTicksNS());
+			break;
+		default:
+			break;
+	}
+	return true; // SDL ignores watcher return values; do not filter or modify events.
+}
+
+static void tracePolledTouchQueue(const SDL_Event& event)
+{
+	const Uint64 polled = SDL_GetTicksNS();
+	TouchQueueTiming::Entry entry;
+	uint64_t overwritten = 0;
+	const bool matched = s_touchQueueTiming.Take(event.type, event.common.timestamp,
+	                     static_cast<uint64_t>(event.tfinger.fingerID),
+	                     static_cast<uint64_t>(event.tfinger.touchID), entry, overwritten);
+	TraceTouchQueueTiming(matched ? &entry : nullptr, event.type, event.common.timestamp,
+	                     polled, overwritten, event.type != SDL_EVENT_FINGER_MOTION);
 }
 
 // ---------------------------------------------------------------------------
@@ -449,6 +483,12 @@ SDL3GameEngine::SDL3GameEngine()
  */
 SDL3GameEngine::~SDL3GameEngine()
 {
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	if (s_touchQueueWatchInstalled) {
+		SDL_RemoveEventWatch(iosTouchQueueWatcher, nullptr);
+		s_touchQueueWatchInstalled = false;
+	}
+#endif
 	if (m_SDLWindow && m_IsTextInputActive) {
 		SDL_StopTextInput(m_SDLWindow);
 		m_IsTextInputActive = false;
@@ -502,6 +542,13 @@ void SDL3GameEngine::init(void)
 	// Lifecycle events can fire outside the poll cycle on iOS; catch them
 	// immediately so rendering halts before the process is suspended.
 	SDL_AddEventWatch(iosLifecycleWatcher, nullptr);
+	if (!s_touchQueueWatchInstalled) {
+		s_touchQueueWatchInstalled = SDL_AddEventWatch(iosTouchQueueWatcher, nullptr);
+		fprintf(stderr, "[TOUCH_QUEUE] watcher installed=%d\n", s_touchQueueWatchInstalled ? 1 : 0);
+		if (!s_touchQueueWatchInstalled) {
+			fprintf(stderr, "[TOUCH_QUEUE] watcher error: %s\n", SDL_GetError());
+		}
+	}
 #endif
 
 	fprintf(stderr, "INFO: SDL3GameEngine using pre-initialized window\n");
@@ -704,6 +751,7 @@ void SDL3GameEngine::pollSDL3Events(void)
 			case SDL_EVENT_FINGER_MOTION:
 			case SDL_EVENT_FINGER_UP:
 			case SDL_EVENT_FINGER_CANCELED:
+				tracePolledTouchQueue(event);
 				TraceInputTiming("touch-delivery", event.type, event.common.timestamp,
 				                 SDL_GetTicksNS(), 0,
 				                 event.type != SDL_EVENT_FINGER_MOTION, static_cast<int>(s_touch.phase));

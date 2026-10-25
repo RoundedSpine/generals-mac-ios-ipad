@@ -119,3 +119,61 @@ No single cause for the 0.5–3 second input-only delay has been confirmed. A ne
 phone log with these probes during a stationary main-menu reproduction is the
 most direct next evidence; repeat gameplay afterward to check whether the same
 mechanism applies in both contexts.
+
+## Device follow-up: old touches delivered in bursts
+
+The subsequent 324,443-byte log contains 95 touch-delivery records with source
+age >=500 ms before INPUT suppression. Distinct bursts include source ages
+2143.06 ms, 908.97 ms, 2356.86 ms and 6961.57 ms. These are SDL-translated OS
+event timestamp ages, not measurements of physical finger contact. Near the
+2143 ms burst, the mouse ring consumes the generated buttons in about 0.5 ms
+and window routing occurs about eight ms after delivery. There is no matching
+multi-second poll-gap in that interval before the record cap is reached.
+Mouse consumption age peaks at 35.76 ms; no mouse-drop-full record occurs.
+The four mainmenu-selected records have state=0. These observations strongly
+localize the captured burst delay upstream of the game mouse ring, but do not
+yet separate UIKit delivery from SDL queue residence or explain every episode.
+Both INPUT and HITCH caps are eventually reached, limiting later conclusions.
+
+### SDL event-watch boundary diagnostic
+
+Added a separate iOS SDL event watcher before engine subsystem initialization.
+For each finger event it captures SDL_GetTicksNS at watcher entry and stores a
+fixed-size diagnostic entry keyed by type, original timestamp, finger ID and
+touch ID. It performs no logging, event mutation, filtering or UIKit calls.
+The watcher can run on a delivery thread: a private mutex protects 2048 entries;
+polling never calls SDL while holding that mutex. Identical keys are consumed
+oldest first; overwritten unmatched entries are counted. The watcher is removed
+in the engine destructor, and installation success/failure is explicitly logged.
+
+Polling emits separate bounded [TOUCH_QUEUE] records after releasing the mutex:
+
+- source_ns: original SDL event timestamp;
+- arrival_ns: the event-watch observation timestamp;
+- poll_ns: retrieval observation timestamp;
+- prequeue_ms: arrival minus source, measuring upstream age;
+- queue_ms: poll minus arrival, measuring time after the watch boundary;
+- source_age_ms: poll minus source;
+- seq/matched/overwritten: pairing sequence, match availability and tracker loss.
+
+All three nanosecond timestamps use SDL's clock; t uses the shared steady clock
+for correlation with HITCH. Zero/future times produce unknown (-1) durations,
+never unsigned wraparound. Events already queued before watch registration or
+inserted through a path bypassing watchers can be unmatched; queue/prequeue
+values must then be treated as unknown. This is a watch boundary, not a precise
+measurement of the internal linked-list insertion instruction.
+
+Down/up/cancel events are recorded even when fast. Matched motion events are
+logged only if source age or queue residence reaches 50 ms; unmatched events
+are visible. The separate budget is 512 records plus one suppression message,
+so earlier INPUT suppression does not erase this diagnostic. Logging happens
+on the polling thread and remains a possible timing perturbation. Existing
+stderr size limits still apply. No async input processing or gesture changes
+are introduced. A short main-menu reproduction immediately after launch is
+preferred to a long mission session.
+
+Local compiled tests cover FIFO matching of duplicate keys, identity isolation,
+ring overwrite reporting, 3000 cross-thread record/consume operations, age
+calculations, unknown timestamps, bounded output and the actual SDL watcher
+function body preserving event fields. Full SDL/UIKit integration and the
+next device measurements still require the IPA built by macOS CI.

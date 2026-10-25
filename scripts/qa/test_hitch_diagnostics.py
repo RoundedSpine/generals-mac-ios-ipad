@@ -65,6 +65,82 @@ int main() {
         self.assertEqual(result.stderr.count('phase='), 2048)
         self.assertEqual(result.stderr.count('further input messages suppressed'), 1)
 
+    def test_touch_queue_matches_identity_duplicates_and_reports_overwrite(self):
+        result = run_cpp(r'''#include "touchqueuetiming.h"
+#include <cassert>
+int main() {
+ TouchQueueTiming tracker; TouchQueueTiming::Entry entry; uint64_t overwritten=0;
+ tracker.Record(1,100000000,2,3,200000000);
+ tracker.Record(1,100000000,2,3,210000000);
+ assert(!tracker.Take(1,100000000,9,3,entry,overwritten));
+ assert(tracker.Take(1,100000000,2,3,entry,overwritten) && entry.sequence==1);
+ assert(TouchQueueAgeMs(entry.source,entry.arrival)==100.0);
+ assert(TouchQueueAgeMs(entry.arrival,225000000)==25.0);
+ assert(tracker.Take(1,100000000,2,3,entry,overwritten) && entry.sequence==2);
+ assert(!tracker.Take(1,100000000,2,3,entry,overwritten));
+ assert(TouchQueueAgeMs(0,10)==-1.0 && TouchQueueAgeMs(20,10)==-1.0);
+ for(unsigned i=0;i<2050;++i) tracker.Record(4,1000+i,2,3,5000+i);
+ assert(!tracker.Take(4,1000,2,3,entry,overwritten) && overwritten==2);
+ assert(tracker.Take(4,3049,2,3,entry,overwritten));
+}
+''')
+        self.assertEqual(result.returncode, 0)
+
+    def test_touch_queue_records_from_delivery_thread_and_caps_separate_log(self):
+        result = run_cpp(r'''#include "touchqueuetiming.h"
+#include <cassert>
+#include <thread>
+int main() {
+ TouchQueueTiming tracker; std::atomic<unsigned> published{0},consumed{0};
+ std::thread delivery([&] {
+   for(unsigned i=1;i<=3000;++i) {
+     while(consumed.load()!=i-1) std::this_thread::yield();
+     tracker.Record(1,i,2,3,100000000+i); published=i;
+   }
+ });
+ for(unsigned i=1;i<=3000;++i) {
+   while(published.load()!=i) std::this_thread::yield();
+   TouchQueueTiming::Entry entry;uint64_t overwritten=0;
+   assert(tracker.Take(1,i,2,3,entry,overwritten) && entry.sequence==i && !overwritten);
+   consumed=i;
+ }
+ delivery.join();
+ TouchQueueTiming::Entry entry;entry.source=100000000;entry.arrival=200000000;entry.sequence=9;
+ TraceTouchQueueTiming(&entry,1,entry.source,225000000,0,true);
+ for(int i=0;i<520;++i) TraceTouchQueueTiming(nullptr,2,0,1,2,true);
+}
+''')
+        self.assertIn('prequeue_ms=100.00 queue_ms=25.00 source_age_ms=125.00', result.stderr)
+        self.assertIn('matched=0 prequeue_ms=-1.00 queue_ms=-1.00 source_age_ms=-1.00', result.stderr)
+        self.assertEqual(result.stderr.count('matched='), 512)
+        self.assertEqual(result.stderr.count('further queue messages suppressed'), 1)
+
+    def test_actual_sdl_touch_watcher_preserves_events(self):
+        source = (ROOT / 'GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp').read_text()
+        start = source.index('static bool SDLCALL iosTouchQueueWatcher(')
+        function = source[start:source.index('\n}', start)+2]
+        result = run_cpp(r'''#include "touchqueuetiming.h"
+#include <cassert>
+#define SDLCALL
+using Uint64=uint64_t;
+enum { SDL_EVENT_FINGER_DOWN=1,SDL_EVENT_FINGER_MOTION,SDL_EVENT_FINGER_UP,SDL_EVENT_FINGER_CANCELED };
+struct SDL_Event { unsigned type;struct { uint64_t timestamp; } common;struct { int64_t fingerID,touchID; } tfinger; };
+TouchQueueTiming s_touchQueueTiming;
+uint64_t SDL_GetTicksNS() { return 200000000; }
+BODY
+int main() {
+ SDL_Event event{SDL_EVENT_FINGER_DOWN,{100000000},{42,8}};
+ assert(iosTouchQueueWatcher(nullptr,&event));
+ assert(event.type==SDL_EVENT_FINGER_DOWN && event.common.timestamp==100000000 && event.tfinger.fingerID==42 && event.tfinger.touchID==8);
+ TouchQueueTiming::Entry entry;uint64_t overwritten=0;
+ assert(s_touchQueueTiming.Take(event.type,event.common.timestamp,42,8,entry,overwritten));
+ assert(entry.arrival==200000000 && !overwritten);
+ event.type=99;assert(iosTouchQueueWatcher(nullptr,&event));
+ assert(!s_touchQueueTiming.Take(99,event.common.timestamp,42,8,entry,overwritten));
+}
+'''.replace('BODY', function))
+        self.assertEqual(result.returncode, 0)
+
     def test_actual_touch_translator_defers_taps_and_distinguishes_long_press(self):
         source = (ROOT / 'GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp').read_text()
         start = source.index('struct TouchState {')
