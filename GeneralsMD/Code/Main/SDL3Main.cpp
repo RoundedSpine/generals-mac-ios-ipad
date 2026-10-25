@@ -40,6 +40,8 @@
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL_main.h>
 #include "nativeframecadence.h"
+#include "nativeframetrace.h"
+#include "slowoperation.h"
 #include <cerrno>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -698,6 +700,7 @@ int main(int argc, char* argv[])
 
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 static NativeFrameCadence s_nativeCadence;
+static NativeFrameTrace s_nativeFrameTrace;
 
 SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 {
@@ -706,6 +709,8 @@ SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 		if (InitializeNativeGameLaunch(argc, argv) != 0) return SDL_APP_FAILURE;
 		*appstate = TheGameEngine;
 		s_nativeCadence.Reset();
+		s_nativeFrameTrace.Reset();
+		fprintf(stderr, "[NATIVE_FRAME] diagnostics enabled; callback and gate policies unchanged\n");
 		return SDL_APP_CONTINUE;
 	} catch (const std::exception& error) {
 		fprintf(stderr, "FATAL: native initialization exception: %s\n", error.what());
@@ -718,6 +723,7 @@ SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 
 SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event)
 {
+	SlowOperationTrace eventTime("native-event-callback", nullptr, 20.0);
 	if (event->type == SDL_EVENT_TERMINATING) return SDL_APP_SUCCESS;
 	if (!appstate) return SDL_APP_CONTINUE;
 	try {
@@ -738,15 +744,29 @@ SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event)
 
 SDL_AppResult SDLCALL SDL_AppIterate(void* appstate)
 {
+	NativeFrameTrace::Scope callbackScope(s_nativeFrameTrace, []() -> uint64_t { return SDL_GetTicksNS(); });
+	SlowOperationTrace callbackTime("native-callback", nullptr, 50.0);
 	try {
 		auto* engine = static_cast<SDL3GameEngine*>(appstate);
 		if (!engine) return SDL_APP_SUCCESS;
-		engine->drainNativeEvents();
+		s_nativeFrameTrace.Mark("event-drain");
+		{ SlowOperationTrace trace("native-event-drain", nullptr, 20.0); engine->drainNativeEvents(); }
 		if (engine->getQuitting()) return SDL_APP_SUCCESS;
-		if (!engine->nativeFrameReady()) { s_nativeCadence.Reset(); return SDL_APP_CONTINUE; }
+		s_nativeFrameTrace.Mark("focus-gate");
+		bool ready;
+		{ SlowOperationTrace trace("native-focus-gate", nullptr, 20.0); ready = engine->nativeFrameReady(); }
+		if (!ready) {
+			s_nativeFrameTrace.Gate(SDL_GetTicksNS(), true, engine->nativePauseReasons(), 0, s_nativeCadence.Deadline());
+			s_nativeCadence.Reset();
+			return SDL_APP_CONTINUE;
+		}
 		double elapsed = 0.0;
 		const int fps = TheFramePacer->getActualFramesPerSecondLimit();
-		if (!s_nativeCadence.Advance(SDL_GetTicksNS(), fps > 0 ? static_cast<unsigned>(fps) : 0, elapsed)) return SDL_APP_CONTINUE;
+		if (!s_nativeCadence.Advance(SDL_GetTicksNS(), fps > 0 ? static_cast<unsigned>(fps) : 0, elapsed)) {
+			s_nativeFrameTrace.Gate(SDL_GetTicksNS(), false, engine->nativePauseReasons(), fps, s_nativeCadence.Deadline());
+			return SDL_APP_CONTINUE;
+		}
+		s_nativeFrameTrace.Update(SDL_GetTicksNS(), engine->nativePauseReasons(), fps, s_nativeCadence.Deadline());
 		TheFramePacer->updateExternal(static_cast<Real>(elapsed));
 		engine->update();
 		return engine->getQuitting() ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;

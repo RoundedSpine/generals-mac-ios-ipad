@@ -49,6 +49,8 @@ int main() {
             'SDL_AppResult SDLCALL SDL_AppIterate(', 'void SDLCALL SDL_AppQuit('])
         run_cpp(r'''
 #include "nativeframecadence.h"
+#include "nativeframetrace.h"
+#include "slowoperation.h"
 #include <cassert>
 #include <cstdio>
 #include <stdexcept>
@@ -67,6 +69,7 @@ struct SDL3GameEngine {
  bool quitting=false,ready=true,throwFrame=false,throwEvent=false;int events=0,frames=0;std::vector<SDL_Event> pending;
  bool getQuitting() { return quitting; }
  bool nativeFrameReady() { return ready; }
+ unsigned nativePauseReasons() const { return ready ? 0u : 2u; }
  bool deferNativeEvent(const SDL_Event& e) { pending.push_back(e);return true; }
  void processSDL3Event(SDL_Event) { if(throwEvent)throw std::runtime_error("event");++events; }
  void drainNativeEvents() { assert(onMain);for(auto e:pending)processSDL3Event(e);pending.clear(); }
@@ -80,6 +83,7 @@ void ShutdownSDL3Launcher(int code) { launcherExit=code; }
 void test_exit(int) { throw std::runtime_error("exit"); }
 #define _exit test_exit
 NativeFrameCadence s_nativeCadence;
+NativeFrameTrace s_nativeFrameTrace;
 BODY
 int main() {
  void* state=&engine;initResult=1;
@@ -164,6 +168,71 @@ int main() {
  engine.m_UsesNativeCallbacks=false;engine.pollSDL3Events();assert(polls==2 && engine.events==1 && longPress==2);
 }
 '''.replace('BODY', body))
+
+    def test_frame_trace_distinguishes_outside_gap_pause_and_long_callback(self):
+        result = run_cpp(r'''#include "nativeframetrace.h"
+uint64_t now=1000000000;
+uint64_t clockNow() { return now; }
+int main() {
+ NativeFrameTrace trace;
+ { NativeFrameTrace::Scope scope(trace,clockNow);trace.Update(now,0,60,now+16666666);now+=1000000; }
+ now+=2000000000;
+ { NativeFrameTrace::Scope scope(trace,clockNow);trace.Gate(now,true,2,0,0);now+=1000000; }
+ now+=16000000;
+ { NativeFrameTrace::Scope scope(trace,clockNow);trace.Gate(now,true,2,0,0);now+=1000000; }
+ now+=16000000;
+ { NativeFrameTrace::Scope scope(trace,clockNow);trace.Update(now,0,60,now+16666666);now+=200000000; }
+}
+''')
+        self.assertIn('phase=callback-gap', result.stderr)
+        self.assertIn('outside_ms=2000.00', result.stderr)
+        self.assertIn('phase=gate-change', result.stderr)
+        self.assertIn('reason=lifecycle pause_bits=2', result.stderr)
+        self.assertIn('phase=update-resumed', result.stderr)
+        self.assertIn('phase=callback-long', result.stderr)
+
+    def test_frame_gate_and_lifecycle_output_have_separate_caps(self):
+        result = run_cpp(r'''#include "nativeframetrace.h"
+int main() {
+ NativeFrameTrace trace;
+ trace.Enter(1000000000);trace.Update(1000000000,0,1,2000000000);trace.Exit(1000000000);
+ trace.Enter(1200000000);trace.Gate(1200000000,false,0,1,2000000000);trace.Exit(1200000000);
+ for(uint64_t i=2;i<400;++i) {
+   uint64_t now=1000000000+i*1000000000;
+   trace.Enter(now);trace.Gate(now,false,0,1,now+1000000000);trace.Exit(now);
+ }
+ for(int i=0;i<70;++i) TraceNativeLifecycle(10,2,1000000000+i);
+}
+''')
+        self.assertIn('phase=update-skipped', result.stderr)
+        self.assertIn('reason=cadence pause_bits=0 fps=1 deadline_ns=2000000000', result.stderr)
+        self.assertEqual(result.stderr.count('[NATIVE_FRAME] t='), 256)
+        self.assertEqual(result.stderr.count('further frame messages suppressed'), 1)
+        self.assertEqual(result.stderr.count('[NATIVE_LIFECYCLE] t='), 64)
+        self.assertEqual(result.stderr.count('further lifecycle messages suppressed'), 1)
+
+    def test_actual_lifecycle_watcher_keeps_atomic_pause_decisions(self):
+        body = function(ENGINE.read_text(), 'static bool SDLCALL iosLifecycleWatcher(')
+        result = run_cpp(r'''#include "nativeframetrace.h"
+#include <cassert>
+#define SDLCALL
+struct SDL_Event { unsigned type; };
+enum { SDL_EVENT_WILL_ENTER_BACKGROUND=1,SDL_EVENT_DID_ENTER_BACKGROUND,
+ SDL_EVENT_DID_ENTER_FOREGROUND,SDL_EVENT_WINDOW_FOCUS_LOST,SDL_EVENT_WINDOW_FOCUS_GAINED };
+std::atomic<bool> s_appBackgrounded{false},s_appInactive{false};
+uint64_t SDL_GetTicksNS() { return 1000000000; }
+BODY
+int main() {
+ SDL_Event e{SDL_EVENT_WILL_ENTER_BACKGROUND};assert(iosLifecycleWatcher(nullptr,&e));assert(s_appBackgrounded && !s_appInactive);
+ e.type=SDL_EVENT_WINDOW_FOCUS_LOST;iosLifecycleWatcher(nullptr,&e);assert(s_appBackgrounded && s_appInactive);
+ e.type=SDL_EVENT_DID_ENTER_FOREGROUND;iosLifecycleWatcher(nullptr,&e);assert(!s_appBackgrounded && s_appInactive);
+ e.type=SDL_EVENT_WINDOW_FOCUS_GAINED;iosLifecycleWatcher(nullptr,&e);assert(!s_appBackgrounded && !s_appInactive);
+ e.type=99;assert(iosLifecycleWatcher(nullptr,&e));
+}
+'''.replace('BODY', body))
+        self.assertEqual(result.stderr.count('[NATIVE_LIFECYCLE]'), 4)
+        for flags in range(4):
+            self.assertIn('pause_bits=' + str(flags), result.stderr)
 
     def test_shared_engine_lifecycle_retains_desktop_and_replay_paths(self):
         source = (ROOT / 'GeneralsMD/Code/GameEngine/Source/Common/GameMain.cpp').read_text()

@@ -70,6 +70,7 @@ extern GameWindowManager *TheWindowManager;
 #include <atomic>
 #include "touchqueuetiming.h"
 #include "uikittouchtiming.h"
+#include "nativeframetrace.h"
 
 // ---------------------------------------------------------------------------
 // iOS app lifecycle
@@ -102,6 +103,7 @@ static inline bool iosShouldPauseRendering()
 
 static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 {
+	bool lifecycleEvent = true;
 	switch (event->type) {
 		case SDL_EVENT_WILL_ENTER_BACKGROUND:
 		case SDL_EVENT_DID_ENTER_BACKGROUND:
@@ -121,8 +123,10 @@ static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 			s_appInactive.store(false);
 			break;
 		default:
+			lifecycleEvent = false;
 			break;
 	}
+	if (lifecycleEvent) TraceNativeLifecycle(event->type, (s_appBackgrounded.load() ? 1u : 0u) | (s_appInactive.load() ? 2u : 0u), SDL_GetTicksNS());
 	return true;
 }
 
@@ -834,6 +838,16 @@ void SDL3GameEngine::drainNativeEvents()
 		if (pending.event.type == SDL_EVENT_TEXT_INPUT) pending.event.text.text = pending.text.c_str();
 		processSDL3Event(pending.event);
 	}
+}
+
+// GeneralsX @feature Codex 25/10/2026 Expose diagnostic pause reasons without changing lifecycle decisions.
+unsigned SDL3GameEngine::nativePauseReasons() const
+{
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	return (s_appBackgrounded.load() ? 1u : 0u) | (s_appInactive.load() ? 2u : 0u);
+#else
+	return 0;
+#endif
 }
 
 Bool SDL3GameEngine::nativeFrameReady()

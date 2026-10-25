@@ -377,3 +377,50 @@ desktop execute and replay simulation; and cadence under 120 Hz callbacks with
 jitter, frame limits, late frames, rate changes, reset and clock rewind. These
 stand-ins cannot verify CADisplayLink/UIKit behavior. The existing macOS CI
 build must compile/link the full iOS application and native probe.
+
+## Remaining 2.1 second episode and native callback/gate tracing
+
+The next 474,493-byte callback-build log captures a different remaining stall.
+Near t=810170923, native touch ages are about 12–16 ms and SDL delivery is
+sub-millisecond/few-millisecond, but generated mouse events wait up to 2108.86
+ms. At t=810173064 the frame-service gap is 2116.93 ms, followed immediately by
+consumption and UI dispatch. No matching two-second game-update scope appears.
+This episode was captured before suppression. It localizes a delay between
+native event handling and the next serviced engine frame; it does not alone
+say whether display callbacks stopped, a lifecycle gate held, cadence skipped,
+or untimed callback/event work blocked.
+
+Added independent bounded NATIVE_FRAME diagnostics at SDL_AppIterate entry,
+exit, lifecycle/cadence skips and engine-update start. Fields include entry
+interval, time since the prior callback returned, time since update start,
+last decision, pause bits, FPS, cadence deadline and callback/skip counts.
+Callback-gap fields describe the previous callback decision; consult lifecycle
+records for intervening changes. Update-resumed records summarize the preceding
+no-update interval. Paused records use fps=0 because the FPS policy has not
+been queried. Cadence exposes its deadline read-only; no eligibility policy,
+frame timing decision or reset order is changed.
+
+NATIVE_LIFECYCLE separately records the existing watcher decisions, with bits
+1=backgrounded and 2=inactive. This remains available when display callbacks do
+not fire. These rare lifecycle notifications may log on their delivery thread;
+touch callbacks still do not log there. NATIVE_FRAME is capped at 256 and
+NATIVE_LIFECYCLE at 64 records, each with a suppression marker independent of
+INPUT/UIKIT_TOUCH/TOUCH_QUEUE/HITCH budgets. Frame skips log on state change or
+at most once per second during a >=100 ms no-update interval; fast normal
+callbacks do not produce continuous trace output. Logging remains a possible
+timing perturbation, and the existing stderr size limit still applies.
+
+Added HITCH scopes for the complete native frame callback, native event callback,
+deferred event drain and focus reconciliation. This fills the untimed paths
+before normal GameEngine::update. The frame RAII exit clock is sampled again
+after its own diagnostic write so that write is not classified as time outside
+the callback. Source timestamps use SDL's clock; t remains the common steady
+clock used by the other traces.
+
+Controlled tests distinguish an injected two-second outside-callback interval,
+continuously invoked lifecycle-gated callbacks, cadence skips, resume, long
+callbacks and bounded independent output. An actual lifecycle-watcher harness
+verifies that diagnostic additions preserve the atomic pause flags and do not
+log unrelated events. Existing actual callback/body tests cover routing and
+cadence decisions with the new traces. No new scheduling experiment is included;
+the purpose is to identify which branch accounts for the remaining episode.

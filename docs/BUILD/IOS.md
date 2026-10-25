@@ -185,3 +185,10 @@ interactive play, not headless/replay simulation launch flags. Desktop/headless
 builds retain the original loop. Use `python3 scripts/qa/test_ios_native_callbacks.py`
 for compiled callback/cadence/event-ownership/lifecycle stand-in checks; device
 behavior requires the macOS-built IPA.
+
+The latest diagnostic also emits `[NATIVE_FRAME]` for long callback gaps and
+frame-update skips, plus `[NATIVE_LIFECYCLE]` pause flags (1=backgrounded,
+2=inactive). These distinguish missing display callbacks from lifecycle/cadence
+returns without changing their policies. Their separate output limits remain
+available after the touch logs reach their caps. Collect the log promptly after
+an episode and note any app backgrounding or system overlay activity.
