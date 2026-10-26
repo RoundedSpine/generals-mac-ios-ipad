@@ -20,8 +20,12 @@ The Windows Actions job uses the pinned upstream builder and locked Python
 dependencies to convert source assets and build only `FullEnglish`. It never
 installs or launches a PC copy of the game and requires no retail game files on
 the runner. Upstream conversion tools are downloaded with the checksums specified
-by its pinned tool configuration. `--debug` makes build errors propagate instead
-of prompting for interactive input.
+by its pinned tool configuration. The checked-in API adapter limits both build
+and install metadata to FullEnglish while leaving install/uninstall/run operations
+disabled. This avoids an upstream pre-build assertion for unbuilt language packs.
+It passes the Blender add-on path through an environment variable, so Windows
+backslashes cannot become Python escapes, and sets Blender's Python exit code.
+Exceptions propagate to the job and are published as Actions annotations.
 
 The staging tool requires exactly the 15 BIG archives described by the selected
 upstream pack. It merges them using the original filename priority: optional
@@ -66,7 +70,7 @@ intentionally updated. The workflow uses the repository named in that file.
 For a Windows development build with the pinned source and submodule checked out:
 
 ```powershell
-uv run --locked --project C:\Patch\Tools\GeneralsModBuilder generalsmodbuilder --debug --build-pack FullEnglish --release --config-list C:\Patch\Patch104pZH\ModJsonFiles.json C:\Patch\Patch104pZH\Scripts\Windows\WindowsTools.json
+uv run --locked --project C:\Patch\Tools\GeneralsModBuilder python scripts/build/ios/build-community-patch.py --source C:\Patch
 python scripts/build/ios/stage-community-patch.py --source C:\Patch --pack-dir C:\Patch\Patch104pZH\.Build\RawBundlePacks\FullEnglish --output build/community-patch
 ```
 

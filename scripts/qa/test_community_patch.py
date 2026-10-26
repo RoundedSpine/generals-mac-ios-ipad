@@ -3,6 +3,9 @@
 # GeneralsX @test Codex 26/10/2026 Test the patch as an overlay, never a replacement retail asset root.
 import importlib.util
 import json
+import os
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 import struct
 import tempfile
@@ -13,6 +16,9 @@ from compiled_harness import ROOT, run_cpp
 spec = importlib.util.spec_from_file_location('patch_stage', ROOT / 'scripts/build/ios/stage-community-patch.py')
 stage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stage)
+build_spec = importlib.util.spec_from_file_location('patch_build', ROOT / 'scripts/build/ios/build-community-patch.py')
+patch_build = importlib.util.module_from_spec(build_spec)
+build_spec.loader.exec_module(patch_build)
 SOURCE = (ROOT / 'Core/GameEngineDevice/Source/StdDevice/Common/StdBIGFileSystem.cpp').read_text()
 
 
@@ -22,6 +28,48 @@ def function(marker):
 
 
 class CommunityPatchTest(unittest.TestCase):
+    def test_blender_install_path_is_data_not_python_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            directory = source / 'Patch104pZH/Scripts/Windows'
+            directory.mkdir(parents=True)
+            original = {'tools': {'list': [{'name': 'blender', 'files': [{'sha256': 'keep-this-hash', 'callList': [
+                {'call':'{TOOLS_DIR}/blender.exe','callArgs':{'--background':'','--python-expr':'old path expression'}}]}]}]}}
+            path = directory / 'WindowsTools.json'
+            path.write_text(json.dumps(original))
+            with patch.dict(os.environ):
+                generated = json.loads(patch_build.prepare_tools(source).read_text())
+                self.assertEqual(json.loads(path.read_text()), original)
+                file = generated['tools']['list'][0]['files'][0]
+                self.assertEqual(file['sha256'], 'keep-this-hash')
+                args = file['callList'][0]['callArgs']
+                self.assertEqual(args['--python-exit-code'], '1')
+                self.assertLess(list(args).index('--python-exit-code'), list(args).index('--python-expr'))
+                windows_path = r"D:\a\new\test\quote's dir\io_mesh_w3d.zip"
+                os.environ[patch_build.ADDON_ENV] = windows_path
+                seen = []
+                bpy = SimpleNamespace(ops=SimpleNamespace(preferences=SimpleNamespace(addon_install=lambda **kwargs: seen.append(kwargs))))
+                with patch.dict(sys.modules, {'bpy': bpy}):
+                    exec(args['--python-expr'], {})
+                self.assertEqual(seen, [{'overwrite': True, 'filepath': windows_path}])
+                self.assertFalse(any(ord(char)<32 for char in seen[0]['filepath']))
+
+    def test_only_selected_pack_metadata_without_install_or_run(self):
+        config = {'commit':'a'*40,'builder_commit':'b'*40,'pack':'FullEnglish'}
+        calls = []
+        with patch.object(patch_build.subprocess, 'check_output', side_effect=['a'*40,'b'*40]), patch.object(patch_build, 'prepare_tools', return_value=Path('adapted-tools.json')):
+            patch_build.build(Path('source'), config, lambda **kwargs: calls.append(kwargs))
+        self.assertEqual(calls[0]['buildList'], ['FullEnglish'])
+        self.assertEqual(calls[0]['installList'], ['FullEnglish'])
+        for operation in ['install', 'uninstall', 'run']:
+            self.assertFalse(calls[0][operation])
+        self.assertTrue(calls[0]['build'] and calls[0]['release'])
+        def fail(**kwargs): raise RuntimeError('conversion failed')
+        with patch.object(patch_build.subprocess, 'check_output', side_effect=['a'*40,'b'*40]), patch.object(patch_build, 'prepare_tools', return_value=Path('adapted-tools.json')):
+            with self.assertRaisesRegex(RuntimeError, 'conversion failed'):
+                patch_build.build(Path('source'), config, fail)
+
+
     def test_big_roundtrip_and_invalid_paths(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

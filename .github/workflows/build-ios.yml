@@ -51,7 +51,7 @@ jobs:
           $config = Get-Content ios/community-patch/source.json -Raw | ConvertFrom-Json
           $builder = git -C "$source/Tools/GeneralsModBuilder" rev-parse HEAD
           if ($builder -ne $config.builder_commit) { throw 'Unexpected Mod Builder commit' }
-          uv run --locked --project "$source/Tools/GeneralsModBuilder" generalsmodbuilder --debug --build-pack $config.pack --release --config-list "$source/Patch104pZH/ModJsonFiles.json" "$source/Patch104pZH/Scripts/Windows/WindowsTools.json"
+          uv run --locked --project "$source/Tools/GeneralsModBuilder" python scripts/build/ios/build-community-patch.py --source "$source"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/build/ios/stage-community-patch.py --source "$source" --pack-dir "$source/Patch104pZH/.Build/RawBundlePacks/$($config.pack)" --output build/community-patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
