@@ -1207,6 +1207,8 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 		info->m_pathParent = nullptr;
 		info->m_costSoFar = 0;
 		info->m_totalCost = 0;
+		info->m_openIndex = -1;
+		info->m_openSequence = 0;
 		info->m_open = 0;
 		info->m_closed = 0;
 		info->m_obstacleID = INVALID_ID;
@@ -1234,6 +1236,112 @@ void PathfindCellInfo::releaseACellInfo(PathfindCellInfo *theInfo)
 }
 
 //-----------------------------------------------------------------------------------
+
+// GeneralsX @performance Codex 26/10/2026 Stable binary heap, inspired by Reimagined 1.0.0's open queue.
+// Keep our existing records and search semantics; no worker contexts or per-frame batching.
+Bool PathfindCellList::before(const PathfindCellInfo* a, const PathfindCellInfo* b)
+{
+	return a->m_totalCost < b->m_totalCost ||
+		(a->m_totalCost == b->m_totalCost && a->m_openSequence < b->m_openSequence);
+}
+
+#if RETAIL_COMPATIBLE_PATHFINDING
+void PathfindCellList::reset(PathfindCell* newHead)
+#else
+void PathfindCellList::reset()
+#endif
+{
+	m_heap.clear();
+	m_heapActive = m_heapEnabled;
+	m_sequence = 0;
+	m_head = m_tail = nullptr;
+#if RETAIL_COMPATIBLE_PATHFINDING
+	if (newHead) {
+		if (m_heapActive) pushHeap(newHead->m_info);
+		else m_head = newHead;
+	}
+#endif
+}
+
+void PathfindCellList::pushHeap(PathfindCellInfo* info)
+{
+	info->m_openSequence = ++m_sequence;
+	info->m_openIndex = static_cast<Int>(m_heap.size());
+	m_heap.push_back(info);
+	siftUp(info->m_openIndex);
+}
+
+void PathfindCellList::removeHeap(PathfindCellInfo* info)
+{
+	const Int index = info->m_openIndex;
+	DEBUG_ASSERTCRASH(index >= 0 && index < static_cast<Int>(m_heap.size()) && m_heap[index] == info,
+		("Invalid pathfinding heap membership."));
+	PathfindCellInfo* last = m_heap.back();
+	m_heap.pop_back();
+	if (last != info) {
+		m_heap[index] = last;
+		last->m_openIndex = index;
+		siftUp(index);
+		siftDown(last->m_openIndex);
+	}
+	info->m_openIndex = -1;
+}
+
+void PathfindCellList::siftUp(Int index)
+{
+	PathfindCellInfo* info = m_heap[index];
+	while (index > 0) {
+		const Int parent = (index - 1) / 2;
+		if (!before(info, m_heap[parent])) break;
+		m_heap[index] = m_heap[parent];
+		m_heap[index]->m_openIndex = index;
+		index = parent;
+	}
+	m_heap[index] = info;
+	info->m_openIndex = index;
+}
+
+void PathfindCellList::siftDown(Int index)
+{
+	PathfindCellInfo* info = m_heap[index];
+	const Int count = static_cast<Int>(m_heap.size());
+	for (;;) {
+		Int child = 2 * index + 1;
+		if (child >= count) break;
+		if (child + 1 < count && before(m_heap[child + 1], m_heap[child])) ++child;
+		if (!before(m_heap[child], info)) break;
+		m_heap[index] = m_heap[child];
+		m_heap[index]->m_openIndex = index;
+		index = child;
+	}
+	m_heap[index] = info;
+	info->m_openIndex = index;
+}
+
+void PathfindCellList::useLinkedList()
+{
+	// The retail insertion loop stops after 5,000 entries, even if that breaks cost ordering.
+	// Convert before an insertion can reach that limit; retain the original list for this search.
+	PathfindCellInfo* previous = nullptr;
+	while (!m_heap.empty()) {
+		PathfindCellInfo* info = m_heap[0];
+		removeHeap(info);
+		info->m_prevOpen = previous;
+		info->m_nextOpen = nullptr;
+		if (previous) previous->m_nextOpen = info;
+		else m_head = info->m_cell;
+		previous = info;
+	}
+	m_tail = previous ? previous->m_cell : nullptr;
+	m_heapActive = false;
+}
+
+PathfindCell* PathfindCellList::getNextForDisplay(PathfindCell* cell) const
+{
+	if (!m_heapActive) return cell->getNextOpen();
+	const Int next = cell->m_info->m_openIndex + 1;
+	return next < static_cast<Int>(m_heap.size()) ? m_heap[next]->m_cell : nullptr;
+}
 
 Bool PathfindCellList::canReverseSort(PathfindCell& currentCell) const
 {
@@ -1851,6 +1959,22 @@ void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 /// put self on "open" list in ascending cost order, return new list
 void PathfindCell::putOnSortedOpenList( PathfindCellList &list )
 {
+	// GeneralsX @performance Codex 26/10/2026 Stable ties match insertion after all existing equal-cost cells.
+#if RETAIL_COMPATIBLE_PATHFINDING
+	if (list.m_heapActive && !s_useFixedPathfinding && list.m_heap.size() >= PATHFIND_CELLS_PER_FRAME) {
+		list.useLinkedList();
+	}
+#endif
+	if (list.m_heapActive) {
+		DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
+		DEBUG_ASSERTCRASH(!m_info->m_open && !m_info->m_closed, ("Invalid open-list flags."));
+		m_info->m_open = true;
+		m_info->m_closed = false;
+		m_info->m_nextOpen = m_info->m_prevOpen = nullptr;
+		list.pushHeap(m_info);
+		return;
+	}
+
 #if RETAIL_COMPATIBLE_PATHFINDING
 	if (!s_useFixedPathfinding) {
 		forwardInsertionSortRetailCompatible(list);
@@ -1872,6 +1996,14 @@ void PathfindCell::putOnSortedOpenList( PathfindCellList &list )
 /// remove self from "open" list
 void PathfindCell::removeFromOpenList( PathfindCellList &list )
 {
+	// GeneralsX @performance Codex 26/10/2026 Remove by index even when callers changed the cost before reinsertion.
+	if (list.m_heapActive) {
+		list.removeHeap(m_info);
+		m_info->m_open = false;
+		m_info->m_nextOpen = m_info->m_prevOpen = nullptr;
+		return;
+	}
+
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
 	DEBUG_ASSERTCRASH(m_info->m_closed==FALSE && m_info->m_open==TRUE, ("Serious error - Invalid flags. jba"));
 	if (m_info->m_nextOpen)
@@ -1894,6 +2026,19 @@ void PathfindCell::removeFromOpenList( PathfindCellList &list )
 /// remove all cells from "open" list
 Int PathfindCell::releaseOpenList( PathfindCellList &list )
 {
+	// GeneralsX @performance Codex 26/10/2026 Return heap records through the unchanged cell lifetime rules.
+	if (list.m_heapActive) {
+		Int count = 0;
+		while (!list.empty()) {
+			PathfindCell* cell = list.getHead();
+			cell->removeFromOpenList(list);
+			cell->releaseInfo();
+			++count;
+		}
+		list.reset();
+		return count;
+	}
+
 	Int count = 0;
 	while (list.m_head) {
 		count++;
@@ -4026,7 +4171,7 @@ void PathfindLayer::classifyWallMapCell( Int i, Int j , PathfindCell *cell, Obje
 
 //----------------------- Pathfinder ---------------------------------------
 
-Pathfinder::Pathfinder() :m_map(nullptr)
+Pathfinder::Pathfinder() :m_map(nullptr), m_openList(true)
 {
 	debugPath = nullptr;
 	PathfindCellInfo::allocateCellInfos();
@@ -4893,7 +5038,7 @@ void Pathfinder::debugShowSearch(  Bool pathFound  )
 		addIcon(nullptr, 0, 0, color);	 // erase.
 	}
 
-	for( s = m_openList.getHead(); s; s=s->getNextOpen() )
+	for( s = m_openList.getHead(); s; s=m_openList.getNextForDisplay(s) )
 	{
 		// create objects to show path - they decay
 		RGBColor color;

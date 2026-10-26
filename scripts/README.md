@@ -45,6 +45,9 @@ concurrent texture-queue and shutdown-lock tests.
 Run `python3 scripts/qa/test_ios_native_callbacks.py` for compiled callback,
 cadence, deferred-text ownership, input-service and shared-lifecycle checks.
 
+Run `python3 scripts/qa/test_pathfind_heap.py` for compiled heap/list ordering,
+retail traversal-limit fallback, record reuse and synthetic grid-search comparisons.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 

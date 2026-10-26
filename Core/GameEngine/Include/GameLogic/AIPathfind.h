@@ -31,6 +31,8 @@
 #include "Common/GameType.h"
 #include "Common/GameMemory.h"
 #include "Common/Snapshot.h"
+
+#include <vector>
 //#include "GameLogic/Locomotor.h"	// no, do not include this, unless you like long recompiles
 #include "GameLogic/LocomotorSet.h"
 #include "GameLogic/GameLogic.h"
@@ -208,6 +210,7 @@ enum {MAX_WALL_PIECES = 128};
 class PathfindCellInfo
 {
 	friend class PathfindCell;
+	friend class PathfindCellList;
 public:
 #if RETAIL_COMPATIBLE_PATHFINDING
 	static void forceCleanPathFindCellInfos();
@@ -227,6 +230,10 @@ protected:
 
 	PathfindCellInfo *m_pathParent;												///< "parent" cell from pathfinder
 	PathfindCell *m_cell;															///< Cell this info belongs to currently.
+
+	// GeneralsX @performance Codex 26/10/2026 Stable open-heap membership, bounded by the existing record pool.
+	unsigned long long m_openSequence;
+	Int m_openIndex;
 
 	UnsignedShort m_totalCost, m_costSoFar;	///< cost estimates for A* search
 
@@ -254,23 +261,36 @@ class PathfindCellList
 	friend class PathfindCell;
 
 public:
-	PathfindCellList() : m_head(nullptr), m_tail(nullptr) {}
+	// GeneralsX @performance Codex 26/10/2026 Use the heap only for the open list; keep closed-list links unchanged.
+	explicit PathfindCellList(Bool useHeap = false) : m_head(nullptr), m_tail(nullptr),
+		m_heapEnabled(useHeap), m_heapActive(useHeap), m_sequence(0) {}
 
 #if RETAIL_COMPATIBLE_PATHFINDING
-	void reset(PathfindCell* newHead = nullptr) { m_head = newHead; m_tail = nullptr; }
+	void reset(PathfindCell* newHead = nullptr);
 #else
-	void reset() { m_head = nullptr; m_tail = nullptr; }
+	void reset();
 #endif
 
-	PathfindCell* getHead() const { return m_head; }
-
-	Bool empty() const { return m_head == nullptr; }
+	PathfindCell* getHead() const { return m_heapActive ? (m_heap.empty() ? nullptr : m_heap[0]->m_cell) : m_head; }
+	Bool empty() const { return getHead() == nullptr; }
+	PathfindCell* getNextForDisplay(PathfindCell* cell) const;
 
 	Bool canReverseSort(PathfindCell& currentCell) const;
 
 private:
 	PathfindCell* m_head;
 	PathfindCell* m_tail;
+	Bool m_heapEnabled;
+	Bool m_heapActive;
+	unsigned long long m_sequence;
+	std::vector<PathfindCellInfo*> m_heap;
+
+	static Bool before(const PathfindCellInfo* a, const PathfindCellInfo* b);
+	void pushHeap(PathfindCellInfo* info);
+	void removeHeap(PathfindCellInfo* info);
+	void siftUp(Int index);
+	void siftDown(Int index);
+	void useLinkedList();
 };
 
 /**
@@ -281,6 +301,7 @@ private:
  */
 class PathfindCell
 {
+	friend class PathfindCellList;
 public:
 
 	enum CellType
