@@ -77,3 +77,50 @@ same mission more than once: this branch still uses a fresh DXVK cache per build
 so first-run shader compilation can confound performance impressions. Report any
 new stalls, early stops, poor detours or crashes. No speedup or replay guarantee
 is claimed until real engine/device evidence supports it.
+
+
+## Follow-up: serial bookkeeping ownership
+
+The next stage extends PathfindSearchContext to own its node arena, open/closed
+lists, tunneling state, ignored obstacle, frame allocation counter and hierarchical
+corridor flags. Pathfinder uses `searchState()` for bookkeeping. With the experiment
+disabled, it uses local PathfindSearchBookkeeping and legacy ZoneBlock flags.
+
+Corridor storage is one byte per hierarchical block. Map allocation initializes
+all blocks passable, matching ZoneBlock construction. Map reset releases storage.
+Node generation advances intentionally leave the corridor and control state intact:
+coarse search constructs the corridor for the fine search, and callers establish
+ignored obstacles before entering search boundaries. Frame accounting resets only
+where the existing queue loop reset it, never at an individual search boundary.
+Snapshot field sizes and transfer order are unchanged.
+
+Lists now live with a static context, so their heap capacity and corridor capacity
+are explicitly released in Pathfinder destruction before the game allocator shuts
+down. Recreating the engine can reuse the empty context. Node storage remains fixed
+at 30,000 slots; the small list/vector owners and per-block byte array are added,
+without allocating map-sized node arrays or worker contexts.
+
+### Remaining boundary
+
+This stage **does not complete worker readiness**. Search records still attach to
+shared cell `m_info` and use the existing static record pool. Retained occupancy
+records compete for that pool just as before. Replacing the pool requires a separate
+cell-to-search-node lookup and an explicit allocation/failure equivalence policy;
+it is not safe to silently substitute independent unlimited worker arenas. Debug
+paths, movement side effects and live object/terrain reads also remain serial.
+See [the prefetch audit](IOS_PATHFIND_PREFETCH_AUDIT_2026-10-26.md).
+
+### Regression coverage
+
+The expanded ten-test search-context suite exercises production arena allocation,
+generation and rollover, actual region-corridor methods in both modes with the
+same randomized operation stream, map resizing/reset, independent state, heap
+storage shutdown/reuse and the production queue loop. The queue fixture checks
+head wrapping, missing objects/AI, zone-update deferral, the unchanged 5,000-cell
+per-request budget and nested generation changes. Other suites retain stable
+heap/list ordering, retail threshold fallback and hierarchical edge allocation
+checks. These fixtures are not full-engine replay or device performance tests.
+
+Validation result: all 57 workflow QA tests passed locally. All ten search-context
+tests also passed with AddressSanitizer and UndefinedBehaviorSanitizer. Full iOS
+SDK compilation and device/replay validation remain pending for this stage.

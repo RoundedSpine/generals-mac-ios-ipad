@@ -14,7 +14,7 @@ def function(marker):
 
 
 def allocator_fixture(enabled=True):
-    declarations = HEADER[HEADER.index('class PathfindCellInfo;'):HEADER.index('// TheSuperHackers @info The PathfindCellList')].replace('protected:', 'public:')
+    declarations = HEADER[HEADER.index('class PathfindCellInfo;'):HEADER.index('/**\n * This represents one cell')].replace('protected:', 'public:')
     methods = '\n'.join(function(marker) for marker in [
         'void PathfindCellInfo::allocateCellInfos()', 'void PathfindCellInfo::releaseCellInfos()',
         'PathfindCellInfo *PathfindCellInfo::getACellInfo(', 'void PathfindCellInfo::releaseACellInfo(',
@@ -97,6 +97,7 @@ struct List{bool occupied=false;bool empty(){return !occupied;}};
 struct Pathfinder{
  List m_openList,m_closedList;unsigned previous=0;int cleaned=0;
  void cleanOpenAndClosedLists(){assert(mainPathfindSearchContext().generation()==previous);++cleaned;m_openList.occupied=m_closedList.occupied=false;}
+ Pathfinder& searchState(){return *this;}
  void beginSearchState();
 };
 ''' + body + r'''
@@ -131,6 +132,153 @@ int main(){PathfindCellInfo::allocateCellInfos();PathfindCell cell;
  auto*p=PathfindCellInfo::getACellInfo(&cell,{1,2});assert(&p->freeLink()==&p->search().m_pathParent);
  PathfindCellInfo::releaseACellInfo(p);PathfindCellInfo::releaseCellInfos();}
 ''')
+
+
+    def test_context_state_survives_node_generation_changes(self):
+        run_cpp(allocator_fixture() + r"""
+int main(){
+ auto&c=mainPathfindSearchContext();c.resizeCorridor(12);
+ for(unsigned i=0;i<12;++i)assert(c.corridorPassable(i));
+ c.setCorridorPassable(7,false);c.m_ignoreObstacleID=91;c.m_isTunneling=true;c.m_cumulativeCellsAllocated=4999;
+ c.get(2).m_totalCost=41;auto generation=c.generation();c.beginSearch();
+ assert(c.generation()==generation+1 && c.get(2).m_totalCost==0);
+ // Coarse/fine boundaries invalidate nodes only, preserving the corridor and caller's control state.
+ assert(c.m_ignoreObstacleID==91 && c.m_isTunneling && c.m_cumulativeCellsAllocated==4999);
+ for(unsigned i=0;i<12;++i)assert(c.corridorPassable(i)==(i!=7));
+ auto*other=new PathfindSearchContext;other->resizeCorridor(12);
+ other->get(2).m_totalCost=99;other->setCorridorPassable(1,false);
+ assert(c.get(2).m_totalCost==0 && c.corridorPassable(1) && !c.corridorPassable(7));
+ assert(other->m_ignoreObstacleID==INVALID_ID && !other->m_isTunneling && !other->m_cumulativeCellsAllocated);
+ assert(other->corridorPassable(7) && other->m_openList.empty() && other->m_closedList.empty());delete other;
+ // Loading a map with the same or different dimensions must discard its old corridor.
+ for(unsigned size:{12u,3u,0u,9u}){c.resizeCorridor(size);assert(c.m_corridor.size()==size);
+  for(unsigned i=0;i<size;++i)assert(c.corridorPassable(i));}
+ c.resizeCorridor(0);assert(c.m_corridor.capacity()==0);
+}
+""")
+
+    def test_zone_corridor_matches_legacy_through_map_resets(self):
+        # Compile actual allocation, bounds checks and corridor methods in both modes.
+        markers = ['void PathfindZoneManager::freeBlocks()',
+                   'void PathfindZoneManager::allocateBlocks(',
+                   'void PathfindZoneManager::clearPassableFlags()',
+                   'void PathfindZoneManager::setAllPassable()',
+                   'void PathfindZoneManager::setPassable(',
+                   'Bool PathfindZoneManager::isPassable(',
+                   'Bool PathfindZoneManager::clipIsPassable(']
+        methods = '\n'.join(function(marker) for marker in markers)
+        def result(enabled):
+            return run_cpp(allocator_fixture(enabled) + r"""
+#include <random>
+#define DEBUG_CRASH(m) (++boundsErrors)
+struct IRegion2D{ICoord2D lo,hi;};
+struct ZoneBlock{bool pass=true;void setPassable(bool v){pass=v;}bool isPassable(){return pass;}};
+using ZoneBlockP=ZoneBlock*;
+struct PathfindZoneManager{
+ enum{ZONE_BLOCK_SIZE=10};int boundsErrors=0;
+ ICoord2D m_zoneBlockExtent{0,0};ZoneBlock*m_blockOfZoneBlocks=nullptr;ZoneBlock**m_zoneBlocks=nullptr;
+ void freeBlocks();void allocateBlocks(const IRegion2D&);void clearPassableFlags();void setAllPassable();
+ void setPassable(int,int,bool);bool isPassable(int,int)const;bool clipIsPassable(int,int)const;
+};
+""".replace('int boundsErrors=0;', 'mutable int boundsErrors=0;') + methods + r"""
+int main(){PathfindZoneManager p;std::mt19937 random(174);unsigned long long hash=0;
+ for(int pass=0;pass<4;++pass){
+  int width=pass%2?81:131,height=pass%2?113:87;
+  p.allocateBlocks({{0,0},{width-1,height-1}});
+  for(int i=0;i<1000;++i){int x=random()%width,y=random()%height;
+   if(i%29==0)p.clearPassableFlags();else if(i%31==0)p.setAllPassable();else p.setPassable(x,y,random()%2);
+   for(int n=0;n<5;++n){int a=random()%width,b=random()%height;
+    bool v=p.isPassable(a,b);assert(v==p.clipIsPassable(a,b));hash=hash*131+v;}
+  }
+  // Preserve the retail integer-division semantics at negative coordinates.
+  assert(p.clipIsPassable(-1,0)==p.clipIsPassable(0,0));
+  assert(!p.clipIsPassable(-10,0) && !p.clipIsPassable(width+10,0));
+  p.setPassable(-10,0,true);assert(p.boundsErrors==pass+1);
+  p.freeBlocks();assert(!p.m_zoneBlocks && !p.m_blockOfZoneBlocks);
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+  assert(mainPathfindSearchContext().m_corridor.empty() && !mainPathfindSearchContext().m_corridor.capacity());
+#endif
+ }
+ printf("%llu\n",hash);
+}
+""").stdout
+        self.assertEqual(result(False), result(True))
+
+    def test_context_heap_storage_is_released_before_shutdown(self):
+        from test_pathfind_heap import fixture
+        source = fixture(1, True, True).replace('int main(){randomized()', 'void unused_regression(){randomized()')
+        source += r"""
+int main(){Arena a(true,16);auto&c=mainPathfindSearchContext();
+ for(int i=0;i<16;++i){a.info[i].search().m_totalCost=i;a.cells[i].putOnSortedOpenList(c.m_openList);}
+ assert(!c.m_openList.empty() && c.m_openList.m_heap.capacity());
+ c.resizeCorridor(64);c.m_ignoreObstacleID=17;c.m_isTunneling=true;c.m_cumulativeCellsAllocated=99;
+ c.releaseStorage();assert(c.m_openList.empty() && !c.m_openList.m_heap.capacity());
+ assert(c.m_closedList.empty() && !c.m_closedList.m_heap.capacity() && c.m_corridor.empty() && !c.m_corridor.capacity());
+ assert(c.m_ignoreObstacleID==INVALID_ID && !c.m_isTunneling && !c.m_cumulativeCellsAllocated);
+ // A new engine can reuse the static context and restore normal heap ordering.
+ for(int i=0;i<16;++i){a.info[i].search()=PathfindSearchState{};a.info[i].search().m_totalCost=15-i;
+  a.cells[i].putOnSortedOpenList(c.m_openList);}
+ assert(c.m_openList.getHead()->id==15);c.releaseStorage();
+}
+"""
+        run_cpp(source)
+
+
+    def test_queue_order_and_original_per_request_budget(self):
+        accessor_start=HEADER.index(' PathfindSearchBookkeeping& searchState() const {')
+        accessor=HEADER[accessor_start:HEADER.index('\n }',accessor_start)+3]
+        def result(enabled):
+            return run_cpp(allocator_fixture(enabled) + r"""
+#include <cmath>
+#define PROFILER_PLOT(k,v) ((void)0)
+#define REAL_TO_INT_FLOOR(v) static_cast<int>(std::floor(v))
+constexpr float PATHFIND_CELL_SIZE_F=10;
+constexpr int PATHFIND_CELLS_PER_FRAME=5000,PATHFIND_QUEUE_LEN=512;
+struct IRegion2D{ICoord2D lo,hi;};
+struct Coord3D{float x,y,z;};struct Region3D{Coord3D lo,hi;};
+struct Terrain{void getExtent(Region3D*p){*p={{0,0,0},{1000,1000,0}};}}terrain;
+auto*TheTerrainLogic=&terrain;
+struct Pathfinder;
+std::vector<int> processed;
+struct AIUpdateInterface{int id,cost;void doPathfind(Pathfinder*);};
+struct Object{AIUpdateInterface*ai;AIUpdateInterface*getAIUpdateInterface(){return ai;}};
+struct Logic{AIUpdateInterface a[6]{{1,3000},{2,2500},{3,5000},{4,10},{5,10},{6,100}};
+ Object objects[6]{{&a[0]},{&a[1]},{&a[2]},{&a[3]},{nullptr},{&a[5]}};
+ Object*findObjectByID(unsigned id){assert(id>=1 && id<=6);return id==4?nullptr:&objects[id-1];}}logic;
+auto*TheGameLogic=&logic;
+struct ZoneManager{bool dirty=false;bool needToCalculateZones(){return dirty;}
+ void calculateZones(void*,int*,IRegion2D){dirty=false;}};
+struct Pathfinder{
+ mutable PathfindSearchBookkeeping m_legacySearchState;
+ bool m_isMapReady=true;ZoneManager m_zoneManager;void*m_map=nullptr;int*m_layers=nullptr;
+ IRegion2D m_extent{},m_logicalExtent{};
+ unsigned m_queuedPathfindRequests[512]{};int m_queuePRHead=510,m_queuePRTail=4;
+ void processPathfindQueue();void beginSearchState();
+ void cleanOpenAndClosedLists(){assert(false);}
+""" + accessor + '\n};\n' + function('void Pathfinder::beginSearchState()') +
+ function('void Pathfinder::processPathfindQueue()') + r"""
+void AIUpdateInterface::doPathfind(Pathfinder*p){
+ // Nested coarse/fine search boundaries must not reset frame accounting.
+ auto count=p->searchState().m_cumulativeCellsAllocated;
+ p->beginSearchState();p->beginSearchState();assert(count==p->searchState().m_cumulativeCellsAllocated);
+ p->searchState().m_cumulativeCellsAllocated+=cost;processed.push_back(id);
+}
+int main(){Pathfinder p;for(int i=0;i<6;++i)p.m_queuedPathfindRequests[(510+i)%512]=i+1;
+ p.m_isMapReady=false;p.processPathfindQueue();assert(processed.empty() && p.m_queuePRHead==510);
+ p.m_isMapReady=true;p.m_zoneManager.dirty=true;p.processPathfindQueue();assert(processed.empty());
+ p.processPathfindQueue();assert((processed==std::vector<int>{1,2}) && p.m_queuePRHead==0);
+ assert(p.searchState().m_cumulativeCellsAllocated==5500);
+ p.processPathfindQueue();assert((processed==std::vector<int>{1,2,3}) && p.m_queuePRHead==1);
+ assert(p.searchState().m_cumulativeCellsAllocated==5000);
+ p.processPathfindQueue();assert((processed==std::vector<int>{1,2,3,6}) && p.m_queuePRHead==4);
+ assert(p.searchState().m_cumulativeCellsAllocated==100);
+ for(int i=0;i<6;++i)assert(p.m_queuedPathfindRequests[(510+i)%512]==INVALID_ID);
+ assert(p.m_logicalExtent.hi.x==99 && p.m_logicalExtent.hi.y==99);
+ p.processPathfindQueue();assert(p.searchState().m_cumulativeCellsAllocated==0);
+ for(int id:processed)printf("%d ",id);
+}
+""").stdout
+        self.assertEqual(result(False),result(True))
 
 
 if __name__ == '__main__':

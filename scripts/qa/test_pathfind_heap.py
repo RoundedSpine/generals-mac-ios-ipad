@@ -34,6 +34,7 @@ def fixture(retail, fixed, context=False):
 #define TRUE true
 #define DEBUG_ASSERTCRASH(c,m) assert(c)
 using Bool=bool; using Int=int; using UnsignedInt=unsigned; using UnsignedShort=unsigned short; using ObjectID=unsigned;
+constexpr ObjectID INVALID_ID=0;
 struct ICoord2D {int x,y;};
 class PathfindCell;
 constexpr unsigned PATHFIND_CELLS_PER_FRAME=5000;

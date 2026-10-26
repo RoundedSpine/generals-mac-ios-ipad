@@ -41,6 +41,7 @@ struct Pathfinder{
  struct {ICoord2D lo{0,0},hi{1,0};}m_extent;
  PathfindZoneManager m_zoneManager;void*m_map=nullptr;
  std::vector<PathfindCell*>m_closedList,m_openList;
+ Pathfinder& searchState(){return *this;}
  PathfindCell border,adjacent;
  PathfindCell*getCell(int,int x,int){assert(x>=0 && x<=1);return x==0?&border:&adjacent;}
  void processHierarchicalCell(const ICoord2D&,const ICoord2D&,PathfindCell*,PathfindCell*,zoneStorageType,zoneStorageType*,Int&,Bool,Int&);

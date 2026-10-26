@@ -222,11 +222,9 @@ struct PathfindSearchState {
  Bool m_open = false, m_closed = false, m_blockedByAlly = false;
 };
 constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;
-using PathfindSearchContext = StampedSearchContext<PathfindSearchState, PATHFIND_RECORD_CAPACITY>;
-inline PathfindSearchContext& mainPathfindSearchContext() {
- static PathfindSearchContext context;
- return context;
-}
+using PathfindSearchNodes = StampedSearchContext<PathfindSearchState, PATHFIND_RECORD_CAPACITY>;
+// Defined after the list type; records access only the node arena here.
+inline PathfindSearchNodes& mainPathfindSearchNodes();
 
 class PathfindCellInfo
 {
@@ -244,7 +242,7 @@ public:
 
 	PathfindSearchState& search() const {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-		return mainPathfindSearchContext().get(m_searchSlot);
+		return mainPathfindSearchNodes().get(m_searchSlot);
 #else
 		return const_cast<PathfindCellInfo*>(this)->m_search;
 #endif
@@ -303,6 +301,8 @@ public:
 
 	PathfindCell* getHead() const { return m_heapActive ? (m_heap.empty() ? nullptr : m_heap[0]->m_cell) : m_head; }
 	Bool empty() const { return getHead() == nullptr; }
+ // GeneralsX @refactor Codex 26/10/2026 Release global context buffers before game memory shuts down.
+ void releaseStorage() { reset(); std::vector<PathfindCellInfo*>().swap(m_heap); }
 	PathfindCell* getNextForDisplay(PathfindCell* cell) const;
 
 	Bool canReverseSort(PathfindCell& currentCell) const;
@@ -322,6 +322,45 @@ private:
 	void siftDown(Int index);
 	void useLinkedList();
 };
+
+// GeneralsX @refactor Codex 26/10/2026 Own serial search lists, control flags and corridor scratch together.
+struct PathfindSearchBookkeeping {
+ PathfindCellList m_openList{true};
+ PathfindCellList m_closedList;
+ Bool m_isTunneling = false;
+ ObjectID m_ignoreObstacleID = INVALID_ID;
+ Int m_cumulativeCellsAllocated = 0;
+};
+
+struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
+ // One byte per hierarchical block, not per terrain cell. A new map starts fully passable.
+ std::vector<unsigned char> m_corridor;
+ void resizeCorridor(std::size_t blocks) {
+  if (!blocks) std::vector<unsigned char>().swap(m_corridor);
+  else m_corridor.assign(blocks, 1);
+ }
+ void releaseStorage() {
+  m_openList.releaseStorage();
+  m_closedList.releaseStorage();
+  resizeCorridor(0);
+  m_isTunneling = false;
+  m_ignoreObstacleID = INVALID_ID;
+  m_cumulativeCellsAllocated = 0;
+ }
+ void setCorridorPassable(std::size_t block, Bool passable) {
+  assert(block < m_corridor.size());
+  m_corridor[block] = passable ? 1 : 0;
+ }
+ Bool corridorPassable(std::size_t block) const {
+  assert(block < m_corridor.size());
+  return m_corridor[block] != 0;
+ }
+};
+inline PathfindSearchContext& mainPathfindSearchContext() {
+ static PathfindSearchContext context;
+ return context;
+}
+inline PathfindSearchNodes& mainPathfindSearchNodes() { return mainPathfindSearchContext(); }
 
 /**
  * This represents one cell in the pathfinding grid.
@@ -561,9 +600,11 @@ public:
 	void blockCalculateZones(	PathfindCell **map, PathfindLayer layers[], const IRegion2D &bounds);	///< Does zone calculations.
 	zoneStorageType getEffectiveZone(LocomotorSurfaceTypeMask acceptableSurfaces, Bool crusher, zoneStorageType zone) const;
 
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
 	void clearMarkedPassable() {m_markedPassable = false;}
 	Bool isPassable() {return m_markedPassable;}
 	void setPassable(Bool pass) {m_markedPassable = pass;}
+#endif
 
 	Bool getInteractsWithBridge() const {return m_interactsWithBridge;}
 	void setInteractsWithBridge(Bool interacts) {m_interactsWithBridge = interacts;}
@@ -585,7 +626,9 @@ protected:
 	zoneStorageType *m_groundRubbleZones;
 	zoneStorageType *m_crusherZones;
 	Bool					m_interactsWithBridge;
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
 	Bool					m_markedPassable;
+#endif
 };
 typedef ZoneBlock *ZoneBlockP;
 
@@ -934,24 +977,33 @@ protected:
 #endif
 
 private:
+ // GeneralsX @refactor Codex 26/10/2026 Route all search scratch through one serial owner.
+ PathfindSearchBookkeeping& searchState() const {
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+  return mainPathfindSearchContext();
+#else
+  return m_legacySearchState;
+#endif
+ }
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
+ mutable PathfindSearchBookkeeping m_legacySearchState;
+#endif
+
+private:
 	/// This uses WAY too much memory.  Should at least be array of pointers to cells w/ many fewer cells
 	PathfindCell *m_blockOfMapCells;		///< Pathfinding map - contains iconic representation of the map
 	PathfindCell **m_map;		///< Pathfinding map indexes - contains matrix indexing into the map.
 	IRegion2D m_extent;														///< Grid extent limits
 	IRegion2D m_logicalExtent;										///< Logical grid extent limits
 
-	PathfindCellList m_openList;									///< Cells ready to be explored
-	PathfindCellList m_closedList;								///< Cells already explored
 
 	Bool m_isMapReady;														///< True if all cells of map have been classified
-	Bool m_isTunneling;														///< True if path started in an obstacle
 
 	Int m_frameToShowObstacles;										///< Time to redraw obstacles.  For debug output.
 
 	Coord3D debugPathPos;													///< Used for visual debugging
 	Path *debugPath;															///< Used for visual debugging
 
-	ObjectID m_ignoreObstacleID;									///< Ignore the given obstacle
 
 	PathfindZoneManager m_zoneManager;						///< Handles the pathfind zones.
 
@@ -968,7 +1020,6 @@ private:
 	ObjectID			m_queuedPathfindRequests[PATHFIND_QUEUE_LEN];
 	Int						m_queuePRHead;
 	Int						m_queuePRTail;
-	Int						m_cumulativeCellsAllocated;
 
 #if RTS_ZEROHOUR && RETAIL_COMPATIBLE_CRC
 public:
@@ -979,7 +1030,7 @@ public:
 
 inline void Pathfinder::setIgnoreObstacleID( ObjectID objID )
 {
-	m_ignoreObstacleID = objID;
+	searchState().m_ignoreObstacleID = objID;
 }
 
 inline void Pathfinder::worldToGrid( const Coord3D *pos, ICoord2D *cellIndex )
