@@ -40,6 +40,7 @@
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL_main.h>
 #include "nativeframecadence.h"
+#include "dxvkcachemaintenance.h"
 #include <cerrno>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -459,6 +460,9 @@ int main(int argc, char* argv[])
 			}
 #endif
 
+			// GeneralsX @feature Codex 26/10/2026 Clear requested state caches before the Vulkan/DXVK libraries load.
+			const char* activeCache = std::getenv("DXVK_STATE_CACHE_PATH");
+			gxcache::clearRequested(home, activeCache ? activeCache : cacheDir);
 
 			if (usingBundleData) {
 				// Seed default settings on first run (full detail instead of the

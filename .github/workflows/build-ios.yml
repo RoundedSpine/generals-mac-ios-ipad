@@ -40,6 +40,7 @@ jobs:
           python3 scripts/qa/test_hierarchical_edges.py
           python3 scripts/qa/test_strip_diagnostics.py
           python3 scripts/qa/test_quad_lists.py
+          python3 scripts/qa/test_dxvk_cache_reset.py
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk

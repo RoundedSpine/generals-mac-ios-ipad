@@ -59,6 +59,10 @@ Run `python3 scripts/qa/test_quad_lists.py` for verified-quad winding, vertex
 attributes, draw results and actual water upload/draw branches, including the
 original-strip fallback with conversion disabled.
 
+Run `python3 scripts/qa/test_dxvk_cache_reset.py` for real-filesystem cache reset
+checks: opt-in requests, deletion boundaries, preserved user files, symlinks and
+request consumption/retry behavior.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 

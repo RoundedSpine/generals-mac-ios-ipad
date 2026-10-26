@@ -167,3 +167,25 @@ desktop/headless builds retain the original loop. Run
 `python3 scripts/qa/test_ios_native_callbacks.py` for compiled callback/cadence,
 event-ownership, gesture and lifecycle checks. These stand-ins do not replace a
 full macOS/Xcode build or device testing.
+
+
+## Manually clear the DXVK state cache
+
+1. Fully close Generals ZH.
+2. In Files, open **On My iPhone/iPad > Generals ZH**.
+3. Create an empty folder named exactly **Clear DXVK Cache**.
+4. Launch the game. The reset runs before DXVK starts.
+5. Open **DXVK Cache Reset Result.txt** in the same Files location to check the result.
+
+On success, the request folder disappears. Repeat these steps whenever another
+reset is needed. The next run can have shader/pipeline compilation hitches.
+
+The reset removes regular `.dxvk-cache` files directly in the app's Library/Caches
+and directly inside its `dxvk-test-<tag>` folders, including the active test cache.
+It leaves game data, saves, settings, other caches and directories in place.
+Symlinks are not followed. A nonempty request folder is rejected; remove its
+contents yourself or create a fresh empty request folder. Failed resets keep the
+request for a later attempt and report an incomplete result. An externally
+overridden cache location is not deleted or reported as fully cleared.
+
+This resets DXVK's persistent state cache, not every Metal/driver-managed cache.
