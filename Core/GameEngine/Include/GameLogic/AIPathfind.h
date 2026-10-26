@@ -33,6 +33,11 @@
 #include "Common/Snapshot.h"
 
 #include <vector>
+#include "stampedsearchcontext.h"
+
+#if defined(GENERALS_SEARCH_CONTEXT) && RTS_ZEROHOUR
+#define GENERALS_ZH_SEARCH_CONTEXT 1
+#endif
 //#include "GameLogic/Locomotor.h"	// no, do not include this, unless you like long recompiles
 #include "GameLogic/LocomotorSet.h"
 #include "GameLogic/GameLogic.h"
@@ -207,6 +212,22 @@ protected:
 // Fits in 4 bits for now
 enum {MAX_WALL_PIECES = 128};
 
+// GeneralsX @feature Codex 26/10/2026 Search-only state is isolated from permanent unit/obstacle records.
+class PathfindCellInfo;
+struct PathfindSearchState {
+ PathfindCellInfo *m_nextOpen = nullptr, *m_prevOpen = nullptr, *m_pathParent = nullptr;
+ unsigned long long m_openSequence = 0;
+ Int m_openIndex = -1;
+ UnsignedShort m_totalCost = 0, m_costSoFar = 0;
+ Bool m_open = false, m_closed = false, m_blockedByAlly = false;
+};
+constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;
+using PathfindSearchContext = StampedSearchContext<PathfindSearchState, PATHFIND_RECORD_CAPACITY>;
+inline PathfindSearchContext& mainPathfindSearchContext() {
+ static PathfindSearchContext context;
+ return context;
+}
+
 class PathfindCellInfo
 {
 	friend class PathfindCell;
@@ -221,21 +242,33 @@ public:
 	static PathfindCellInfo * getACellInfo(PathfindCell *cell, const ICoord2D &pos);
 	static void releaseACellInfo(PathfindCellInfo *theInfo);
 
+	PathfindSearchState& search() const {
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+		return mainPathfindSearchContext().get(m_searchSlot);
+#else
+		return const_cast<PathfindCellInfo*>(this)->m_search;
+#endif
+	}
+	PathfindCellInfo*& freeLink() {
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+		return m_nextFree;
+#else
+		return m_search.m_pathParent; // Retain legacy free-list aliasing when the experiment is disabled.
+#endif
+	}
+
 protected:
 	static PathfindCellInfo *s_infoArray;
 	static PathfindCellInfo *s_firstFree;							///<
 
 
-	PathfindCellInfo *m_nextOpen, *m_prevOpen;						///< for A* "open" list, shared by closed list
-
-	PathfindCellInfo *m_pathParent;												///< "parent" cell from pathfinder
-	PathfindCell *m_cell;															///< Cell this info belongs to currently.
-
-	// GeneralsX @performance Codex 26/10/2026 Stable open-heap membership, bounded by the existing record pool.
-	unsigned long long m_openSequence;
-	Int m_openIndex;
-
-	UnsignedShort m_totalCost, m_costSoFar;	///< cost estimates for A* search
+	PathfindCell *m_cell;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+	UnsignedInt m_searchSlot;
+	PathfindCellInfo* m_nextFree;
+#else
+	PathfindSearchState m_search;
+#endif
 
 	/// have to include cell's coordinates, since cells are often accessed via pointer only
 	ICoord2D m_pos;
@@ -247,12 +280,9 @@ protected:
 	ObjectID m_obstacleID;	///< the object ID who overlaps this cell
 
 	UnsignedInt m_isFree:1;
-	UnsignedInt m_blockedByAlly:1;///< True if this cell is blocked by an allied unit.
 	UnsignedInt m_obstacleIsFence:1;///< True if occupied by a fence.
 	UnsignedInt m_obstacleIsTransparent:1;///< True if obstacle is transparent (undefined if obstacleid is invalid)
 	/// @todo Do we need both mark values in this cell?  Can't store a single value and compare it?
-	UnsignedInt m_open:1;													///< place for marking this cell as on the open list
-	UnsignedInt m_closed:1;												///< place for marking this cell as on the closed list
 };
 
 // TheSuperHackers @info The PathfindCellList class acts as a new management class for the pathfindcell open and closed lists
@@ -383,8 +413,8 @@ public:
 	/// remove all cells from closed list.
 	static Int releaseOpenList( PathfindCellList &list );
 
-	inline PathfindCell *getNextOpen() {return m_info->m_nextOpen?m_info->m_nextOpen->m_cell: nullptr;}
-	inline PathfindCell *getPrevOpen() {return m_info->m_prevOpen?m_info->m_prevOpen->m_cell: nullptr;}
+	inline PathfindCell *getNextOpen() {return m_info->search().m_nextOpen?m_info->search().m_nextOpen->m_cell: nullptr;}
+	inline PathfindCell *getPrevOpen() {return m_info->search().m_prevOpen?m_info->search().m_prevOpen->m_cell: nullptr;}
 
 	inline UnsignedShort getXIndex() const {return m_info->m_pos.x;}
 	inline UnsignedShort getYIndex() const {return m_info->m_pos.y;}
@@ -392,20 +422,20 @@ public:
 	inline Bool isBlockedByAlly() const;
 	inline void setBlockedByAlly(Bool blocked);
 
-	inline Bool getOpen() const {return m_info->m_open;}
-	inline Bool getClosed() const {return m_info->m_closed;}
-	inline UnsignedInt getCostSoFar() const {return m_info->m_costSoFar;}
-	inline UnsignedInt getTotalCost() const {return m_info->m_totalCost;}
+	inline Bool getOpen() const {return m_info->search().m_open;}
+	inline Bool getClosed() const {return m_info->search().m_closed;}
+	inline UnsignedInt getCostSoFar() const {return m_info->search().m_costSoFar;}
+	inline UnsignedInt getTotalCost() const {return m_info->search().m_totalCost;}
 
 	inline UnsignedInt getTotalCostDifference(PathfindCell& other) const;
 
-	inline void setCostSoFar(UnsignedInt cost) { if( m_info ) m_info->m_costSoFar = cost;}
-	inline void setTotalCost(UnsignedInt cost) { if( m_info ) m_info->m_totalCost = cost;}
+	inline void setCostSoFar(UnsignedInt cost) { if( m_info ) m_info->search().m_costSoFar = cost;}
+	inline void setTotalCost(UnsignedInt cost) { if( m_info ) m_info->search().m_totalCost = cost;}
 
 	void setParentCell(PathfindCell* parent);
 	void clearParentCell();
 	void setParentCellHierarchical(PathfindCell* parent);
-	inline PathfindCell* getParentCell() const {return m_info ? m_info->m_pathParent ? m_info->m_pathParent->m_cell : nullptr : nullptr;}
+	inline PathfindCell* getParentCell() const {return m_info ? m_info->search().m_pathParent ? m_info->search().m_pathParent->m_cell : nullptr : nullptr;}
 
 	Bool startPathfind( PathfindCell *goalCell );
 	Bool getPinched() const {return m_pinched;}
@@ -771,6 +801,7 @@ public:
 #if RETAIL_COMPATIBLE_PATHFINDING
 	void forceCleanCells();
 #endif
+	void beginSearchState();
 	void cleanOpenAndClosedLists();
 
 	// Adjusts the destination to a spot near dest that is not occupied by other units.

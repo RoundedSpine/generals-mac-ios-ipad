@@ -2,6 +2,7 @@
 """Compare production heap/list operations without changing search or allocation rules."""
 # GeneralsX @test Codex 26/10/2026 Check stable ties, changed-cost removal, retail fallback and reuse.
 import unittest
+import re
 from compiled_harness import ROOT, run_cpp
 
 HEADER = (ROOT / 'Core/GameEngine/Include/GameLogic/AIPathfind.h').read_text()
@@ -13,7 +14,8 @@ def function(marker):
     return SOURCE[start:SOURCE.index('\n}', start) + 2]
 
 
-def fixture(retail, fixed):
+def fixture(retail, fixed, context=False):
+    state = HEADER[HEADER.index('class PathfindCellInfo;'):HEADER.index('class PathfindCellInfo\n')]
     info = HEADER[HEADER.index('class PathfindCellInfo\n'):HEADER.index('// TheSuperHackers @info The PathfindCellList')]
     queue = HEADER[HEADER.index('class PathfindCellList\n'):HEADER.index('/**\n * This represents one cell')]
     # Expose fields only in the fixture for independent invariant checks.
@@ -21,7 +23,7 @@ def fixture(retail, fixed):
     queue = queue.replace('private:', 'public:')
     methods = SOURCE[SOURCE.index('Bool PathfindCellList::before('):SOURCE.index('//-----------------------------------------------------------------------------------', SOURCE.index('Bool PathfindCellList::before('))]
     operations = SOURCE[SOURCE.index('#if RETAIL_COMPATIBLE_PATHFINDING\n// Retail compatible insertion sort'):SOURCE.index('/// remove all cells from "closed" list', SOURCE.index('// Retail compatible insertion sort'))]
-    return f'#define RETAIL_COMPATIBLE_PATHFINDING {retail}\n' + r'''
+    source = ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if context else '') + f'#define RETAIL_COMPATIBLE_PATHFINDING {retail}\n' + r'''
 #include <vector>
 #include <random>
 #include <cassert>
@@ -35,7 +37,7 @@ using Bool=bool; using Int=int; using UnsignedInt=unsigned; using UnsignedShort=
 struct ICoord2D {int x,y;};
 class PathfindCell;
 constexpr unsigned PATHFIND_CELLS_PER_FRAME=5000;
-bool s_useFixedPathfinding=''' + ('true' if fixed else 'false') + '; bool s_forceCleanCells=false;\n' + info + queue + r'''
+bool s_useFixedPathfinding=''' + ('true' if fixed else 'false') + '; bool s_forceCleanCells=false;\n' + '#include "stampedsearchcontext.h"\n' + state + info + queue + r'''
 class PathfindCell {
 public:
  PathfindCellInfo* m_info=nullptr;
@@ -57,7 +59,11 @@ struct Arena {
  std::vector<PathfindCellInfo> info;
  PathfindCellList queue;
  Arena(bool heap, int n):cells(n),info(n),queue(heap){
-  for(int i=0;i<n;++i){cells[i].id=i;cells[i].m_info=&info[i];info[i].m_cell=&cells[i];info[i].m_openIndex=-1;}
+  for(int i=0;i<n;++i){cells[i].id=i;cells[i].m_info=&info[i];
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ static unsigned nextSlot=0;info[i].m_searchSlot=(nextSlot++)%PATHFIND_RECORD_CAPACITY;info[i].search()=PathfindSearchState{};
+#endif
+info[i].m_cell=&cells[i];info[i].m_openIndex=-1;}
  }
  void insert(int i,unsigned cost){info[i].m_totalCost=cost;cells[i].putOnSortedOpenList(queue);}
  void remove(int i){cells[i].removeFromOpenList(queue);}
@@ -160,6 +166,11 @@ void reused_record(){
 int main(){randomized();threshold();reused_record();for(unsigned seed=0;seed<100;++seed)assert(gridSearch(true,seed)==gridSearch(false,seed));}
 '''
 
+    fields = 'm_nextOpen|m_prevOpen|m_pathParent|m_openSequence|m_openIndex|m_totalCost|m_costSoFar|m_open|m_closed'
+    source = re.sub(r'->(' + fields + r')\b', lambda m: '->search().' + m[1], source)
+    source = re.sub(r'(?<!search\(\))\.(' + fields + r')\b', lambda m: '.search().' + m[1], source)
+    return source.replace("m_search.search().", "m_search.")
+
 
 class PathfindHeapTest(unittest.TestCase):
     def test_retail_order_and_capped_fallback(self):
@@ -167,6 +178,10 @@ class PathfindHeapTest(unittest.TestCase):
 
     def test_fixed_order_with_retail_support(self):
         run_cpp(fixture(1, True))
+
+    def test_generation_context_heap_and_list_order(self):
+        run_cpp(fixture(1, False, True))
+        run_cpp(fixture(1, True, True))
 
     def test_fixed_order_without_retail_support(self):
         run_cpp(fixture(0, True))

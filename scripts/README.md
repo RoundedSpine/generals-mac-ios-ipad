@@ -63,6 +63,10 @@ Run `python3 scripts/qa/test_dxvk_cache_reset.py` for real-filesystem cache rese
 checks: opt-in requests, deletion boundaries, preserved user files, symlinks and
 request consumption/retry behavior.
 
+Run `python3 scripts/qa/test_search_context.py` for bounded generation-stamped
+search lifetime, occupancy preservation, pool exhaustion/recycling, cleanup order
+and synthetic route comparisons. The heap suite also exercises the enabled context.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 

@@ -42,6 +42,12 @@ if(NOT GENERALS_DXVK_CACHE_TAG STREQUAL "")
     add_compile_definitions(GENERALS_DXVK_CACHE_TAG="${GENERALS_DXVK_CACHE_TAG}")
 endif()
 
+# GeneralsX @build Codex 26/10/2026 Keep the bounded serial search-context experiment opt-in.
+option(GENERALS_SEARCH_CONTEXT "Use generation-stamped single-threaded Zero Hour search state" OFF)
+if(GENERALS_SEARCH_CONTEXT)
+    add_compile_definitions(GENERALS_SEARCH_CONTEXT=1)
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Gate the verified-quad conversion for experimental device testing.
 option(GENERALS_QUAD_LISTS "Convert verified screen/water quads to triangle lists" OFF)
 if(GENERALS_QUAD_LISTS)
