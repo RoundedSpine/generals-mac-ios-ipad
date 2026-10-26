@@ -28,6 +28,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "GameLogic/AIPathfind.h"
+#include "ownedpathroute.h"
 
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
@@ -9419,7 +9420,9 @@ Path *Pathfinder::buildActualPath( const Object *obj, LocomotorSurfaceTypeMask a
 /**
  * Work backwards from goal cell to construct final path.
  */
-void Pathfinder::prependCells( Path *path, const Coord3D *fromPos,
+// GeneralsX @refactor Codex 27/10/2026 Keep one parent walk for immediate and owned-value sinks.
+template<class RouteSink>
+void Pathfinder::prependRouteCells( RouteSink *path, const Coord3D *fromPos,
 																	PathfindCell *goalCell, Bool center )
 {
 	// traverse path cells in REVERSE order, creating path in desired order
@@ -9504,6 +9507,20 @@ void Pathfinder::prependCells( Path *path, const Coord3D *fromPos,
 	}
 
 }
+
+// GeneralsX @refactor Codex 27/10/2026 Materialize engine nodes only after the route values have been collected.
+void Pathfinder::prependCells(Path* path, const Coord3D* fromPos, PathfindCell* goalCell, Bool center)
+{
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ using Route = OwnedPathRoute<Coord3D, PathfindLayerEnum, PATHFIND_RECORD_CAPACITY + 1>;
+ auto result = Route::fromPath(*path);
+ prependRouteCells(&result, fromPos, goalCell, center);
+ result.materialize(*path);
+#else
+ prependRouteCells(path, fromPos, goalCell, center);
+#endif
+}
+
 
 void Pathfinder::setDebugPath(Path *newDebugpath)
 {

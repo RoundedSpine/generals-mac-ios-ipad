@@ -1022,6 +1022,9 @@ protected:
 		Bool center, Int pathDiameter );	///< Work backwards from goal cell to construct final path
 	Path *buildHierarchicalPath( const Coord3D *fromPos, PathfindCell *goalCell);	///< Work backwards from goal cell to construct final path
 
+ // GeneralsX @refactor Codex 27/10/2026 Share the unchanged cell walk between legacy and owned route sinks.
+ template<class RouteSink>
+ void prependRouteCells(RouteSink* route, const Coord3D* fromPos, PathfindCell* goalCell, Bool center);
 	void  prependCells( Path *path, const Coord3D *fromPos,
 																	PathfindCell *goalCell, Bool center ); ///< Add pathfind cells to a path.
 

@@ -207,3 +207,41 @@ Validation result for independent allocation: all 64 workflow QA tests passed
 locally; all 17 context/allocation tests passed AddressSanitizer and
 UndefinedBehaviorSanitizer. Actionlint and diff checks passed. Full iOS SDK
 compilation, device movement/performance and replay checks remain pending.
+
+
+## Follow-up: owned unoptimized route output — 2026-10-27
+
+The serial experiment now builds OwnedPathRoute value data during the parent-cell
+walk and materializes new engine PathNodes only after that walk returns. A shared
+prependRouteCells template preserves the previous algorithm for both immediate
+(default) and deferred (experimental) sinks. This includes corridor marking,
+parent clearing and the retail failover branch. The result survives those cells
+being cleaned because its payload contains copied coordinates/layers/flags only.
+
+Points are appended internally in prepend order, then applied in the same order,
+preserving the final start-to-goal node chain. New points default to canOptimize
+false exactly like PathNode; the walk sets intermediate flags and preserves the
+special exact start-position behavior. Existing patched-path tails are not copied
+or reconstructed: only their head metadata is seeded into the value collector,
+then applied back to that same path before new nodes are prepended. Ally blocking
+is applied when encountered without clearing a pre-existing blocked flag.
+
+The buffer admits at most PATHFIND_RECORD_CAPACITY + 1 new points, allowing the
+existing search records plus an exact source position. This adds temporary vector
+storage and an additional materialization pass proportional to route length; it is
+an ownership refactor, not a measured speedup. No additional path searches or
+background work are performed. Exact iOS memory/performance remains unmeasured.
+
+This is the **unoptimized output side** of a request/result boundary. Terrain
+height lookup, cell traversal, corridor/parent bookkeeping and legacy failover
+still execute serially. Input object/locomotor/team/terrain state has not been
+snapshotted; engine Path allocation and optimization are still part of the serial
+caller. Existing-tail capture also remains on that caller. Worker execution and
+prefetch remain disabled, and stale-result validation is still future work.
+
+Validation: all 70 workflow QA tests passed locally. Six new compiled tests compare
+the production walk with both sinks and assert known results for normal/short,
+bridge, cliff, ally and existing-tail cases, retail failover, result lifetime,
+copy ownership and bounded failure. They also confirm no engine node is allocated
+inside the deferred parent walk. All six pass ASan/UBSan. These are controlled
+fixtures, not full-engine replays or device gameplay/performance tests.

@@ -319,3 +319,7 @@ docker rmi generalsx/linux-builder:latest generalsx/mingw-builder:latest
 - **Phase 1 Details**: See [docs/WORKDIR/phases/PHASE01_IMPLEMENTATION_PLAN.md](../docs/WORKDIR/phases/PHASE01_IMPLEMENTATION_PLAN.md)
 - **Docker Workflow**: See [docs/WORKDIR/support/DOCKER_WORKFLOW.md](../docs/WORKDIR/support/DOCKER_WORKFLOW.md)
 - **Instructions**: See [.github/instructions/scripts.instructions.md](../.github/instructions/scripts.instructions.md)
+
+Run `python3 scripts/qa/test_owned_path_route.py` to compare immediate and deferred
+route construction using the production parent walk, including bridge/cliff flags,
+existing tails, cleanup, value ownership and capacity bounds.
