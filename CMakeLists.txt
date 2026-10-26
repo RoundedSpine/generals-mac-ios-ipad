@@ -33,6 +33,11 @@ endif()
 # Top level project, doesn't really affect anything.
 project(genzh LANGUAGES C CXX)
 
+# GeneralsX @build Codex 26/10/2026 Gate the verified-quad conversion for experimental device testing.
+option(GENERALS_QUAD_LISTS "Convert verified screen/water quads to triangle lists" OFF)
+if(GENERALS_QUAD_LISTS)
+    add_compile_definitions(GENERALS_QUAD_LISTS=1)
+endif()
 # GeneralsX @build Codex 26/10/2026 Temporary strip probes are opt-in and absent from regular builds.
 option(GENERALS_STRIP_DIAGNOSTICS "Enable bounded CPU strip/index diagnostics" OFF)
 if(GENERALS_STRIP_DIAGNOSTICS)

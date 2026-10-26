@@ -54,6 +54,7 @@
 //-----------------------------------------------------------------------------
 
 #include "dx8wrapper.h"
+#include "quadlist.h"
 #include "assetmgr.h"
 #include "Lib/BaseType.h"
 #include "Common/file.h"
@@ -370,7 +371,7 @@ Bool ScreenBWFilter::postRender(FilterModes mode, Coord2D &scrollDelta,Bool &doE
 	//not worth bothering with index/vertex buffers.
 	pDev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
-	GX_STRIP_UP(pDev,D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+	gxquad::draw(pDev, v);
 
 	reset();
 	return true;
@@ -1066,7 +1067,7 @@ Bool ScreenMotionBlurFilter::postRender(FilterModes mode, Coord2D &scrollDelta,B
 	pDev->SetTextureStageState(0,D3DTSS_ALPHAARG1, D3DTA_CURRENT);
 	pDev->SetTextureStageState(0,D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
 	pDev->SetTextureStageState(0,D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-	GX_STRIP_UP(pDev,D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+	gxquad::draw(pDev, v);
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,true);
 
 	DX8Wrapper::Apply_Render_State_Changes();
@@ -1094,7 +1095,7 @@ Bool ScreenMotionBlurFilter::postRender(FilterModes mode, Coord2D &scrollDelta,B
 					v[i].v = ((v[i].v-center.y)*factor) + center.y;
 				}
 			}
-			GX_STRIP_UP(pDev,D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+			gxquad::draw(pDev, v);
 
 		}
 	}
@@ -2863,7 +2864,7 @@ void W3DShaderManager::drawViewport(Int color)
 	//not worth bothering with index/vertex buffers.
 	pDev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
 
-	GX_STRIP_UP(pDev,D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+	gxquad::draw(pDev, v);
 }
 
 // W3DShaderManager::startRenderToTexture =======================================================

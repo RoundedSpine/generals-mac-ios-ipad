@@ -56,6 +56,7 @@
 #include "Common/file.h"
 #include "Common/FileSystem.h"
 #include "texture.h"
+#include "quadlist.h"
 #include "colmath.h"
 #include "coltest.h"
 #include "rinfo.h"
@@ -472,10 +473,17 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 
 	vertexBuffer->Get_DX8_Vertex_Buffer()->Unlock();
 
+#ifndef GENERALS_QUAD_LISTS
 	Int idxCount=(m_y-1)*(m_x*2+2) - 2;	//index count
+#endif
 
 	DX8Wrapper::Set_Index_Buffer(TheWaterTracksRenderSystem->m_indexBuffer,batchStart);
+	// GeneralsX @feature Codex 26/10/2026 The verified water-track quad uses two independent triangles.
+#ifdef GENERALS_QUAD_LISTS
+	DX8Wrapper::Draw_Triangles(0,2,0,m_x*m_y);
+#else
 	DX8Wrapper::Draw_Strip(0,idxCount-2,0,m_x*m_y);	//there are always n-2 primitives for n index strip.
+#endif
 
 	return batchStart+m_x*m_y;	//return new offset into unused area of vertex buffer
 }
@@ -633,7 +641,9 @@ WaterTracksRenderSystem::~WaterTracksRenderSystem()
 //=============================================================================
 void WaterTracksRenderSystem::ReAcquireResources()
 {
+#ifndef GENERALS_QUAD_LISTS
 	Int i,j,k;
+#endif
 //	const Int numModules=16;	///@todo: Get a value out of gdf
 
 	// just for paranoia's sake.
@@ -644,7 +654,12 @@ void WaterTracksRenderSystem::ReAcquireResources()
 	//Will also need 2 extra indices to connect each strip to next one (except last strip)
 	//Total index buffer size = (m_y-1)*(m_x*2+2) - 2 (drop the extra 2 indices from last strip)
 
+#ifdef GENERALS_QUAD_LISTS
+	static_assert(WATER_STRIP_X == 2 && WATER_STRIP_Y == 2, "Quad-list conversion requires four water-track vertices");
+	const Int idxCount = 6;
+#else
 	Int idxCount=(m_stripSizeY-1)*(m_stripSizeX*2+2) - 2;
+#endif
 
 	m_indexBuffer=NEW_REF(DX8IndexBufferClass,(idxCount));
 
@@ -653,6 +668,10 @@ void WaterTracksRenderSystem::ReAcquireResources()
 		DX8IndexBufferClass::WriteLockClass lockIdxBuffer(m_indexBuffer);
 		UnsignedShort *ib=lockIdxBuffer.Get_Index_Array();
 
+#ifdef GENERALS_QUAD_LISTS
+		const UnsignedShort strip[4] = {UnsignedShort(m_stripSizeX), 0, UnsignedShort(m_stripSizeX + 1), 1};
+		gxquad::expand(strip, ib);
+#else
 		for (i=0,j=0,k=0; i<idxCount; j++)
 		{
 			for (;k<(m_stripSizeX*(j+1)); k++,i+=2)
@@ -670,6 +689,7 @@ void WaterTracksRenderSystem::ReAcquireResources()
 				i+=2;
 			}
 		}
+#endif
 		GX_STRIP_WATER_CAPTURE(m_indexBuffer->Get_DX8_Index_Buffer(), 0, ib, idxCount);
 	}
 

@@ -55,6 +55,10 @@ Run `python3 scripts/qa/test_strip_diagnostics.py` for opt-in strip-probe tests:
 call/return preservation, index observation coverage, sentinel detection, reference
 balance and bounded output/scanning. Regular builds leave the probes disabled.
 
+Run `python3 scripts/qa/test_quad_lists.py` for verified-quad winding, vertex
+attributes, draw results and actual water upload/draw branches, including the
+original-strip fallback with conversion disabled.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 
