@@ -42,6 +42,12 @@ if(NOT GENERALS_DXVK_CACHE_TAG STREQUAL "")
     add_compile_definitions(GENERALS_DXVK_CACHE_TAG="${GENERALS_DXVK_CACHE_TAG}")
 endif()
 
+# GeneralsX @build Codex 26/10/2026 Community Patch data is opt-in and supplied by the pinned builder job.
+option(GENERALS_COMMUNITY_PATCH "Mount the bundled Community Patch overlay after retail data" OFF)
+if(GENERALS_COMMUNITY_PATCH)
+    add_compile_definitions(GENERALS_COMMUNITY_PATCH=1)
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Keep the bounded serial search-context experiment opt-in.
 option(GENERALS_SEARCH_CONTEXT "Use generation-stamped single-threaded Zero Hour search state" OFF)
 if(GENERALS_SEARCH_CONTEXT)

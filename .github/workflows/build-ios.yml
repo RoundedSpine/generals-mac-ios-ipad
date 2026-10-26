@@ -6,6 +6,7 @@ on:
     branches:
       - ci/ios-unsigned-ipa
       - experiment/ios-mod-testing
+      - community-patch-ios
   workflow_dispatch:
 
 permissions:
@@ -16,7 +17,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  community-patch:
+    if: github.ref_name == 'community-patch-ios'
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read pinned Community Patch source
+        id: patch
+        shell: pwsh
+        run: |
+          $config = Get-Content ios/community-patch/source.json -Raw | ConvertFrom-Json
+          if ($config.repository -notmatch '^https://github.com/([^/]+/[^/]+)\.git$') { throw 'Invalid patch repository URL' }
+          "repository=$($Matches[1])" >> $env:GITHUB_OUTPUT
+          "commit=$($config.commit)" >> $env:GITHUB_OUTPUT
+          "pack=$($config.pack)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.patch.outputs.repository }}
+          ref: ${{ steps.patch.outputs.commit }}
+          submodules: recursive
+          path: community-patch-source
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.5'
+      - name: Build pinned Full English data without installing the PC game
+        shell: pwsh
+        run: |
+          $source = Resolve-Path community-patch-source
+          $config = Get-Content ios/community-patch/source.json -Raw | ConvertFrom-Json
+          $builder = git -C "$source/Tools/GeneralsModBuilder" rev-parse HEAD
+          if ($builder -ne $config.builder_commit) { throw 'Unexpected Mod Builder commit' }
+          uv run --locked --project "$source/Tools/GeneralsModBuilder" generalsmodbuilder --debug --build-pack $config.pack --release --config-list "$source/Patch104pZH/ModJsonFiles.json" "$source/Patch104pZH/Scripts/Windows/WindowsTools.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/build/ios/stage-community-patch.py --source "$source" --pack-dir "$source/Patch104pZH/.Build/RawBundlePacks/$($config.pack)" --output build/community-patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CommunityPatch-FullEnglish
+          path: build/community-patch/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload patch build logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CommunityPatch-build-debug
+          path: community-patch-source/Patch104pZH/.Build/**/*.log
+          if-no-files-found: ignore
+
   build-ipa:
+    needs: community-patch
+    if: always() && !cancelled() && (needs.community-patch.result == 'success' || needs.community-patch.result == 'skipped')
     runs-on: macos-15
     timeout-minutes: 180
     defaults:
@@ -41,7 +96,7 @@ jobs:
               "test_pathfind_heap.py", "test_hierarchical_edges.py",
               "test_strip_diagnostics.py", "test_quad_lists.py",
               "test_dxvk_cache_reset.py", "test_search_context.py",
-              "test_search_record_pool.py",
+              "test_search_record_pool.py", "test_community_patch.py",
           ]
           for test in tests:
               result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)
@@ -100,10 +155,11 @@ jobs:
         run: |
           set -euo pipefail
           cmake --preset ios-vulkan \
-            -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && github.run_id || '' }} \
-            -DGENERALS_SEARCH_CONTEXT=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_QUAD_LISTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_STRIP_DIAGNOSTICS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_DXVK_CACHE_TAG=${{ contains(fromJSON('["experiment/ios-mod-testing","community-patch-ios"]'), github.ref_name) && github.run_id || '' }} \
+            -DGENERALS_COMMUNITY_PATCH=${{ github.ref_name == 'community-patch-ios' && 'ON' || 'OFF' }} \
+            -DGENERALS_SEARCH_CONTEXT=${{ contains(fromJSON('["experiment/ios-mod-testing","community-patch-ios"]'), github.ref_name) && 'ON' || 'OFF' }} \
+            -DGENERALS_QUAD_LISTS=${{ contains(fromJSON('["experiment/ios-mod-testing","community-patch-ios"]'), github.ref_name) && 'ON' || 'OFF' }} \
+            -DGENERALS_STRIP_DIAGNOSTICS=${{ contains(fromJSON('["experiment/ios-mod-testing","community-patch-ios"]'), github.ref_name) && 'ON' || 'OFF' }} \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
             -DVulkan_INCLUDE_DIR="$GX_MVK_ROOT/include" \
@@ -124,7 +180,20 @@ jobs:
           cmake --build build/ios-vulkan --target SDL3-shared --parallel 3 2>&1 | tee logs/build_sdl_ios.log
           cmake --build build/ios-vulkan --target z_generals --parallel 3 2>&1 | tee logs/build_ios.log
 
+      - name: Download compiled Community Patch overlay
+        if: github.ref_name == 'community-patch-ios'
+        uses: actions/download-artifact@v7
+        with:
+          name: CommunityPatch-FullEnglish
+          path: build/community-patch
+
+      - name: Verify patch source, content hash and notices
+        if: github.ref_name == 'community-patch-ios'
+        run: python3 scripts/build/ios/stage-community-patch.py --verify build/community-patch
+
       - name: Package unsigned IPA without retail game assets
+        env:
+          GX_COMMUNITY_PATCH_DIR: ${{ github.ref_name == 'community-patch-ios' && format('{0}/build/community-patch', github.workspace) || '' }}
         run: |
           set -euo pipefail
           bash scripts/build/ios/package-ios-zh.sh --dev --unsigned 2>&1 | tee logs/package_ios.log

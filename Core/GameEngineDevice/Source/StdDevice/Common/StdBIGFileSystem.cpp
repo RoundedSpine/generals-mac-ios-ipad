@@ -42,6 +42,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 
 #if defined(_UNIX)
 #include <strings.h>
@@ -509,6 +510,19 @@ void StdBIGFileSystem::init() {
 
 #if RTS_ZEROHOUR
 	loadBaseGeneralsAssetsForZH(this, primaryAssetsDirectory);
+#if defined(GENERALS_COMMUNITY_PATCH)
+ // GeneralsX @feature Codex 26/10/2026 Mount compiled patch data after both retail archive sets.
+ AsciiString patchPath;
+ if (!getExecutableDirectory(patchPath)) throw std::runtime_error("Cannot locate Community Patch bundle");
+ patchPath.concat("/CommunityPatch/CommunityPatch.big");
+ if (!loadedPrimaryAssets || !TheLocalFileSystem->doesFileExist(patchPath.str()))
+  throw std::runtime_error("Community Patch requires retail game data and its bundled overlay");
+ ArchiveFile* patch = openArchiveFile(patchPath.str());
+ if (!patch) throw std::runtime_error("Cannot open bundled Community Patch archive");
+ loadIntoDirectoryTree(patch, TRUE);
+ m_archiveFileMap[patchPath] = patch;
+ fprintf(stderr, "[COMMUNITY_PATCH] mounted FullEnglish overlay after retail data: %s\n", patchPath.str());
+#endif
 #endif
 }
 
@@ -658,6 +672,13 @@ Bool StdBIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString fi
 	Bool actuallyAdded = FALSE;
 	FilenameListIter it = filenameList.begin();
 	while (it != filenameList.end()) {
+#if RTS_ZEROHOUR && defined(GENERALS_COMMUNITY_PATCH)
+ // The overlay is not a standalone game-data root, even when a recursive bundle scan finds it.
+ if (it->endsWithNoCase("CommunityPatch/CommunityPatch.big") || it->endsWithNoCase("CommunityPatch\\CommunityPatch.big")) {
+  ++it;
+  continue;
+ }
+#endif
 #if RTS_ZEROHOUR
 		// TheSuperHackers @bugfix bobtista 18/11/2025 Skip duplicate INIZH.big in Data\INI to prevent CRC mismatches.
 		// English, Chinese, and Korean SKUs shipped with two INIZH.big files (one in Run directory, one in Run\Data\INI).

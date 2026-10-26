@@ -123,6 +123,28 @@ class PackagingTest(unittest.TestCase):
         self.assertTrue(any('--remove-signature' in call for call in calls))
         self.assertTrue(any('@rpath/libSDL3.0.dylib' in call for call in calls))
 
+    def test_patch_resources_are_separate_from_retail_game_data(self):
+        patch = self.root / 'patch'
+        patch.mkdir()
+        for name in ['CommunityPatch.big', 'manifest.json', 'TERMS.txt', 'UPSTREAM-README.md']:
+            (patch / name).write_text('patch fixture')
+        self.env['GX_COMMUNITY_PATCH_DIR'] = str(patch)
+        result = self.run_package('--dev', '--unsigned')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with zipfile.ZipFile(self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa') as ipa:
+            self.assertIn('Payload/GeneralsXZH.app/CommunityPatch/CommunityPatch.big', ipa.namelist())
+            self.assertFalse(any('/GameData/' in name for name in ipa.namelist()))
+
+    def test_incomplete_patch_resources_fail_packaging(self):
+        patch = self.root / 'patch'
+        patch.mkdir()
+        (patch / 'CommunityPatch.big').write_text('patch fixture')
+        self.env['GX_COMMUNITY_PATCH_DIR'] = str(patch)
+        result = self.run_package('--dev', '--unsigned')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('incomplete Community Patch staging', result.stderr)
+
+
     def test_architecture_check_rejects_filename_after_architecture_list(self):
         binary = self.root / 'build/ios-vulkan/GeneralsMD/GeneralsXZH.app/GeneralsXZH'
         result = subprocess.run(['lipo', '-verify_arch', 'arm64', str(binary)],

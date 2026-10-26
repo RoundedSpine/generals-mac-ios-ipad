@@ -177,6 +177,17 @@ if [[ "${DEV_MODE}" != "1" ]]; then
     echo "    bundled $(du -sh "${APP}/GameData" | cut -f1) of game data"
 fi
 
+# GeneralsX @build Codex 26/10/2026 Patch resources are separate from GameData so retail assets still come from Documents.
+if [[ -n "${GX_COMMUNITY_PATCH_DIR:-}" ]]; then
+    for resource in CommunityPatch.big manifest.json TERMS.txt UPSTREAM-README.md; do
+        if [[ ! -f "${GX_COMMUNITY_PATCH_DIR}/${resource}" ]]; then
+            echo "ERROR: incomplete Community Patch staging: ${resource}" >&2
+            exit 1
+        fi
+    done
+    cp -R "${GX_COMMUNITY_PATCH_DIR}" "${APP}/CommunityPatch"
+fi
+
 # Loose icon PNGs alongside the compiled asset catalog: SpringBoard on some
 # iOS versions won't read Assets.car icons from developer-signed sideloads
 # until a reboot, but it always honors CFBundleIconFiles PNGs in the bundle root.

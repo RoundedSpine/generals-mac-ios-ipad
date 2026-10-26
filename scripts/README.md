@@ -319,3 +319,8 @@ docker rmi generalsx/linux-builder:latest generalsx/mingw-builder:latest
 - **Phase 1 Details**: See [docs/WORKDIR/phases/PHASE01_IMPLEMENTATION_PLAN.md](../docs/WORKDIR/phases/PHASE01_IMPLEMENTATION_PLAN.md)
 - **Docker Workflow**: See [docs/WORKDIR/support/DOCKER_WORKFLOW.md](../docs/WORKDIR/support/DOCKER_WORKFLOW.md)
 - **Instructions**: See [.github/instructions/scripts.instructions.md](../.github/instructions/scripts.instructions.md)
+
+Run `python3 scripts/qa/test_community_patch.py` for compiled BIG staging, upstream
+priority, pin/profile checks, overlay mounting and retail-root exclusion. See
+[Community Patch iOS](../docs/BUILD/IOS_COMMUNITY_PATCH.md) for Windows conversion
+and macOS packaging.

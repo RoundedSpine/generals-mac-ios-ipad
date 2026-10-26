@@ -1,5 +1,9 @@
 # Command & Conquer Generals: Zero Hour — macOS, iOS & iPadOS
 
+EA has not endorsed and does not support this product.
+
+The `community-patch-ios` branch additionally builds and bundles the **Full English Community Patch**. See [Community Patch iOS](docs/BUILD/IOS_COMMUNITY_PATCH.md) and [its notices](COMMUNITY-PATCH-LICENSE.md).
+
 <img width="500" height="281" alt="IMG_3457_500" src="https://github.com/user-attachments/assets/aeaf6692-36e6-40c8-b9f8-8066d014ec4b" />
 
 **Zero Hour running natively on Apple Silicon Macs, iPhone, and iPad** — campaign,
@@ -16,7 +20,7 @@ Built on EA's GPL v3 source release, standing on a chain of community work —
 port and a set of engine fixes. See [Lineage & credits](#lineage--credits) for who built
 what. The original GeneralsX README lives on the `upstream-main` branch.
 
-**No game assets are included or distributed.** You need your own copy
+**The original retail games are not bundled.** The Community Patch branch bundles modified patch data; you still need your own copy
 ([Steam](https://store.steampowered.com/app/2732960/), ~$5 on sale).
 
 ## What this port actually involved
