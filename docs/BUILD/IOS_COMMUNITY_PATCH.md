@@ -27,6 +27,10 @@ It passes the Blender add-on path through an environment variable, so Windows
 backslashes cannot become Python escapes, and sets Blender's Python exit code.
 Exceptions propagate to the job and are published as Actions annotations.
 
+The builder's raw pack uses file symlinks to its compiled items and loose project
+assets. Staging dereferences only links to regular files inside the pinned patch
+project, rejects broken/escaping/directory links, and writes regular output files.
+
 The staging tool requires exactly the 15 BIG archives described by the selected
 upstream pack. It merges them using the original filename priority: optional
 `600_899` overrides core `600_900`, followed by recovered `600_901`. Loose runtime

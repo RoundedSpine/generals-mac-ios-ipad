@@ -116,8 +116,46 @@ class CommunityPatchTest(unittest.TestCase):
                 stage.verify(output, config)
                 with self.assertRaises(ValueError): stage.verify(output, dict(config, commit='c'*40))
                 with self.assertRaises(ValueError): stage.stage(source, pack, output, config)
+                # RawBundlePacks links to BigBundleItems and raw loose source files in the project.
+                linked_archive = project / '.Build/BigBundleItems/optional.big'
+                linked_archive.parent.mkdir(parents=True)
+                original_archive = pack / '600_899_OptionalINI.big'
+                original_archive.rename(linked_archive)
+                original_archive.symlink_to(linked_archive)
+                linked_cursor = project / 'GameFilesEdited/Data/Cursors/c.ani'
+                linked_cursor.parent.mkdir(parents=True)
+                cursor.rename(linked_cursor)
+                cursor.symlink_to(linked_cursor)
+                linked_output = root / 'linked-output'
+                stage.stage(source, pack, linked_output, config)
+                self.assertEqual((linked_output / 'CommunityPatch.big').read_bytes(), content)
+                self.assertFalse(any(path.is_symlink() for path in linked_output.rglob('*')))
+                stage.verify(linked_output, config)
+                original_archive.unlink()
+                original_archive.symlink_to(core)
+                with self.assertRaisesRegex(ValueError, 'outside-project'):
+                    stage.stage(source, pack, root / 'outside-output', config)
                 (pack / '600_899_OptionalINI.big').unlink()
                 with self.assertRaises(ValueError): stage.stage(source, pack, root / 'incomplete', config)
+
+    def test_build_links_reject_broken_directories_and_escape_chains(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / 'project'; project.mkdir()
+            link = project / 'link'
+            link.symlink_to(project / 'missing')
+            with self.assertRaisesRegex(ValueError, 'Broken'):
+                stage.pack_input(link, project)
+            link.unlink(); link.symlink_to(project, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, 'not a regular file'):
+                stage.pack_input(link, project)
+            link.unlink()
+            external = root / 'external'; external.write_text('outside')
+            chain = project / 'chain'; chain.symlink_to(external)
+            link.symlink_to(chain)
+            with self.assertRaisesRegex(ValueError, 'outside-project'):
+                stage.pack_input(link, project)
+
 
     def test_pinned_profile_is_full_english(self):
         config = json.loads((ROOT / 'ios/community-patch/source.json').read_text())

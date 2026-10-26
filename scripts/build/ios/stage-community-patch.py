@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import struct
 import subprocess
+import traceback
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -106,6 +107,21 @@ def expected_archives(source, config):
     return sorted(result, key=str.lower)
 
 
+def pack_input(path, project):
+    # Mod Builder intentionally links RawBundlePacks to compiled items and loose project assets.
+    # Dereference only regular files inside this pinned project; output never contains these links.
+    if not path.is_symlink():
+        return path
+    try:
+        target = path.resolve(strict=True)
+        target.relative_to(project.resolve())
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ValueError(f'Broken or outside-project build link: {path}') from error
+    if not target.is_file():
+        raise ValueError(f'Build link is not a regular file: {path}')
+    return target
+
+
 def stage(source, pack_dir, output, config):
     def revision(*args):
         return subprocess.check_output(['git', '-C', str(source), *args], text=True).strip()
@@ -122,18 +138,19 @@ def stage(source, pack_dir, output, config):
     expected = expected_archives(source, config)
     if [p.name.lower() for p in archives] != [name.lower() for name in expected]:
         raise ValueError(f'Compiled pack archives do not match {config["pack"]}: expected {expected}')
-    selected = {}
+    selected, archive_sources = {}, {}
     # Installed loose data has priority over all archives. Only runtime assets enter the overlay.
     for path in sorted(pack_dir.rglob('*')):
         relative = path.relative_to(pack_dir).as_posix()
-        if path.is_symlink():
-            raise ValueError(f'Symlink in built pack: {relative}')
+        readable = pack_input(path, source / 'Patch104pZH')
+        if path in archives:
+            archive_sources[path] = readable
         if path.is_file() and relative.split('/')[0].lower() in ('data', 'art', 'maps', 'window'):
             if path.suffix.lower() in ('.ani', '.ini', '.csf', '.dds', '.tga', '.w3d', '.wav', '.mp3', '.wnd', '.map', '.str', '.scb', '.pso', '.vso'):
-                selected.setdefault(normalized(relative), (normalized(relative), path, 0, path.stat().st_size))
+                selected.setdefault(normalized(relative), (normalized(relative), readable, 0, readable.stat().st_size))
     # Original loader uses the first archive in filename order. Optional 600_899 precedes Core 600_900.
     for archive in archives:
-        for entry in read_big(archive):
+        for entry in read_big(archive_sources[archive]):
             selected.setdefault(entry[0], entry)
     if 'data/ini/gamedata.ini' not in selected:
         raise ValueError('Patch has no compiled GameData.ini')
@@ -184,9 +201,14 @@ if __name__ == '__main__':
     parser.add_argument('--verify', type=Path)
     args = parser.parse_args()
     config = json.loads((ROOT / 'ios/community-patch/source.json').read_text())
-    if args.verify:
-        verify(args.verify.resolve(), config)
-    elif args.source and args.pack_dir and args.output:
-        stage(args.source.resolve(), args.pack_dir.resolve(), args.output.resolve(), config)
-    else:
-        parser.error('provide --verify DIRECTORY or --source, --pack-dir and --output')
+    try:
+        if args.verify:
+            verify(args.verify.resolve(), config)
+        elif args.source and args.pack_dir and args.output:
+            stage(args.source.resolve(), args.pack_dir.resolve(), args.output.resolve(), config)
+        else:
+            parser.error('provide --verify DIRECTORY or --source, --pack-dir and --output')
+    except Exception:
+        detail = traceback.format_exc()[-6000:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print('::error title=Community Patch staging::' + detail, flush=True)
+        raise
