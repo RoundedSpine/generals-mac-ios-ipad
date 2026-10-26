@@ -80,3 +80,24 @@ and through the previously tested areas, then send generals-stderr.log. Note any
 visible missing geometry and when it happens. The probes add CPU work and bounded
 synchronous log writes, so this build should diagnose compatibility rather than
 serve as a clean performance benchmark. Disable the CMake option after investigation.
+
+## Follow-up: retained water-track records
+
+Both supplied logs reported the indexed water-track quad but `sentinel16=unknown`.
+The general observation table can evict an early water upload after 64 unrelated
+buffers; the old logs do not establish whether eviction, budget use or another
+invalidation caused that specific miss. Preserve four water-track observations
+outside mesh churn, with a separate 4,096-index lifetime scan budget. Up to 16
+`[STRIP_WATER_UPLOAD]` lines identify actual buffers/ranges/min/max/sentinel counts.
+No regenerated or assumed-safe indices are substituted for captured data.
+
+Draw records now label their observation as `retained_water_upload`, `latest_upload`
+or `unavailable`. Every write invalidates both tables before installing new data;
+uncaptured writes and destruction forget both. A full budget yields unknown,
+including for a previously observed buffer. Tests exercise mesh eviction pressure,
+independent budgets, mutation/destruction invalidation, retained record lookup,
+output bounds, and capture/draw calls compiled in different translation units.
+Ten diagnostic tests pass locally, including sanitizer coverage. The existing
+rendering arguments, HRESULTs and pathfinding code are unchanged. The macOS CI
+runner must still compile the next SDK build and the phone must confirm that the
+captured upload identity matches the draw and supplies complete range coverage.

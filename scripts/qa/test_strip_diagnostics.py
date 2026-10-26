@@ -28,12 +28,15 @@ struct Device {
 '''
 
 
-def compile_run(body, enabled=True, sanitizers=False):
+def compile_run(body, enabled=True, sanitizers=False, extra_source=None):
     with tempfile.TemporaryDirectory() as temporary:
         p = Path(temporary)
         (p / 'd3d8.h').write_text(STUB)
         (p / 'test.cpp').write_text(('#define GENERALS_STRIP_DIAGNOSTICS 1\n' if enabled else '') + PREFIX + f'\n#include "{HEADER}"\n' + body)
         cmd = [os.environ.get('CXX', 'c++'), '-std=c++17', '-pthread', '-Werror=format', '-I', str(p), str(p / 'test.cpp'), '-o', str(p / 'test')]
+        if extra_source is not None:
+            (p / 'upload.cpp').write_text('#define GENERALS_STRIP_DIAGNOSTICS 1\n' + PREFIX + f'\n#include "{HEADER}"\n' + extra_source)
+            cmd.append(str(p / 'upload.cpp'))
         if sanitizers:
             cmd += ['-fsanitize=address,undefined']
         subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -99,9 +102,65 @@ int main(){Device d;{GX_STRIP_ORIGIN("model");submit(d);{GX_STRIP_ORIGIN("water"
         self.assertEqual(r.stderr.count('[STRIP_INDEX]'), 64)
         self.assertEqual(r.stderr.count('[STRIP_DRAW_BEGIN]'), 3)
 
+    def test_water_observation_survives_mesh_churn(self):
+        r = compile_run(r'''
+int main(){Device d;unsigned short water[]={2,0,3,1};
+ GX_STRIP_WATER_CAPTURE(&d.index,0,water,4);
+ IDirect3DIndexBuffer8 mesh[100];unsigned short value[]={8,9};
+ for(auto&buffer:mesh)gxstrip::capture(&buffer,0,value,2);
+ assert(GX_STRIP_INDEXED(&d,5,0,4,0,2)==-9);
+ assert(gxstrip::state().waterScanned==4 && d.index.refs==0);
+}
+''', sanitizers=True)
+        self.assertIn('[STRIP_WATER_UPLOAD]', r.stderr)
+        self.assertIn('sentinel16=absent', r.stderr)
+        self.assertIn('observation=retained_water_upload', r.stderr)
+        self.assertIn('upload_min=0 upload_max=3', r.stderr)
+
+    def test_water_capture_and_draw_share_state_across_translation_units(self):
+        r = compile_run(r'''
+extern void uploadWater(Device*);
+int main(){Device d;uploadWater(&d);assert(GX_STRIP_INDEXED(&d,5,0,4,0,2)==-9);}
+''', extra_source=r'''
+void uploadWater(Device*d){unsigned short indices[]={2,0,3,1};GX_STRIP_WATER_CAPTURE(&d->index,0,indices,4);}
+''')
+        self.assertIn('sentinel16=absent', r.stderr)
+        self.assertIn('observation=retained_water_upload', r.stderr)
+
+    def test_water_budget_is_independent_and_writes_invalidate(self):
+        r = compile_run(r'''
+int main(){Device d;unsigned short water[]={2,0,3,1};
+ gxstrip::state().scanned=gxstrip::ScanBudget;
+ GX_STRIP_WATER_CAPTURE(&d.index,0,water,4);
+ gxstrip::describe({1},"fixture",1,"main",5,2,true,&d.index,0,0,0,4);
+ // An uncaptured write must invalidate even the retained water observation.
+ GX_STRIP_FORGET(&d.index);
+ gxstrip::describe({2},"fixture",2,"main",5,2,true,&d.index,0,0,0,4);
+ GX_STRIP_WATER_CAPTURE(&d.index,0,water,4);
+ // A general captured write invalidates the retained observation, even when its own budget is exhausted.
+ gxstrip::capture(&d.index,0,water,4);
+ gxstrip::describe({3},"fixture",3,"main",5,2,true,&d.index,0,0,0,4);
+ assert(gxstrip::state().waterScanned==8);
+}
+''')
+        self.assertEqual(r.stderr.count('sentinel16=absent'), 1)
+        self.assertEqual(r.stderr.count('sentinel16=unknown '), 2)
+
+    def test_water_capture_budget_and_output_limit(self):
+        r = compile_run(r'''
+int main(){Device d;unsigned short water[]={2,0,3,1};
+ for(int i=0;i<1100;++i)GX_STRIP_WATER_CAPTURE(&d.index,0,water,4);
+ assert(gxstrip::state().waterScanned==gxstrip::WaterScanBudget);
+ assert(gxstrip::state().waterReports==16);
+ gxstrip::describe({1},"fixture",1,"main",5,2,true,&d.index,0,0,0,4);
+}
+''')
+        self.assertEqual(r.stderr.count('[STRIP_WATER_UPLOAD]'), 16)
+        self.assertIn('sentinel16=unknown ', r.stderr)
+
     def test_disabled_preserves_calls_without_logging(self):
         r = compile_run(r'''
-int main(){Device d;GX_STRIP_ORIGIN("off");GX_STRIP_CAPTURE(nullptr,0,nullptr,0);GX_STRIP_FORGET(nullptr);assert(GX_STRIP_UP(&d,5,2,nullptr,16)==-7);assert(GX_STRIP_INDEXED(&d,5,0,4,0,2)==-9);assert(d.calls==2 && d.queries==0);}
+int main(){Device d;GX_STRIP_ORIGIN("off");GX_STRIP_CAPTURE(nullptr,0,nullptr,0);GX_STRIP_WATER_CAPTURE(nullptr,0,nullptr,0);GX_STRIP_FORGET(nullptr);assert(GX_STRIP_UP(&d,5,2,nullptr,16)==-7);assert(GX_STRIP_INDEXED(&d,5,0,4,0,2)==-9);assert(d.calls==2 && d.queries==0);}
 ''', enabled=False)
         self.assertEqual(r.stderr, '')
 

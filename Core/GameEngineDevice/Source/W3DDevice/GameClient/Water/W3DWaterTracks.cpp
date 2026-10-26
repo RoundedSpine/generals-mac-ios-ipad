@@ -670,7 +670,7 @@ void WaterTracksRenderSystem::ReAcquireResources()
 				i+=2;
 			}
 		}
-		GX_STRIP_CAPTURE(m_indexBuffer->Get_DX8_Index_Buffer(), 0, ib, idxCount);
+		GX_STRIP_WATER_CAPTURE(m_indexBuffer->Get_DX8_Index_Buffer(), 0, ib, idxCount);
 	}
 
 	m_vertexBuffer=NEW_REF(DX8VertexBufferClass,(DX8_FVF_XYZDUV1,m_stripSizeX*m_stripSizeY*WATER_VB_PAGES,DX8VertexBufferClass::USAGE_DYNAMIC));
