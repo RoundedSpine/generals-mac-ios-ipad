@@ -33,6 +33,15 @@ endif()
 # Top level project, doesn't really affect anything.
 project(genzh LANGUAGES C CXX)
 
+# GeneralsX @build Codex 26/10/2026 Optional isolated cache namespace for controlled iOS comparisons.
+set(GENERALS_DXVK_CACHE_TAG "" CACHE STRING "Isolate iOS DXVK state cache using this test-build tag")
+if(NOT GENERALS_DXVK_CACHE_TAG STREQUAL "")
+    if(NOT GENERALS_DXVK_CACHE_TAG MATCHES "^[A-Za-z0-9_-]+$")
+        message(FATAL_ERROR "GENERALS_DXVK_CACHE_TAG must contain only letters, digits, underscores or hyphens")
+    endif()
+    add_compile_definitions(GENERALS_DXVK_CACHE_TAG="${GENERALS_DXVK_CACHE_TAG}")
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Gate the verified-quad conversion for experimental device testing.
 option(GENERALS_QUAD_LISTS "Convert verified screen/water quads to triangle lists" OFF)
 if(GENERALS_QUAD_LISTS)

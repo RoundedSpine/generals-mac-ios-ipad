@@ -52,3 +52,23 @@ show remaining unconverted strip sources. Converted list draws intentionally do
 not produce STRIP_DRAW records. CPU submission timings from the probes still do
 not isolate asynchronous pipeline compilation or GPU execution. Visual comparison
 and the macOS SDK build remain required.
+
+## Follow-up: isolated state-cache test
+
+The user confirmed unchanged visuals. The subsequent log showed the six-index
+water upload and none of the previous strip draw samples, but still 11 MoltenVK
+warnings. DXVK's state cache can compile historical pipeline recipes; this remains
+a hypothesis, not an established source for the remaining warnings.
+
+The experimental workflow now passes its run ID as GENERALS_DXVK_CACHE_TAG, selecting
+Library/Caches/dxvk-test-<run-id> before loading DXVK. No files are deleted or copied
+from the previous cache. A successful first creation logs [DXVK_CACHE_TEST] with
+state=new; repeat launches of the same build log state=reused. Empty tags retain
+the standard cache behavior. Only safe filename characters are allowed in the tag.
+Creation/selection failures are logged and invalidate any cold-cache conclusion.
+
+Repeat the same mission on the first launch and send the log. Extra first-run
+pipeline compilation may cause hitches, so do not infer a performance regression
+from this cold-cache experiment alone. This isolates DXVK's persistent state cache,
+not every Metal/driver-managed shader cache. Other remaining strip pipelines can
+still produce warnings even if old DXVK recipes are eliminated.

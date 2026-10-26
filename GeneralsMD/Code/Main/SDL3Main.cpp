@@ -437,6 +437,28 @@ int main(int argc, char* argv[])
 			snprintf(cacheDir, sizeof(cacheDir), "%s/Library/Caches", home);
 			mkdir(cacheDir, 0755);
 			setenv("DXVK_STATE_CACHE_PATH", cacheDir, 0);
+#ifdef GENERALS_DXVK_CACHE_TAG
+			// GeneralsX @feature Codex 26/10/2026 Use a per-test-build directory without deleting any existing cache.
+			char isolatedCache[1024];
+			const int isolatedLength = snprintf(isolatedCache, sizeof(isolatedCache),
+				"%s/Library/Caches/dxvk-test-%s", home, GENERALS_DXVK_CACHE_TAG);
+			if (isolatedLength > 0 && static_cast<size_t>(isolatedLength) < sizeof(isolatedCache)) {
+				const int created = mkdir(isolatedCache, 0755);
+				if (created == 0 || errno == EEXIST) {
+					if (setenv("DXVK_STATE_CACHE_PATH", isolatedCache, 1) == 0) {
+						fprintf(stderr, "[DXVK_CACHE_TEST] tag=%s directory=%s state=%s\n",
+							GENERALS_DXVK_CACHE_TAG, isolatedCache, created == 0 ? "new" : "reused");
+					} else {
+						fprintf(stderr, "ERROR: Failed to select isolated DXVK cache: %s\n", strerror(errno));
+					}
+				} else {
+					fprintf(stderr, "ERROR: Failed to create isolated DXVK cache: %s\n", strerror(errno));
+				}
+			} else {
+				fprintf(stderr, "ERROR: Isolated DXVK cache path exceeds its buffer\n");
+			}
+#endif
+
 
 			if (usingBundleData) {
 				// Seed default settings on first run (full detail instead of the
