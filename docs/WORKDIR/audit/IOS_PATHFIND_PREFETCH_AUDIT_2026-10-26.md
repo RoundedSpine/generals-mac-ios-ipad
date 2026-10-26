@@ -180,3 +180,11 @@ frame accounting and corridor scratch into the context. Shared record allocation
 and live engine dependencies remain blockers. The original findings above describe
 37bdbe30d; see [the implementation notes](IOS_SERIAL_SEARCH_CONTEXT_2026-10-26.md)
 for the completed subset and its validation scope. No workers or prefetch are enabled.
+
+
+A subsequent single-threaded stage also introduced independent bounded search
+record allocation and per-record arena ownership. Shared map-record writes are
+removed from ordinary search allocation. Main-context selection and live engine
+services remain; see the updated implementation notes for the admission policy,
+memory measurements and remaining request/result boundary. This is still not a
+worker-enabled implementation.

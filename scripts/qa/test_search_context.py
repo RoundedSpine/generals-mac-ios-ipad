@@ -21,6 +21,7 @@ def allocator_fixture(enabled=True):
     ])
     return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + r'''
 #include "stampedsearchcontext.h"
+#include "boundedkeyedpool.h"
 #include <cassert>
 #include <cstdio>
 #include <vector>
@@ -31,6 +32,7 @@ using Int=int;using Bool=bool;using UnsignedInt=unsigned;using UnsignedShort=uns
 constexpr ObjectID INVALID_ID=0;
 struct ICoord2D{int x,y;};struct PathfindCell{};
 ''' + declarations + r'''
+unsigned PathfindCellInfo::s_recordsInUse=0;
 PathfindCellInfo*PathfindCellInfo::s_infoArray=nullptr;
 PathfindCellInfo*PathfindCellInfo::s_firstFree=nullptr;
 constexpr unsigned CELL_INFOS_TO_ALLOCATE=PATHFIND_RECORD_CAPACITY;
@@ -41,6 +43,7 @@ class SearchContextTest(unittest.TestCase):
     def test_lazy_reset_and_generation_rollover(self):
         run_cpp(r'''
 #include "stampedsearchcontext.h"
+#include "boundedkeyedpool.h"
 #include <cassert>
 struct Node{int cost=0;void*parent=nullptr;bool open=false;};
 int main(){StampedSearchContext<Node,8,unsigned char> c;
@@ -59,11 +62,13 @@ int main(){
  PathfindCellInfo::allocateCellInfos();PathfindCell a,b;
  auto*one=PathfindCellInfo::getACellInfo(&a,{3,4});auto*two=PathfindCellInfo::getACellInfo(&b,{5,6});
  one->m_goalUnitID=17;one->m_posUnitID=18;one->m_obstacleID=19;one->m_obstacleIsFence=true;
- one->search().m_totalCost=99;one->search().m_pathParent=two;one->search().m_open=true;
+ auto*node=mainPathfindSearchContext().allocateRecord(&a,{3,4},true);
+ node->search().m_totalCost=99;node->search().m_pathParent=node;node->search().m_open=true;
  mainPathfindSearchContext().beginSearch();
  assert(one->m_goalUnitID==17 && one->m_posUnitID==18 && one->m_obstacleID==19 && one->m_obstacleIsFence);
  assert(one->m_pos.x==3 && one->m_pos.y==4 && one->m_cell==&a);
- assert(one->search().m_totalCost==0 && one->search().m_pathParent==nullptr && !one->search().m_open && one->search().m_openIndex==-1);
+ node=mainPathfindSearchContext().allocateRecord(&a,{3,4},true);
+ assert(node->search().m_totalCost==0 && node->search().m_pathParent==nullptr && !node->search().m_open && node->search().m_openIndex==-1);
  PathfindCellInfo::releaseACellInfo(one);PathfindCellInfo::releaseACellInfo(two);
  mainPathfindSearchContext().beginSearch();
  auto*reused=PathfindCellInfo::getACellInfo(&a,{7,8});assert(reused==two && reused->m_goalUnitID==INVALID_ID);
@@ -76,10 +81,10 @@ int main(){
         run_cpp(allocator_fixture() + r'''
 int main(){for(int pass=0;pass<2;++pass){
  PathfindCellInfo::allocateCellInfos();PathfindCell cell;std::vector<PathfindCellInfo*> records;
- for(unsigned i=0;i<PATHFIND_RECORD_CAPACITY;++i){auto*p=PathfindCellInfo::getACellInfo(&cell,{int(i),0});assert(p && p->m_searchSlot==i);records.push_back(p);}
+ for(unsigned i=0;i<PATHFIND_RECORD_CAPACITY;++i){auto*p=PathfindCellInfo::getACellInfo(&cell,{int(i),0});assert(p && !p->m_searchOwner);records.push_back(p);}
  assert(PathfindCellInfo::getACellInfo(&cell,{0,0})==nullptr);
  mainPathfindSearchContext().beginSearch();
- for(auto*p:records){assert(p->search().m_totalCost==0);PathfindCellInfo::releaseACellInfo(p);}
+ for(auto*p:records){assert(!p->m_searchOwner);PathfindCellInfo::releaseACellInfo(p);}
  PathfindCellInfo::releaseCellInfos();
 }}
 ''')
@@ -89,6 +94,7 @@ int main(){for(int pass=0;pass<2;++pass){
         run_cpp(r'''
 #define GENERALS_ZH_SEARCH_CONTEXT 1
 #include "stampedsearchcontext.h"
+#include "boundedkeyedpool.h"
 #include <cassert>
 #define DEBUG_ASSERTCRASH(c,m) assert(c)
 struct Node{int value=0;};

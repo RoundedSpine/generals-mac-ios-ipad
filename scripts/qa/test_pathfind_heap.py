@@ -38,10 +38,12 @@ constexpr ObjectID INVALID_ID=0;
 struct ICoord2D {int x,y;};
 class PathfindCell;
 constexpr unsigned PATHFIND_CELLS_PER_FRAME=5000;
-bool s_useFixedPathfinding=''' + ('true' if fixed else 'false') + '; bool s_forceCleanCells=false;\n' + '#include "stampedsearchcontext.h"\n' + state + info + queue + r'''
+bool s_useFixedPathfinding=''' + ('true' if fixed else 'false') + '; bool s_forceCleanCells=false;\n' + '#include "stampedsearchcontext.h"\n#include "boundedkeyedpool.h"\n' + state + info + queue + r'''
 class PathfindCell {
 public:
  PathfindCellInfo* m_info=nullptr;
+ PathfindCellInfo*searchInfo(){return m_info;}
+ void releaseSearchInfo(){releaseInfo();}
  int id=0, releases=0;
  PathfindCell* getNextOpen(){return m_info->m_nextOpen?m_info->m_nextOpen->m_cell:nullptr;}
  PathfindCell* getPrevOpen(){return m_info->m_prevOpen?m_info->m_prevOpen->m_cell:nullptr;}
@@ -62,7 +64,7 @@ struct Arena {
  Arena(bool heap, int n):cells(n),info(n),queue(heap){
   for(int i=0;i<n;++i){cells[i].id=i;cells[i].m_info=&info[i];
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- static unsigned nextSlot=0;info[i].m_searchSlot=(nextSlot++)%PATHFIND_RECORD_CAPACITY;info[i].search()=PathfindSearchState{};
+ info[i].m_searchOwner=&mainPathfindSearchNodes();static unsigned nextSlot=0;info[i].m_searchSlot=(nextSlot++)%PATHFIND_RECORD_CAPACITY;info[i].search()=PathfindSearchState{};
 #endif
 info[i].m_cell=&cells[i];info[i].m_openIndex=-1;}
  }

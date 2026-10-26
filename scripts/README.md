@@ -67,6 +67,10 @@ Run `python3 scripts/qa/test_search_context.py` for bounded generation-stamped
 search lifetime, occupancy preservation, pool exhaustion/recycling, cleanup order
 and synthetic route comparisons. The heap suite also exercises the enabled context.
 
+Run `python3 scripts/qa/test_search_record_pool.py` for collision-heavy bounded
+lookup, generation rollover, production cell allocation/cleanup, permanent pool
+reuse, independent node owners and route ordering with actual cell/list methods.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 

@@ -22,6 +22,8 @@ struct PathfindCell{
  bool info=false,open=false,closed=false,pinched=false,fail=false;
  int zone=1,allocations=0,cost=0,total=0;PathfindCell*parent=nullptr;
  bool hasInfo(){return info;}
+ bool hasSearchInfo(){return hasInfo();}
+ bool allocateSearchInfo(const ICoord2D&p){return allocateInfo(p);}
  bool getOpen(){assert(info);return open;}bool getClosed(){assert(info);return closed;}
  bool allocateInfo(const ICoord2D&){if(info)return true;if(fail)return false;info=true;++allocations;return true;}
  int getZone(){return zone;}bool getPinched(){return pinched;}

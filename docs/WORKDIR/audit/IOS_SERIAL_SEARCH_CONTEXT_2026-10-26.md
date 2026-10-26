@@ -124,3 +124,86 @@ checks. These fixtures are not full-engine replay or device performance tests.
 Validation result: all 57 workflow QA tests passed locally. All ten search-context
 tests also passed with AddressSanitizer and UndefinedBehaviorSanitizer. Full iOS
 SDK compilation and device/replay validation remain pending for this stage.
+
+
+## Follow-up: independent bounded search-record allocation
+
+Experimental searches now obtain records from a context-owned BoundedKeyedPool.
+The permanent PathfindCellInfo pool continues to hold unit goals, positions,
+aircraft goals and obstacle metadata. Search entry points use allocateSearchInfo,
+hasSearchInfo and releaseSearchInfo; list, parent and cost operations use
+searchInfo. The default mode routes these helpers to the legacy cell-owned info.
+
+### Ownership and lookup
+
+The fixed lookup has 65,536 buckets for 30,000 stable-address record slots, uses
+linear probing and tombstones, and resets bucket validity by generation. Buckets
+are never iterated to choose search work: hash placement and cell addresses do not
+define path order. Recycling is explicit, does not allocate per-node heap objects,
+and never grows past capacity. Generation rollover clears bucket stamps. Values
+must be trivially destructible because invalidation does not destroy each value.
+
+Each search record stores a pointer to its owning node arena. Two contexts can
+therefore allocate the same cell key without sharing cost, parent or open state.
+Permanent records have no search owner; treating them as search scratch asserts.
+Cell searchInfo lazily materializes shadow scratch for a permanent record, preserving
+the old distinction between a cell that already had info and one needing new
+admission. This also avoids counting occupied cells as newly allocated cells in
+existing search-local counters. No search allocation writes the map's m_info or the
+permanent free list. Permanent record allocation does not reset search arena slots.
+
+### Capacity and lifetime policy
+
+- The permanent pool stays at 30,000 records; the independent search pool also has
+  exactly 30,000 record slots.
+- A search cell with permanent metadata consumes a shadow record but no additional
+  transient admission credit. Other cells consume transient credit.
+- At admission, permanent records in use plus charged transient cells must be below
+  30,000 before another transient cell is admitted. Failure returns null through
+  the existing caller checks. Workers and larger limits are not enabled.
+- Search cleanup releases unlinked records for unoccupied cells and preserves
+  permanent occupancy metadata. Records retained for occupied/obstacle cells are
+  private scratch and disappear at the next search generation.
+- A generation boundary discards any scratch not reached by normal list cleanup;
+  it preserves corridor/control state. Map reset additionally invalidates lookup
+  keys before a new map can reuse cell addresses. Existing list cleanup still
+  contributes to frame accounting before generation changes.
+
+This is an explicit new bounded lifetime policy, **not a claim of identical legacy
+pool-exhaustion behavior**. The former shared allocator could retain orphaned
+records across searches. Reclaiming them can admit a later search that formerly
+failed. Exact replay CRC/failure equivalence under exhaustion remains unverified.
+Admission reads the serial permanent-use counter; a future worker kernel must
+capture/freeze this input with the other request inputs.
+
+### Memory and validation scope
+
+A local 64-bit compiled fixture measured a 72-byte record, a 3,044,304-byte keyed
+pool and a 4,724,472-byte complete context. Combined with the 2,160,000-byte
+permanent record array, fixed record/context storage is approximately 6.57 MiB,
+about 3.36 MiB more than the previous stage. Heap queue capacity, corridor bytes
+and engine overhead are additional; exact iOS allocation/resident usage is unmeasured.
+The first implementation reuses the existing record type rather than introducing
+another node hierarchy. Splitting unused metadata from private records can be
+considered after this lifetime change is validated.
+
+The new seven-test suite exercises forced hash collisions and churn against an
+independent map oracle, full capacity, generation rollover, production cell/list
+allocation and cleanup, permanent reuse without search resets, full occupied-pool
+shadow admission, independent record owners and route/expansion hashes across 50
+synthetic obstacle grids in enabled and disabled modes. This is not a full engine
+replay or device performance test.
+
+### Remaining before workers
+
+Cell search helpers still select the main context, and search setup/route processing
+still reach live object, locomotor, team, terrain and debug/UI services. The next
+stage is an explicit immutable request/result boundary and serial comparison of
+speculative results. Do not enable worker searches merely because node storage is
+now independent. No runtime prefetch, worker scheduling or eight-request batching
+is added here.
+
+Validation result for independent allocation: all 64 workflow QA tests passed
+locally; all 17 context/allocation tests passed AddressSanitizer and
+UndefinedBehaviorSanitizer. Actionlint and diff checks passed. Full iOS SDK
+compilation, device movement/performance and replay checks remain pending.
