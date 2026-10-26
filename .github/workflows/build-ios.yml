@@ -32,15 +32,25 @@ jobs:
 
       - name: Check packaging behavior
         run: |
-          python3 scripts/qa/test_ios_packaging.py
-          python3 scripts/qa/test_startup_primitives.py
-          python3 scripts/qa/test_unix_worker.py
-          python3 scripts/qa/test_ios_native_callbacks.py
-          python3 scripts/qa/test_pathfind_heap.py
-          python3 scripts/qa/test_hierarchical_edges.py
-          python3 scripts/qa/test_strip_diagnostics.py
-          python3 scripts/qa/test_quad_lists.py
-          python3 scripts/qa/test_dxvk_cache_reset.py
+          python3 - <<'PYTEST'
+          import subprocess
+          import sys
+          tests = [
+              "test_ios_packaging.py", "test_startup_primitives.py",
+              "test_unix_worker.py", "test_ios_native_callbacks.py",
+              "test_pathfind_heap.py", "test_hierarchical_edges.py",
+              "test_strip_diagnostics.py", "test_quad_lists.py",
+              "test_dxvk_cache_reset.py",
+          ]
+          for test in tests:
+              result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)
+              output = result.stdout + result.stderr
+              print(output, flush=True)
+              if result.returncode:
+                  detail = output[-6000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print("::error title=" + test + "::" + detail, flush=True)
+                  sys.exit(result.returncode)
+          PYTEST
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk
