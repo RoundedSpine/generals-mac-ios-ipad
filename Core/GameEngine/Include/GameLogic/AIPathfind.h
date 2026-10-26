@@ -938,6 +938,15 @@ public:
 	Int clearCellForDiameter( Bool crusher, Int cellX, Int cellY, PathfindLayerEnum layer, Int pathDiameter );		///< Return true if given position is a valid movement location
 
 protected:
+	// GeneralsX @refactor Codex 27/10/2026 First owned input boundary; not a complete worker request.
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+	struct OrdinaryPathRequest {
+		Coord3D from;
+		Coord3D to;
+	};
+#endif
+	Path *findPathWithInputs(Object *obj, const LocomotorSet& locomotorSet,
+		const Coord3D *from, const Coord3D *to);
 	virtual Path *internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to);	///< Find a short, valid path between given locations
 	Path *findHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);
 	Path *findClosestHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);

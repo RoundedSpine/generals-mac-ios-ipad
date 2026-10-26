@@ -245,3 +245,50 @@ bridge, cliff, ally and existing-tail cases, retail failover, result lifetime,
 copy ownership and bounded failure. They also confirm no engine node is allocated
 inside the deferred parent walk. All six pass ASan/UBSan. These are controlled
 fixtures, not full-engine replays or device gameplay/performance tests.
+
+
+## Follow-up: ordinary request endpoint ownership — 2026-10-27
+
+The experimental public findPath entry now captures both Coord3D endpoints by
+value before the quick reachability check, coarse search and fine search. An
+unchanged serial findPathWithInputs dispatcher receives pointers to those const
+request values. Object and LocomotorSet remain explicit live dependencies. The
+request owns no engine pointers and uses two coordinates of automatic storage;
+it is not queued, retained after return or sent to a worker. The disabled mode
+passes the original pointers through the same dispatcher. Preserve the existing
+virtual internalFindPath call, hierarchical fallback, null-result handling and
+coarse-path deletion. No new searches, queue operations or changed search limits.
+
+This is deliberately the first input slice, not a completed immutable request.
+In particular findClosestPath has a writable destination, and findSafePath uses
+obj->getPosition() for its actual start rather than simply its from argument.
+Wrapping either with the ordinary endpoint contract would hide important behavior.
+Attack, closest, safe, quick and patched-path APIs retain their existing contracts.
+
+### Remaining dependency boundary, checked against production calls
+
+| Dependency | Current access | Required before worker execution |
+| --- | --- | --- |
+| Ordinary from/to coordinates | Copied once by public findPath in experimental mode | Value ownership established for this entry only |
+| Unit footprint, layer, crusher level, human/computer policy | internalFindPath, getRadiusAndCenter and neighboring-cell callbacks still read Object/Player | Capture a shared movement-policy value and route every relevant helper through it |
+| Locomotor surface mask | LocomotorSet remains a reference across reachability, hierarchy, fine search and path construction | Capture consumed settings without copying pointer-owning engine objects |
+| Occupants, obstacles and team relationships | checkDestination, checkForMovement and neighbor expansion resolve other objects and compare relationships | Define immutable world view or revisions covering both movement and diplomacy changes |
+| Terrain layers, heights, zones and map identity | TerrainLogic, zone manager and cell helpers remain live | Snapshot or freeze relevant data; reject results after topology/map changes |
+| Admission capacity and context selection | Permanent pool count and main-context cell access remain live | Explicit admission snapshot and selected context |
+| Result optimization and engine side effects | buildActualPath, debug drawing, statistics and engine PathNode construction remain on caller | Keep application on main thread; separate pure route processing and validation |
+
+Cell-only stale checks cannot cover the object, team, locomotor and terrain rows.
+Do not add a validation token that suggests otherwise. Next implementation is the
+movement-policy value and helper plumbing for ordinary searches, followed by a
+complete read/dependency contract and serial comparison before any worker.
+
+Validation: four new compiled tests cover both modes, quick failure, hierarchy
+success/fallback and deletion, fine failure, all XYZ components, aliased endpoints,
+caller mutation during a mocked first stage and retained virtual override dispatch.
+Mocks exercise the real entry/dispatcher bodies, not the full engine. The deliberate
+caller mutation proves ownership, not a supported concurrent world mutation model.
+Full iOS SDK compilation and device/replay behavior remain separate checks.
+
+Validation for the endpoint stage: all 74 workflow QA tests passed locally; the
+four new request tests also passed ASan/UBSan. Actionlint and diff checks passed.
+Full iOS compilation and device/replay checks remain pending.

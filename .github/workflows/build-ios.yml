@@ -41,7 +41,7 @@ jobs:
               "test_pathfind_heap.py", "test_hierarchical_edges.py",
               "test_strip_diagnostics.py", "test_quad_lists.py",
               "test_dxvk_cache_reset.py", "test_search_context.py",
-              "test_search_record_pool.py", "test_owned_path_route.py",
+              "test_search_record_pool.py", "test_owned_path_route.py", "test_path_request_inputs.py",
           ]
           for test in tests:
               result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)

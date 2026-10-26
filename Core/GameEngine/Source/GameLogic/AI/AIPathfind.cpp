@@ -6748,6 +6748,19 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+	// GeneralsX @refactor Codex 27/10/2026 Own ordinary request endpoints before any search-stage calls.
+	const OrdinaryPathRequest request = {*from, *rawTo};
+	return findPathWithInputs(obj, locomotorSet, &request.from, &request.to);
+#else
+	return findPathWithInputs(obj, locomotorSet, from, rawTo);
+#endif
+}
+
+// GeneralsX @refactor Codex 27/10/2026 Live object and locomotor dependencies remain explicit and serial.
+Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorSet,
+		const Coord3D *from, const Coord3D *rawTo)
+{
 	if (!clientSafeQuickDoesPathExist(locomotorSet, from, rawTo)) {
 		return nullptr;
 	}

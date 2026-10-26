@@ -323,3 +323,7 @@ docker rmi generalsx/linux-builder:latest generalsx/mingw-builder:latest
 Run `python3 scripts/qa/test_owned_path_route.py` to compare immediate and deferred
 route construction using the production parent walk, including bridge/cliff flags,
 existing tails, cleanup, value ownership and capacity bounds.
+
+Run `python3 scripts/qa/test_path_request_inputs.py` to check ordinary request
+endpoint copies, aliased inputs, unchanged failure/stage ordering, legacy pointer
+semantics and virtual fine-search dispatch using the production entry functions.
