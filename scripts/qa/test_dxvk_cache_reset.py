@@ -7,11 +7,11 @@ from compiled_harness import run_cpp
 PREFIX = r'''
 #include "dxvkcachemaintenance.h"
 #include <cassert>
-#include <cstdlib>
+#include <chrono>
 using namespace gxcache;
 struct Fixture {
  fs::path home,docs,cache;
- Fixture(){char name[]="/tmp/gx-cache-reset-XXXXXX";auto*p=mkdtemp(name);assert(p);home=p;docs=home/"Documents";cache=home/"Library/Caches";fs::create_directories(docs);fs::create_directories(cache);}
+ Fixture(){home=fs::temp_directory_path()/("gx-cache-reset-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));assert(fs::create_directory(home));docs=home/"Documents";cache=home/"Library/Caches";fs::create_directories(docs);fs::create_directories(cache);}
  ~Fixture(){fs::remove_all(home);}
  void put(const fs::path&p){fs::create_directories(p.parent_path());std::ofstream(p)<<"preserve";}
  void request(){fs::create_directory(docs/"Clear DXVK Cache");}
