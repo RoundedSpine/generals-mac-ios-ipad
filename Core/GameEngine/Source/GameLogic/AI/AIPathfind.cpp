@@ -7660,6 +7660,10 @@ void Pathfinder::processHierarchicalCell( const ICoord2D &scanCell, const ICoord
 		PathfindCell *newCell = getCell(LAYER_GROUND, scanCell.x, scanCell.y);
 #if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
 		if (newCell->hasInfo() && (newCell->getOpen() || newCell->getClosed())) return; // already looked at this one.
+#elif RTS_ZEROHOUR
+		// GeneralsX @feature Codex 26/10/2026 Examine eligible zone edges without requiring a leftover search record.
+		// Inspired by Zero Hour Reimagined 1.0.0; allocate only after the rejection checks below.
+		if (newCell->hasInfo() && (newCell->getOpen() || newCell->getClosed())) return;
 #else
 		if( !newCell->hasInfo() )
 		{
@@ -7702,7 +7706,12 @@ void Pathfinder::processHierarchicalCell( const ICoord2D &scanCell, const ICoord
 			return;
 		}
 
+#if RTS_ZEROHOUR
+		// GeneralsX @bugfix Codex 26/10/2026 Keep rejected crossings out of the shared pool and handle exhaustion.
+		if (!newCell->allocateInfo(scanCell)) return;
+#else
 		newCell->allocateInfo(scanCell);
+#endif
 #if RETAIL_COMPATIBLE_PATHFINDING
 		if (!s_useFixedPathfinding)
 		{

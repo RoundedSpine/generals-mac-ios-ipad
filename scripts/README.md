@@ -48,6 +48,9 @@ cadence, deferred-text ownership, input-service and shared-lifecycle checks.
 Run `python3 scripts/qa/test_pathfind_heap.py` for compiled heap/list ordering,
 retail traversal-limit fallback, record reuse and synthetic grid-search comparisons.
 
+Run `python3 scripts/qa/test_hierarchical_edges.py` for compiled zone-edge
+eligibility, rejected-crossing allocation, exhaustion and cleanup-ownership checks.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 
