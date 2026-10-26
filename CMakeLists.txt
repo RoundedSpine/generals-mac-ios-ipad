@@ -33,6 +33,12 @@ endif()
 # Top level project, doesn't really affect anything.
 project(genzh LANGUAGES C CXX)
 
+# GeneralsX @build Codex 26/10/2026 Temporary strip probes are opt-in and absent from regular builds.
+option(GENERALS_STRIP_DIAGNOSTICS "Enable bounded CPU strip/index diagnostics" OFF)
+if(GENERALS_STRIP_DIAGNOSTICS)
+    add_compile_definitions(GENERALS_STRIP_DIAGNOSTICS=1)
+endif()
+
 # GeneralsX @build BenderAI 10/02/2026
 # Linux port: Make CompatLib headers globally accessible so Core libraries (WWLib, WWMath, etc.)
 # can access platform compatibility types when building for non-Windows platforms

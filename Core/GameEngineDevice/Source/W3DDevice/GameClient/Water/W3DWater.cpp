@@ -767,6 +767,8 @@ HRESULT WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
 		}
 	}
 
+	GX_STRIP_CAPTURE(m_indexBufferD3D, 0, pIndices, m_numIndices);
+
 	/*Old way
 	Int step=1;
 	Int psize=(size-1)/step;
@@ -822,6 +824,7 @@ void WaterRenderObjClass::ReleaseResources()
 
 	REF_PTR_RELEASE(m_pReflectionTexture);
 	SAFE_RELEASE(m_vertexBufferD3D);
+	GX_STRIP_FORGET(m_indexBufferD3D);
 	SAFE_RELEASE(m_indexBufferD3D);
 
 	if (m_waterTrackSystem)
@@ -1224,6 +1227,7 @@ void WaterRenderObjClass::enableWaterGrid(Bool state)
 
 		//Release existing grid data
 		SAFE_RELEASE(m_vertexBufferD3D);
+		GX_STRIP_FORGET(m_indexBufferD3D);
 		SAFE_RELEASE(m_indexBufferD3D);
 
 		//Create new grid data
@@ -1944,7 +1948,7 @@ Matrix4x4 matProj, matView, matWW3D;
 			D3DXMatrixTranspose((D3DXMATRIX*)&matWorldViewProj, (D3DXMATRIX*)&matWorldViewProj);
 			m_pDev->SetVertexShaderConstant(CV_WORLDVIEWPROJ_0, &matWorldViewProj, 4);	//pass transform matrix into shader
 
-			m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,m_numVertices,0,m_numIndices);
+			GX_STRIP_INDEXED(m_pDev,D3DPT_TRIANGLESTRIP,0,m_numVertices,0,m_numIndices);
 		}
 	}
 //	m_pDev->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);
@@ -2000,7 +2004,7 @@ Matrix4x4 matProj, matView, matWW3D;
 
 				DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD, matTemp);
 
-				m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,m_numVertices,0,m_numIndices);
+				GX_STRIP_INDEXED(m_pDev,D3DPT_TRIANGLESTRIP,0,m_numVertices,0,m_numIndices);
 			}
 		}
 		W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
@@ -2444,12 +2448,12 @@ void WaterRenderObjClass::renderWaterMesh()
 		//Shroud shader uses z-compare of EQUAL which wouldn't work on water because it doesn't
 		//write to the zbuffer.  Change to LESSEQUAL.
 		DX8Wrapper::_Get_D3D_Device8()->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-		m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,mx*my,0,m_numIndices-2);
+		GX_STRIP_INDEXED(m_pDev,D3DPT_TRIANGLESTRIP,0,mx*my,0,m_numIndices-2);
 		DX8Wrapper::_Get_D3D_Device8()->SetRenderState(D3DRS_ZFUNC, D3DCMP_EQUAL);
 		W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
 	}
 	else
-		m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLESTRIP,0,mx*my,0,m_numIndices-2);
+		GX_STRIP_INDEXED(m_pDev,D3DPT_TRIANGLESTRIP,0,mx*my,0,m_numIndices-2);
 
 	Debug_Statistics::Record_DX8_Polys_And_Vertices(m_numIndices-2,mx*my,ShaderClass::_PresetOpaqueShader);
 

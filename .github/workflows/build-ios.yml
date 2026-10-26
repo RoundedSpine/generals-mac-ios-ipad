@@ -38,6 +38,7 @@ jobs:
           python3 scripts/qa/test_ios_native_callbacks.py
           python3 scripts/qa/test_pathfind_heap.py
           python3 scripts/qa/test_hierarchical_edges.py
+          python3 scripts/qa/test_strip_diagnostics.py
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk
@@ -86,6 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake --preset ios-vulkan \
+            -DGENERALS_STRIP_DIAGNOSTICS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
             -DVulkan_INCLUDE_DIR="$GX_MVK_ROOT/include" \

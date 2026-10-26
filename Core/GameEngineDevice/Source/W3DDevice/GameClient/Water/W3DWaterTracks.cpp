@@ -295,6 +295,7 @@ Int WaterTracksObj::update(Int msElapsed)
 
 Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 {
+	GX_STRIP_ORIGIN("water-track");
 	// TheSuperHackers @tweak The wave movement time step is now decoupled from the render update.
 	m_elapsedMs += TheFramePacer->getLogicTimeStepMilliseconds();
 
@@ -669,6 +670,7 @@ void WaterTracksRenderSystem::ReAcquireResources()
 				i+=2;
 			}
 		}
+		GX_STRIP_CAPTURE(m_indexBuffer->Get_DX8_Index_Buffer(), 0, ib, idxCount);
 	}
 
 	m_vertexBuffer=NEW_REF(DX8VertexBufferClass,(DX8_FVF_XYZDUV1,m_stripSizeX*m_stripSizeY*WATER_VB_PAGES,DX8VertexBufferClass::USAGE_DYNAMIC));

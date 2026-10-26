@@ -3405,7 +3405,7 @@ void W3DVolumetricShadowManager::renderStencilShadows()
 	m_pDev->SetRenderState(D3DRS_SHADEMODE, D3DSHADE_FLAT);
 
 	if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
-		m_pDev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANSLITVERTEX));
+		GX_STRIP_UP(m_pDev,D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANSLITVERTEX));
 
 	m_pDev->SetRenderState(D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
 	m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );

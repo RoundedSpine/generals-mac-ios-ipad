@@ -51,6 +51,10 @@ retail traversal-limit fallback, record reuse and synthetic grid-search comparis
 Run `python3 scripts/qa/test_hierarchical_edges.py` for compiled zone-edge
 eligibility, rejected-crossing allocation, exhaustion and cleanup-ownership checks.
 
+Run `python3 scripts/qa/test_strip_diagnostics.py` for opt-in strip-probe tests:
+call/return preservation, index observation coverage, sentinel detection, reference
+balance and bounded output/scanning. Regular builds leave the probes disabled.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 

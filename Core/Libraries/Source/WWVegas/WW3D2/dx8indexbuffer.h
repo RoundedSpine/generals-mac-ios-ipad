@@ -83,6 +83,9 @@ public:
 	{
 		IndexBufferClass* index_buffer;
 		unsigned short* indices;
+#ifdef GENERALS_STRIP_DIAGNOSTICS
+		unsigned diagnostic_start, diagnostic_count;
+#endif
 	public:
 		AppendLockClass(IndexBufferClass* index_buffer,unsigned start_index, unsigned index_range);
 		~AppendLockClass();

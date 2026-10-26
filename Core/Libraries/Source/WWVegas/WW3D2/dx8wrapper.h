@@ -77,6 +77,9 @@ const unsigned MAX_VERTEX_SHADER_CONSTANTS=96;
 const unsigned MAX_PIXEL_SHADER_CONSTANTS=8;
 const unsigned MAX_SHADOW_MAPS=1;
 
+// GeneralsX @build Codex 26/10/2026 Opt-in, bounded rendering diagnostics.
+#include "stripdiagnostics.h"
+
 #define prevVer
 #define nextVer
 
@@ -154,11 +157,14 @@ WWINLINE void DX8_ErrorCode(unsigned res)
 }
 
 #ifdef WWDEBUG
+// GeneralsX @feature Codex 26/10/2026 Retain the existing debug checks and call counter around sampled draws.
+#define GX_STRIP_DX8_INDEXED(topology, minimum, vertices, start, primitives) DX8_Assert(); DX8_ErrorCode(GX_STRIP_INDEXED(DX8Wrapper::_Get_D3D_Device8(), topology, minimum, vertices, start, primitives)); DX8Wrapper::Increment_DX8_CallCount();
 #define DX8CALL_HRES(x,res) DX8_Assert(); res = DX8Wrapper::_Get_D3D_Device8()->x; DX8_ErrorCode(res); DX8Wrapper::Increment_DX8_CallCount();
 #define DX8CALL(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D_Device8()->x); DX8Wrapper::Increment_DX8_CallCount();
 #define DX8CALL_D3D(x) DX8_Assert(); DX8_ErrorCode(DX8Wrapper::_Get_D3D8()->x); DX8Wrapper::Increment_DX8_CallCount();
 #define DX8_THREAD_ASSERT() if (_DX8SingleThreaded) { WWASSERT_PRINT(DX8Wrapper::_Get_Main_Thread_ID()==ThreadClass::_Get_Current_Thread_ID(),"DX8Wrapper::DX8 calls must be called from the main thread!"); }
 #else
+#define GX_STRIP_DX8_INDEXED(topology, minimum, vertices, start, primitives) GX_STRIP_INDEXED(DX8Wrapper::_Get_D3D_Device8(), topology, minimum, vertices, start, primitives); DX8Wrapper::Increment_DX8_CallCount();
 #define DX8CALL_HRES(x,res) res = DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
 #define DX8CALL(x) DX8Wrapper::_Get_D3D_Device8()->x; DX8Wrapper::Increment_DX8_CallCount();
 #define DX8CALL_D3D(x) DX8Wrapper::_Get_D3D8()->x; DX8Wrapper::Increment_DX8_CallCount();

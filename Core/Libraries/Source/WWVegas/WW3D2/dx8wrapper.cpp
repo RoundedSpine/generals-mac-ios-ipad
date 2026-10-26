@@ -289,7 +289,7 @@ void DX8Wrapper::Pillarbox_End()
 		{x0, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1},
 	};
 	D3DDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_TEX1);
-	D3DDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(BV));
+	GX_STRIP_UP(D3DDevice,D3DPT_TRIANGLESTRIP, 2, quad, sizeof(BV));
 	D3DDevice->SetTexture(0, nullptr);
 }
 
@@ -2473,12 +2473,12 @@ void DX8Wrapper::Draw(
 				}*/
 				DX8_RECORD_RENDER(polygon_count,vertex_count,render_state.shader);
 				DX8_RECORD_DRAW_CALLS();
-				DX8CALL(DrawIndexedPrimitive(
+				GX_STRIP_DX8_INDEXED(
 					(D3DPRIMITIVETYPE)primitive_type,
 					min_vertex_index,
 					vertex_count,
 					start_index+render_state.iba_offset,
-					polygon_count));
+					polygon_count);
 			}
 			break;
 		case BUFFER_TYPE_SORTING:

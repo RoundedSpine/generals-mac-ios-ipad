@@ -151,6 +151,9 @@ void IndexBufferClass::Copy(unsigned int* indices,unsigned first_index,unsigned 
 		for (unsigned v=0;v<count;++v) {
 			*inds++=(unsigned short)(*indices++);
 		}
+		if (Type() == BUFFER_TYPE_DX8)
+			GX_STRIP_CAPTURE(static_cast<DX8IndexBufferClass*>(this)->Get_DX8_Index_Buffer(), 0, l.Get_Index_Array(), count);
+
 	}
 }
 
@@ -173,6 +176,9 @@ void IndexBufferClass::Copy(unsigned short* indices,unsigned first_index,unsigne
 		for (unsigned v=0;v<count;++v) {
 			*inds++=*indices++;
 		}
+		if (Type() == BUFFER_TYPE_DX8)
+			GX_STRIP_CAPTURE(static_cast<DX8IndexBufferClass*>(this)->Get_DX8_Index_Buffer(), 0, l.Get_Index_Array(), count);
+
 	}
 }
 
@@ -184,6 +190,9 @@ void IndexBufferClass::Copy(unsigned short* indices,unsigned first_index,unsigne
 
 IndexBufferClass::WriteLockClass::WriteLockClass(IndexBufferClass* index_buffer_, int flags) : index_buffer(index_buffer_)
 {
+	// GeneralsX @feature Codex 26/10/2026 Do not reuse observations across buffer writes.
+	if (index_buffer->Type() == BUFFER_TYPE_DX8) GX_STRIP_FORGET(static_cast<DX8IndexBufferClass*>(index_buffer)->Get_DX8_Index_Buffer());
+
 	DX8_THREAD_ASSERT();
 	WWASSERT(index_buffer);
 	WWASSERT(!index_buffer->Engine_Refs());
@@ -234,6 +243,13 @@ IndexBufferClass::AppendLockClass::AppendLockClass(IndexBufferClass* index_buffe
 	:
 	index_buffer(index_buffer_)
 {
+	// GeneralsX @feature Codex 26/10/2026 Do not reuse observations across buffer writes.
+	if (index_buffer->Type() == BUFFER_TYPE_DX8) GX_STRIP_FORGET(static_cast<DX8IndexBufferClass*>(index_buffer)->Get_DX8_Index_Buffer());
+
+#ifdef GENERALS_STRIP_DIAGNOSTICS
+	diagnostic_start = start_index; diagnostic_count = index_range;
+#endif
+
 	DX8_THREAD_ASSERT();
 	WWASSERT(start_index+index_range<=index_buffer->Get_Index_Count());
 	WWASSERT(index_buffer);
@@ -261,6 +277,11 @@ IndexBufferClass::AppendLockClass::AppendLockClass(IndexBufferClass* index_buffe
 
 IndexBufferClass::AppendLockClass::~AppendLockClass()
 {
+#ifdef GENERALS_STRIP_DIAGNOSTICS
+	if (index_buffer->Type() == BUFFER_TYPE_DX8)
+		GX_STRIP_CAPTURE(static_cast<DX8IndexBufferClass*>(index_buffer)->Get_DX8_Index_Buffer(), diagnostic_start, indices, diagnostic_count);
+#endif
+
 	DX8_THREAD_ASSERT();
 	switch (index_buffer->Type()) {
 	case BUFFER_TYPE_DX8:
@@ -338,6 +359,7 @@ DX8IndexBufferClass::DX8IndexBufferClass(unsigned short index_count_,UsageType u
 
 DX8IndexBufferClass::~DX8IndexBufferClass()
 {
+	GX_STRIP_FORGET(index_buffer);
 	index_buffer->Release();
 }
 
@@ -423,6 +445,9 @@ DynamicIBAccessClass::WriteLockClass::WriteLockClass(DynamicIBAccessClass* ib_ac
 	:
 	DynamicIBAccess(ib_access_)
 {
+	if (DynamicIBAccess->Get_Type() == BUFFER_TYPE_DYNAMIC_DX8)
+		GX_STRIP_FORGET(static_cast<DX8IndexBufferClass*>(DynamicIBAccess->IndexBuffer)->Get_DX8_Index_Buffer());
+
 	DX8_THREAD_ASSERT();
 	DynamicIBAccess->IndexBuffer->Add_Ref();
 	switch (DynamicIBAccess->Get_Type()) {
