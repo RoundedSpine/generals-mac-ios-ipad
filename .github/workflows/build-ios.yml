@@ -42,7 +42,7 @@ jobs:
               "test_strip_diagnostics.py", "test_quad_lists.py",
               "test_dxvk_cache_reset.py", "test_search_context.py",
               "test_search_record_pool.py", "test_owned_path_route.py", "test_path_request_inputs.py",
-              "test_path_movement_inputs.py",
+              "test_path_movement_inputs.py", "test_occupancy_worker.py",
           ]
           for test in tests:
               result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)
@@ -53,6 +53,12 @@ jobs:
                   print("::error title=" + test + "::" + detail, flush=True)
                   sys.exit(result.returncode)
           PYTEST
+
+      - name: Check copied-query worker with ThreadSanitizer
+        if: github.ref_name == 'experiment/ios-mod-testing'
+        env:
+          CXX: clang++
+        run: python3 scripts/qa/test_occupancy_worker.py --tsan
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk
@@ -103,6 +109,7 @@ jobs:
           cmake --preset ios-vulkan \
             -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && github.run_id || '' }} \
             -DGENERALS_SEARCH_CONTEXT=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_OCCUPANCY_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_QUAD_LISTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_STRIP_DIAGNOSTICS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \

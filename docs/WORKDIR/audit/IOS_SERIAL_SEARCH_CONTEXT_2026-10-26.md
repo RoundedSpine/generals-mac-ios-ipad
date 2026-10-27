@@ -373,3 +373,13 @@ Validation result: all 81 workflow QA tests passed locally. All seven movement
 input tests also passed AddressSanitizer and UndefinedBehaviorSanitizer. Actionlint
 and diff checks passed. Full iOS SDK compilation, device movement/performance and
 replay CRC verification remain pending.
+
+
+## Follow-up: occupancy query boundary and shadow validation — 2026-10-27
+
+See [the occupancy worker audit](IOS_OCCUPANCY_SHADOW_WORKER_2026-10-27.md).
+The experiment now separates movement/destination decisions from engine reads and
+enables one bounded copied-query replay worker. It never searches the live world
+or applies routes; gameplay searches remain serial. All 88 QA tests pass, and the
+seven new tests pass ASan/UBSan and ThreadSanitizer. Complete world snapshots,
+selected search contexts and main-thread stale-path validation remain unresolved.

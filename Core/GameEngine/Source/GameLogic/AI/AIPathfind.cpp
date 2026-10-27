@@ -29,6 +29,9 @@
 
 #include "GameLogic/AIPathfind.h"
 #include "ownedpathroute.h"
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+#include "occupancyvalidationworker.h"
+#endif
 
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
@@ -4256,10 +4259,28 @@ void PathfindLayer::classifyWallMapCell( Int i, Int j , PathfindCell *cell, Obje
 	}
 }
 
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+// GeneralsX @feature Codex 27/10/2026 Worker lifetime is subordinate to Pathfinder and engine memory.
+struct PathfindOccupancyValidation {
+	PathOccupancy::ValidationWorker worker;
+	~PathfindOccupancyValidation() {
+		worker.stop();
+		fprintf(stderr, "[PATH_OCCUPANCY_WORKER] stopped validated=%llu mismatches=%llu skipped=%llu; gameplay_searches=serial\n",
+			static_cast<unsigned long long>(worker.validated()), static_cast<unsigned long long>(worker.mismatches()),
+			static_cast<unsigned long long>(worker.skipped()));
+	}
+};
+#endif
+
 //----------------------- Pathfinder ---------------------------------------
 
 Pathfinder::Pathfinder() :m_map(nullptr)
 {
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	m_occupancyValidation = nullptr;
+	m_occupancyValidationUnavailable = false;
+	m_occupancySamplesRemaining = 0;
+#endif
 	debugPath = nullptr;
 	PathfindCellInfo::allocateCellInfos();
 	reset();
@@ -4267,6 +4288,10 @@ Pathfinder::Pathfinder() :m_map(nullptr)
 
 Pathfinder::~Pathfinder()
 {
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	delete m_occupancyValidation;
+	m_occupancyValidation = nullptr;
+#endif
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
  // Static context buffers must not outlive the engine's allocation system.
  mainPathfindSearchContext().releaseStorage();
@@ -4276,6 +4301,10 @@ Pathfinder::~Pathfinder()
 
 void Pathfinder::reset()
 {
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	m_occupancySamplesRemaining = 0;
+	if (m_occupancyValidation) m_occupancyValidation->worker.invalidate();
+#endif
 	frameToShowObstacles = 0;
 	DEBUG_LOG(("Pathfind cell is %d bytes, PathfindCellInfo is %d bytes", sizeof(PathfindCell), sizeof(PathfindCellInfo)));
 
@@ -5310,8 +5339,88 @@ Bool Pathfinder::validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask
  * Returns false if there is another unit's goal already there.
  * Assumes your locomotor already said you can go there.
  */
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+// GeneralsX @refactor Codex 27/10/2026 Resolve engine dependencies only on the caller; transcripts own integer replies.
+struct LiveOccupancyReader {
+	Pathfinder *pathfinder;
+	const Object *obj;
+	PathfindCell *cell = nullptr;
+	Object *unit = nullptr;
+	PathOccupancy::Transcript *transcript = nullptr;
+	std::uint32_t read(PathOccupancy::Op op, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+		using PathOccupancy::Op;
+		std::uint32_t value = 0;
+		switch (op) {
+			case Op::HasMover: value = obj != nullptr; break;
+			case Op::HasAI: value = obj->getAIUpdateInterface() != nullptr; break;
+			case Op::IgnoreID: value = obj->getAIUpdateInterface()->getIgnoredObstacleID(); break;
+			case Op::Aircraft: value = obj->getAI()->isAircraftThatAdjustsDestination(); break;
+			case Op::MoverID: value = obj->getID(); break;
+			case Op::Cell:
+				cell = pathfinder->getCell(static_cast<PathfindLayerEnum>(a), static_cast<std::int32_t>(b), static_cast<std::int32_t>(c));
+				value = cell != nullptr; break;
+			case Op::AircraftGoal: value = cell->isAircraftGoal(); break;
+			case Op::GoalAircraft: value = cell->getGoalAircraft(); break;
+			case Op::CellType: value = cell->getType(); break;
+			case Op::ObstaclePresent: value = cell->isObstaclePresent(static_cast<ObjectID>(a)); break;
+			case Op::CellFlags: value = cell->getFlags(); break;
+			case Op::GoalUnit: value = cell->getGoalUnit(); break;
+			case Op::Resolve: unit = TheGameLogic->findObjectByID(static_cast<ObjectID>(a)); value = unit != nullptr; break;
+			case Op::Allied: value = obj->getRelationship(unit) == ALLIES; break;
+			case Op::CanCrush: value = obj->canCrushOrSquish(unit, TEST_CRUSH_OR_SQUISH); break;
+			case Op::PosUnit: value = cell->getPosUnit(); break;
+			case Op::UnitID: value = unit->getID(); break;
+			case Op::MoverInfantry: value = obj->isKindOf(KINDOF_INFANTRY); break;
+			case Op::UnitInfantry: value = unit->isKindOf(KINDOF_INFANTRY); break;
+			case Op::UnitHasAI: value = unit->getAIUpdateInterface() != nullptr; break;
+			case Op::UnitIdle: value = unit->getAIUpdateInterface()->isIdle(); break;
+		}
+		if (transcript) transcript->record(op,a,b,c,value);
+		return value;
+	}
+};
+static_assert(static_cast<int>(PathfindCell::NO_UNITS) == PathOccupancy::NoUnits && static_cast<int>(PathfindCell::UNIT_GOAL) == PathOccupancy::UnitGoal &&
+	static_cast<int>(PathfindCell::UNIT_PRESENT_MOVING) == PathOccupancy::Moving && static_cast<int>(PathfindCell::UNIT_PRESENT_FIXED) == PathOccupancy::Fixed &&
+	static_cast<int>(PathfindCell::UNIT_GOAL_OTHER_MOVING) == PathOccupancy::GoalOtherMoving, "Occupancy flags must match");
+static_assert(static_cast<int>(PathfindCell::CELL_OBSTACLE) == PathOccupancy::Obstacle && static_cast<int>(PathfindCell::CELL_IMPASSABLE) == PathOccupancy::Impassable &&
+	static_cast<int>(PathfindCell::CELL_BRIDGE_IMPASSABLE) == PathOccupancy::BridgeImpassable, "Occupancy types must match");
+
+PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, const PathOccupancy::Input& input)
+{
+	LiveOccupancyReader live = {this, obj};
+	if (!m_occupancySamplesRemaining || m_occupancyValidationUnavailable || PathOccupancy::validationPaused().load())
+		return PathOccupancy::evaluate(input, live);
+	--m_occupancySamplesRemaining;
+	if (!m_occupancyValidation) {
+		try {
+			m_occupancyValidation = new PathfindOccupancyValidation;
+			fprintf(stderr, "[PATH_OCCUPANCY_WORKER] enabled mode=shadow queries_per_queue_call=4 queue_capacity=1 event_capacity=512; gameplay_searches=serial\n");
+		} catch (const std::system_error& error) {
+			m_occupancyValidationUnavailable = true;
+			fprintf(stderr, "[PATH_OCCUPANCY_WORKER] unavailable: %s; gameplay_searches=serial\n", error.what());
+			return PathOccupancy::evaluate(input, live);
+		}
+	}
+	PathOccupancy::Transcript transcript;
+	transcript.input = input;
+	live.transcript = &transcript;
+	const auto result = PathOccupancy::evaluate(input, live);
+	transcript.expected = result;
+	m_occupancyValidation->worker.submit(transcript);
+	return result;
+}
+#endif
+
 Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, PathfindLayerEnum layer, Int iRadius, Bool centerInCell)
 {
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	// GeneralsX @refactor Codex 27/10/2026 The same explicit query kernel executes live and on copied transcripts.
+	PathOccupancy::Input input;
+	input.destination = true; input.x = cellX; input.y = cellY; input.layer = layer;
+	input.radius = iRadius; input.center = centerInCell; input.invalidID = INVALID_ID;
+	input.legacy = RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING;
+	return evaluateOccupancyQuery(obj, input).allowed;
+#else
 	// If obj==nullptr, means we are checking for any ground units present.  jba.
 	Int numCellsAbove = iRadius;
 	if (centerInCell) numCellsAbove++;
@@ -5391,6 +5500,7 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
 		}
 	}
 	return true;
+#endif
 }
 
 /**
@@ -5400,6 +5510,20 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
  */
 Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 {
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	PathOccupancy::Input input;
+	input.x = info.cell.x; input.y = info.cell.y; input.layer = info.layer;
+	input.radius = info.radius; input.center = info.centerInCell;
+	input.considerTransient = info.considerTransient; input.invalidID = INVALID_ID;
+	input.legacy = RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING;
+#ifdef INFANTRY_MOVES_THROUGH_INFANTRY
+	input.infantryThroughInfantry = true;
+#endif
+	const auto result = evaluateOccupancyQuery(obj, input);
+	info.allyFixedCount = result.allyFixedCount; info.allyMoving = result.allyMoving;
+	info.allyGoal = result.allyGoal; info.enemyFixed = result.enemyFixed;
+	return result.allowed;
+#else
 	info.allyFixedCount = 0;
 	info.allyMoving = false;
 	info.allyGoal = false;
@@ -5511,6 +5635,7 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 		}
 	}
 	return true;
+#endif
 }
 
 /**
@@ -6319,6 +6444,11 @@ void Pathfinder::processPathfindQueue()
 	bounds.hi.x--;
 	bounds.hi.y--;
 	m_logicalExtent = bounds;
+
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	// GeneralsX @feature Codex 27/10/2026 Sample at most four occupancy queries per queue-processing call.
+	m_occupancySamplesRemaining = 4;
+#endif
 
 	searchState().m_cumulativeCellsAllocated = 0;	// Number of pathfind cells examined.
 	Int pathsFound = 0;

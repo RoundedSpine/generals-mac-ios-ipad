@@ -333,3 +333,11 @@ search, neighbor expansion and the line callback with captured/live policies.
 Checks route/expansion equivalence on controlled grids, source mutation, null
 unit defaults, legacy callers, attack-cost branches and live relationship reads.
 These fixtures do not replace full-engine replay or iOS device testing.
+
+Run `python3 scripts/qa/test_occupancy_worker.py` to compare the production
+occupancy-query adapter with the retained legacy functions over generated worlds,
+then exercise copied transcript replay, bounded submissions, iOS lifecycle events,
+reset and shutdown. Add `--tsan` for ThreadSanitizer (requires compiler/runtime
+support). The mod-testing workflow enables `GENERALS_OCCUPANCY_WORKER` and runs
+this sanitizer check. This is a shadow query validator, not gameplay pathfinding
+on a worker. The compiled harness accepts optional `extra_flags` for sanitizer runs.

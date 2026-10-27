@@ -48,6 +48,15 @@ if(GENERALS_SEARCH_CONTEXT)
     add_compile_definitions(GENERALS_SEARCH_CONTEXT=1)
 endif()
 
+# GeneralsX @build Codex 27/10/2026 Enable one copied-query validation worker, never live-world search offload.
+option(GENERALS_OCCUPANCY_WORKER "Validate copied occupancy queries on one bounded shadow worker" OFF)
+if(GENERALS_OCCUPANCY_WORKER)
+    if(NOT GENERALS_SEARCH_CONTEXT)
+        message(FATAL_ERROR "GENERALS_OCCUPANCY_WORKER requires GENERALS_SEARCH_CONTEXT")
+    endif()
+    add_compile_definitions(GENERALS_OCCUPANCY_WORKER=1)
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Gate the verified-quad conversion for experimental device testing.
 option(GENERALS_QUAD_LISTS "Convert verified screen/water quads to triangle lists" OFF)
 if(GENERALS_QUAD_LISTS)

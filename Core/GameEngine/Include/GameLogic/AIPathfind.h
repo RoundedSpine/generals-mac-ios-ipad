@@ -39,6 +39,11 @@
 #if defined(GENERALS_SEARCH_CONTEXT) && RTS_ZEROHOUR
 #define GENERALS_ZH_SEARCH_CONTEXT 1
 #endif
+#if defined(GENERALS_OCCUPANCY_WORKER) && defined(GENERALS_ZH_SEARCH_CONTEXT)
+#define GENERALS_ZH_OCCUPANCY_WORKER 1
+namespace PathOccupancy { struct Input; struct Result; }
+struct PathfindOccupancyValidation;
+#endif
 //#include "GameLogic/Locomotor.h"	// no, do not include this, unless you like long recompiles
 #include "GameLogic/LocomotorSet.h"
 #include "GameLogic/GameLogic.h"
@@ -987,6 +992,12 @@ protected:
 		const PathfindMovementInput& movement, const Coord3D *pos);
 
 	void adjustCoordToCell(Int cellX, Int cellY, Bool centerInCell, Coord3D &pos, PathfindLayerEnum layer);
+#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+	PathOccupancy::Result evaluateOccupancyQuery(const Object *obj, const PathOccupancy::Input& input);
+	PathfindOccupancyValidation *m_occupancyValidation;
+	Bool m_occupancyValidationUnavailable;
+	UnsignedInt m_occupancySamplesRemaining;
+#endif
 	Bool checkDestination(const Object *obj, Int cellX, Int cellY, PathfindLayerEnum layer, Int iRadius, Bool centerInCell);
 	Bool checkForMovement(const Object *obj, TCheckMovementInfo &info);
 	Bool segmentIntersectsTallBuilding(const PathNode *curNode, PathNode *nextNode,
