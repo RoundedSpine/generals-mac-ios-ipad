@@ -10,12 +10,13 @@ renderer/cache, packaging and pathfinding paths, including their transitive
 services. This is a review of our iOS work and its integration points, not a claim
 to have verified every line of the roughly 500,000-line engine or every mod.
 
-Run 40468966878 for 452ea6f20 passed Mac QA, ThreadSanitizer, iOS compilation,
-packaging and artifact upload. The latest supplied device log was the preceding
-40453771952 exclusive-worker build; it is not device validation of parallel pairs
-or of the fixes below. The current audit changes need a new SDK build and device
-test. Community Patch asset integration remains on its separate branch; only its
-shared CSF parser correction is brought into this branch here.
+Run [40476386557](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40476386557)
+for code commit f3fb2f9e8 passed all 131 Mac QA tests, ThreadSanitizer, iOS
+compilation, actual platform/rpath packaging checks and IPA artifact upload.
+The latest supplied device log was the preceding 40453771952 exclusive-worker
+build; it is not device validation of parallel pairs or these audit fixes.
+Device testing remains pending. Community Patch asset integration remains on its
+separate branch; only its shared CSF parser correction is brought into this branch here.
 
 ## Confirmed issues corrected
 
@@ -113,14 +114,18 @@ universal performance/safety claim follows from passing isolated fixtures.
   cases and platform/rpath packaging checks. Fixtures compile production bodies
   with controlled service implementations; they are not full-engine runs.
 - Audio, CSF, immediate/deferred route and touch-cancellation checks pass ASan/UBSan.
-- All 13 parallel-batch and 9 occupancy tests pass ThreadSanitizer. Existing Mac
-  QA/TSan and SDK/package success applies to 452ea6f20, not these unbuilt changes.
+- All 13 parallel-batch and 9 occupancy tests pass local ThreadSanitizer. The
+  macOS runner also passed its QA/TSan steps and the full SDK/package build for
+  f3fb2f9e8. Race checks still cover controlled fixtures, not the live engine world.
 - Staged PowerShell combined-collector execution verified both games, font aliases,
   excluded top-level executable, unchanged source hashes, existing-output rejection
   and missing-font preflight before creating output. XDG cache/config paths were
   redirected into the temporary fixture because this environment's home is read-only.
-- Actionlint, shell syntax and diff checks pass. Packaging tests use tool stand-ins;
-  actual Mach-O platform/rpath verification must run in the next macOS build.
+- All 13 original-game CSF files available under GameFilesOriginalZH in the
+  Community Patch source parsed with production buffer bounds under ASan/UBSan.
+- Actionlint, shell syntax and diff checks pass. Local packaging tests use tool
+  stand-ins; the successful macOS build additionally ran the actual Mach-O
+  platform/rpath checks on every packaged runtime binary.
 
 Next device validation should include menu/game input, interrupted drag/pan and
 background/resume, speech/music pause/resume, consecutive EVA lines, maps/bridges,
