@@ -29,6 +29,10 @@
 
 #include "GameLogic/AIPathfind.h"
 #include "ownedpathroute.h"
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+#include "boundedsearchreads.h"
+#include <new>
+#endif
 #if defined(GENERALS_ZH_OCCUPANCY_WORKER) || defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER)
 #include "occupancyvalidationworker.h"
 #endif
@@ -1138,6 +1142,10 @@ void PathfindCellInfo::forceCleanPathFindCellInfos()
 
 void Pathfinder::forceCleanCells()
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	UnicodeString pathfinderFailoverMessage = TheGameText->FETCH_OR_SUBSTITUTE("GUI:PathfindingCrashPrevented", L"A pathfinding crash was prevented, now switching to the crash fixed pathfinding.");
 	TheInGameUI->message(pathfinderFailoverMessage);
 
@@ -3444,7 +3452,12 @@ Bool PathfindZoneManager::isPassable(Int cellX, Int cellY) const
 	}
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- return activePathfindSearchContext().corridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY);
+ const auto block=static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY;
+ const Bool passable=activePathfindSearchContext().corridorPassable(block);
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (activePathfindSearchContext().m_parallelReads) observeParallelCorridor(block,passable);
+#endif
+ return passable;
 #else
  return m_zoneBlocks[blockX][blockY].isPassable();
 #endif
@@ -3466,7 +3479,12 @@ Bool PathfindZoneManager::clipIsPassable(Int cellX, Int cellY) const
 	}
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- return activePathfindSearchContext().corridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY);
+ const auto block=static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY;
+ const Bool passable=activePathfindSearchContext().corridorPassable(block);
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (activePathfindSearchContext().m_parallelReads) observeParallelCorridor(block,passable);
+#endif
+ return passable;
 #else
  return m_zoneBlocks[blockX][blockY].isPassable();
 #endif
@@ -4287,6 +4305,83 @@ struct PathfindExclusiveWorker {
 };
 #endif
 
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @feature Codex 27/10/2026 Bounded dependencies belong to each private context, never to shared map cells.
+struct PathfindParallelReads {
+ static constexpr std::size_t capacity = 8192;
+ BoundedSearchReads<PathfindCell*, std::array<unsigned,19>, capacity> cells;
+ BoundedSearchReads<std::size_t, Bool, capacity> corridor;
+ struct Query {PathOccupancy::Input input; PathOccupancy::Result result;};
+ struct Height {Real x,y,z;};
+ std::vector<Query> queries;
+ std::vector<Height> heights;
+ Bool overflow = false;
+ void reset() {cells.reset();corridor.reset();queries.clear();heights.clear();overflow=false;}
+ void query(const PathOccupancy::Input& input, const PathOccupancy::Result& result) {
+  if (queries.size()==capacity) overflow=true;
+  else queries.push_back({input,result});
+ }
+};
+
+struct PathfindParallelJob {
+ PathfindSearchContext context;
+ PathfindParallelReads reads;
+ Object *obj = nullptr;
+ const LocomotorSet *locomotor = nullptr;
+ ObjectID id = INVALID_ID, ignored = INVALID_ID;
+ Coord3D from{},to{};
+ PathfindMovementSettings settings{};
+ PathfindCell *start = nullptr, *goal = nullptr;
+ ICoord2D startIndex{};
+ Pathfinder::OrdinarySearchOutcome outcome{nullptr,0,false};
+ unsigned permanent = 0;
+ unsigned long long epoch = 0;
+ std::uint64_t lifecycle = 0;
+ Int queueIndex = -1;
+ Bool captured = false, ready = false, used = false, tunneling = false, fixed = false;
+ void reset() {
+  context.m_parallelReads=nullptr;
+  context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
+  context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;
+  reads.reset();obj=nullptr;captured=ready=used=false;queueIndex=-1;
+ }
+};
+struct PathfindParallelBatch {
+ PathfindParallelJob jobs[2];
+ PathfindParallelJob* preparing = nullptr;
+ unsigned long long batches=0, accepted=0, rejected=0, unused=0;
+ Bool active=false;
+ ~PathfindParallelBatch() {
+  fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2\n",
+   batches,accepted,rejected,unused);
+ }
+};
+
+void observeParallelCorridor(std::size_t block, Bool passable) {
+ if (auto* reads=activePathfindSearchContext().m_parallelReads) reads->corridor.observe(block,passable);
+}
+void Pathfinder::observeParallelCell(PathfindCell* cell) {
+ if (auto* reads=activePathfindSearchContext().m_parallelReads)
+  if (!reads->cells.contains(cell)) reads->cells.observe(cell,cell->permanentSearchValues());
+}
+Real Pathfinder::searchGroundHeight(Real x, Real y) {
+ const Real height=TheTerrainLogic->getGroundHeight(x,y);
+ if (auto* reads=activePathfindSearchContext().m_parallelReads) {
+  if (reads->heights.size()==PathfindParallelReads::capacity) reads->overflow=true;
+  else reads->heights.push_back({x,y,height});
+ }
+ return height;
+}
+void Pathfinder::clearParallelBatch() {
+ if (!m_parallelBatch) return;
+ for (auto& job:m_parallelBatch->jobs) {
+  if(job.ready && !job.used) ++m_parallelBatch->unused;
+  job.reset();
+ }
+ m_parallelBatch->preparing=nullptr;m_parallelBatch->active=false;
+}
+#endif
+
 //----------------------- Pathfinder ---------------------------------------
 
 Pathfinder::Pathfinder() :m_map(nullptr)
@@ -4294,6 +4389,9 @@ Pathfinder::Pathfinder() :m_map(nullptr)
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
 	m_exclusiveWorker = nullptr;
 	m_exclusiveWorkerUnavailable = false;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ m_parallelBatch=nullptr;m_parallelWorldEpoch=0;
+#endif
 #endif
 #ifdef GENERALS_ZH_OCCUPANCY_WORKER
 	m_occupancyValidation = nullptr;
@@ -4307,6 +4405,9 @@ Pathfinder::Pathfinder() :m_map(nullptr)
 
 Pathfinder::~Pathfinder()
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ clearParallelBatch();delete m_parallelBatch;m_parallelBatch=nullptr;
+#endif
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
 	delete m_exclusiveWorker;
 	m_exclusiveWorker = nullptr;
@@ -4324,6 +4425,10 @@ Pathfinder::~Pathfinder()
 
 void Pathfinder::reset()
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 #ifdef GENERALS_ZH_OCCUPANCY_WORKER
 	m_occupancySamplesRemaining = 0;
 	if (m_occupancyValidation) m_occupancyValidation->worker.invalidate();
@@ -4405,6 +4510,10 @@ void Pathfinder::reset()
  */
 void Pathfinder::addWallPiece(Object *wallPiece)
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	if (m_numWallPieces<MAX_WALL_PIECES-1) {
 		m_wallPieces[m_numWallPieces] = wallPiece->getID();
 		m_numWallPieces++;
@@ -4416,6 +4525,10 @@ void Pathfinder::addWallPiece(Object *wallPiece)
  */
 void Pathfinder::removeWallPiece(Object *wallPiece)
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 
 	// sanity
   if( wallPiece == nullptr )
@@ -4467,6 +4580,10 @@ Bool Pathfinder::isPointOnWall(const Coord3D *pos)
  */
 PathfindLayerEnum Pathfinder::addBridge(Bridge *theBridge)
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	Int layer = LAYER_GROUND+1;
 	while (layer<=LAYER_WALL) {
 		if (m_layers[layer].isUnused()) {
@@ -4503,6 +4620,10 @@ void Pathfinder::updateLayer(Object *obj, PathfindLayerEnum layer)
  */
 void Pathfinder::classifyFence( Object *obj, Bool insert )
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 #if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
 	m_zoneManager.markZonesDirty();
 #endif
@@ -4614,6 +4735,10 @@ void Pathfinder::classifyFence( Object *obj, Bool insert )
  */
 void Pathfinder::classifyObjectFootprint( Object *obj, Bool insert )
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	if (obj->isKindOf(KINDOF_MINE)) {
 		return;  // don't pathfind around mines.
 	}
@@ -4703,6 +4828,10 @@ void Pathfinder::classifyObjectFootprint( Object *obj, Bool insert )
 
 void Pathfinder::internal_classifyObjectFootprint( Object *obj, Bool insert )
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	const Coord3D *pos = obj->getPosition();
 
 #if !(RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING)
@@ -5026,6 +5155,10 @@ void Pathfinder::classifyMapCell( Int i, Int j , PathfindCell *cell)
  */
 void Pathfinder::newMap()
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	m_wallHeight = TheAI->getAiData()->m_wallHeight; // may be updated by map.ini.
 	Region3D terrainExtent;
 	TheTerrainLogic->getMaximumPathfindExtent( &terrainExtent );
@@ -5162,6 +5295,10 @@ void Pathfinder::classifyMap()
  */
 void Pathfinder::forceMapRecalculation()
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	classifyMap();
 }
 
@@ -5411,6 +5548,12 @@ static_assert(static_cast<int>(PathfindCell::CELL_OBSTACLE) == PathOccupancy::Ob
 PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, const PathOccupancy::Input& input)
 {
 	LiveOccupancyReader live = {this, obj};
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (auto* reads=activePathfindSearchContext().m_parallelReads) {
+  const auto result=PathOccupancy::evaluate(input,live);reads->query(input,result);return result;
+ }
+#endif
+
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
 	// The real search worker reads a frozen world; never start/sample a shadow worker from it.
 	if (ExclusiveSearchWorker::onWorker()) return PathOccupancy::evaluate(input, live);
@@ -6488,6 +6631,9 @@ void Pathfinder::processPathfindQueue()
 	Int pathsFound = 0;
 	while (searchState().m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME &&
 		m_queuePRTail!=m_queuePRHead) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+  prepareParallelBatch();
+#endif
 		Object *obj = TheGameLogic->findObjectByID(m_queuedPathfindRequests[m_queuePRHead]);
 		m_queuedPathfindRequests[m_queuePRHead] = INVALID_ID;
 		if (obj) {
@@ -6502,6 +6648,9 @@ void Pathfinder::processPathfindQueue()
 			m_queuePRHead = 0;
 		}
 	}
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ clearParallelBatch();
+#endif
 	if (pathsFound > 0) {
 		PROFILER_PLOT("PathfindCells", (double)searchState().m_cumulativeCellsAllocated);
 		PROFILER_PLOT("PathfindPaths", (double)pathsFound);
@@ -6795,12 +6944,22 @@ Int Pathfinder::examineNeighboringCellsWithMovement(PathfindCell *parentCell, Pa
 				Coord3D fromPos;
 				fromPos.x = parentCell->getXIndex() * PATHFIND_CELL_SIZE_F ;
 				fromPos.y = parentCell->getYIndex() * PATHFIND_CELL_SIZE_F ;
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+				fromPos.z = searchGroundHeight(fromPos.x,fromPos.y);
+#else
 				fromPos.z = TheTerrainLogic->getGroundHeight(fromPos.x , fromPos.y);
+#endif
 
 				Coord3D toPos;
 				toPos.x = newCellCoord.x * PATHFIND_CELL_SIZE_F ;
 				toPos.y = newCellCoord.y * PATHFIND_CELL_SIZE_F ;
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+				toPos.z = searchGroundHeight(toPos.x,toPos.y);
+#else
 				toPos.z = TheTerrainLogic->getGroundHeight(toPos.x , toPos.y);
+#endif
 
 				if ( fromPos.z < toPos.z )
 					continue;
@@ -6865,12 +7024,22 @@ Int Pathfinder::examineNeighboringCellsWithMovement(PathfindCell *parentCell, Pa
 				Coord3D fromPos;
 				fromPos.x = parentCell->getXIndex() * PATHFIND_CELL_SIZE_F ;
 				fromPos.y = parentCell->getYIndex() * PATHFIND_CELL_SIZE_F ;
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+				fromPos.z = searchGroundHeight(fromPos.x,fromPos.y);
+#else
 				fromPos.z = TheTerrainLogic->getGroundHeight(fromPos.x , fromPos.y);
+#endif
 
 				Coord3D toPos;
 				toPos.x = newCellCoord.x * PATHFIND_CELL_SIZE_F ;
 				toPos.y = newCellCoord.y * PATHFIND_CELL_SIZE_F ;
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+				toPos.z = searchGroundHeight(toPos.x,toPos.y);
+#else
 				toPos.z = TheTerrainLogic->getGroundHeight(toPos.x , toPos.y);
+#endif
 
 				if ( fabs(fromPos.z - toPos.z)<PATHFIND_CELL_SIZE_F) {
 					newCostSoFar += 7*COST_DIAGONAL;
@@ -6953,6 +7122,81 @@ Int Pathfinder::examineNeighboringCellsWithMovement(PathfindCell *parentCell, Pa
  * Find a short, valid path between given locations.
  * Uses A* algorithm.
  */
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @feature Codex 27/10/2026 Speculate only two adjacent eligible requests; never dequeue or charge unused work.
+void Pathfinder::prepareParallelBatch()
+{
+#if !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
+ if (m_exclusiveWorkerUnavailable || TheGlobalData->m_debugAI!=0 || PathOccupancy::validationPaused().load() ||
+     SearchContextBinding<PathfindSearchContext>::current()) return;
+ if (m_parallelBatch && m_parallelBatch->active) {
+  if (m_queuePRHead==m_parallelBatch->jobs[0].queueIndex || m_queuePRHead==m_parallelBatch->jobs[1].queueIndex) return;
+  clearParallelBatch();
+ }
+ const Int next=(m_queuePRHead+1)%PATHFIND_QUEUE_LEN;
+ if (next==m_queuePRTail) return;
+ const ObjectID ids[2]={m_queuedPathfindRequests[m_queuePRHead],m_queuedPathfindRequests[next]};
+ if (ids[0]==ids[1]) return;
+ Object* objects[2]={TheGameLogic->findObjectByID(ids[0]),TheGameLogic->findObjectByID(ids[1])};
+ Coord3D from[2],to[2];ObjectID ignored[2];
+ for (Int i=0;i<2;++i) {
+  if (!objects[i] || !objects[i]->getAIUpdateInterface() ||
+      !objects[i]->getAIUpdateInterface()->predictOrdinaryPath(from[i],to[i],ignored[i]) ||
+      objects[i]->isKindOf(KINDOF_DOZER) ||
+      (objects[i]->getCrusherLevel()>0 && TheNameKeyGenerator->findExistingNameKey("SquishCollide")==NAMEKEY_INVALID)) return;
+ }
+ try {
+  if (!m_parallelBatch) m_parallelBatch=new PathfindParallelBatch;
+  if (!m_exclusiveWorker) {
+   m_exclusiveWorker=new PathfindExclusiveWorker;
+   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=exclusive scope=ordinary_fine main_waits=true\n");
+  }
+  auto& batch=*m_parallelBatch;
+  for (Int i=0;i<2;++i) {
+   auto& job=batch.jobs[i];job.reset();job.obj=objects[i];job.id=ids[i];
+   job.locomotor=&objects[i]->getAIUpdateInterface()->getLocomotorSet();
+   job.from=from[i];job.to=to[i];job.ignored=ignored[i];job.queueIndex=i?next:m_queuePRHead;
+   job.epoch=m_parallelWorldEpoch;job.lifecycle=PathOccupancy::validationLifecycleEpoch().load();
+   job.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
+   job.context.m_ignoreObstacleID=ignored[i];job.context.m_parallelReads=&job.reads;
+   batch.preparing=&job;
+   {SearchContextBinding<PathfindSearchContext> binding(job.context);
+    internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
+   batch.preparing=nullptr;
+  }
+  batch.active=true;
+  if (batch.jobs[0].captured && batch.jobs[1].captured) {
+   auto execute=[&](Int index) {
+    auto& job=batch.jobs[index];
+    SearchContextBinding<PathfindSearchContext> binding(job.context);
+    PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
+    const PathfindMovementInput movement={job.obj,*job.locomotor,&job.settings};
+    job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
+     job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
+   };
+   // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
+   m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
+   for (auto& job:batch.jobs) job.ready=true;
+   ++m_exclusiveWorker->searches;
+   if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
+  }
+  for (auto& job:batch.jobs) job.context.m_parallelReads=nullptr;
+ } catch (const ExclusiveSearchWorker::EnvironmentError& error) {
+  clearParallelBatch();m_exclusiveWorkerUnavailable=true;
+  fprintf(stderr,"[PATH_PARALLEL_BATCH] unavailable: %s; using ordinary dispatch\n",error.what());
+ } catch (const std::system_error& error) {
+  clearParallelBatch();m_exclusiveWorkerUnavailable=true;
+  fprintf(stderr,"[PATH_PARALLEL_BATCH] unavailable: %s; using ordinary dispatch\n",error.what());
+ } catch (const std::bad_alloc&) {
+  clearParallelBatch();m_exclusiveWorkerUnavailable=true;
+  fprintf(stderr,"[PATH_PARALLEL_BATCH] allocation unavailable; using ordinary dispatch\n");
+ } catch (...) {
+  clearParallelBatch();throw;
+ }
+#endif
+}
+#endif
+
 Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
@@ -7201,45 +7445,23 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	// "closed" list is initially empty
 	searchState().m_closedList.reset();
 
-	// GeneralsX @refactor Codex 27/10/2026 Keep completion processing inside the caller's context/admission phase.
-	OrdinarySearchOutcome outcome{parentCell, 0, false};
-	Bool dispatched = false;
-#if defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER) && !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
-	// GeneralsX @feature Codex 27/10/2026 Freeze the simulation by waiting here; only the loop owns scratch off-thread.
-	if (!m_exclusiveWorkerUnavailable && contextBinding.canTransfer() && TheGlobalData->m_debugAI == 0 &&
-		!PathOccupancy::validationPaused().load() &&
-		(!settings.crusher || TheNameKeyGenerator->findExistingNameKey("SquishCollide") != NAMEKEY_INVALID)) {
-		if (!m_exclusiveWorker) {
-			try {
-				m_exclusiveWorker = new PathfindExclusiveWorker;
-				fprintf(stderr, "[PATH_SEARCH_WORKER] enabled mode=exclusive scope=ordinary_fine main_waits=true\n");
-			} catch (const std::system_error& error) {
-				m_exclusiveWorkerUnavailable = true;
-				fprintf(stderr, "[PATH_SEARCH_WORKER] unavailable: %s; using caller\n", error.what());
-			}
-		}
-		if (m_exclusiveWorker) {
-			auto& context = activePathfindSearchContext();
-			try {
-				contextBinding.transferAndWait([&] {
-					m_exclusiveWorker->worker.run([&] {
-						SearchContextBinding<PathfindSearchContext> workerBinding(context);
-						outcome = runOrdinarySearchLoop(parentCell, goalCell, movement,
-							isHuman, centerInCell, radius, startCellNdx, obj);
-					});
-				});
-				++m_exclusiveWorker->searches;
-				dispatched = true;
-			} catch (const ExclusiveSearchWorker::EnvironmentError& error) {
-				// Environment setup fails before the loop starts, so a caller retry has no duplicate search effects.
-				m_exclusiveWorkerUnavailable = true;
-				fprintf(stderr, "[PATH_SEARCH_WORKER] unavailable: %s; using caller\n", error.what());
-			}
-		}
-	}
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // Preparation is main-thread only and stops before any loop, path allocation or retail cleanup.
+ if (m_parallelBatch && m_parallelBatch->preparing) {
+  auto& job=*m_parallelBatch->preparing;
+  job.start=parentCell;job.goal=goalCell;job.startIndex=startCellNdx;job.settings=settings;
+  job.tunneling=searchState().m_isTunneling;
+  job.permanent=PathfindSearchContext::permanentRecordsInUse();
+#if RETAIL_COMPATIBLE_PATHFINDING
+  job.fixed=s_useFixedPathfinding;
 #endif
-	if (!dispatched) outcome = runOrdinarySearchLoop(parentCell, goalCell, movement,
-		isHuman, centerInCell, radius, startCellNdx, obj);
+  job.captured=!settings.dozer && (!settings.crusher ||
+   TheNameKeyGenerator->findExistingNameKey("SquishCollide")!=NAMEKEY_INVALID);
+  return nullptr;
+ }
+#endif
+ // GeneralsX @refactor Codex 27/10/2026 Finalize only in the consuming request, after both searches have joined.
+ auto finish = [&](OrdinarySearchOutcome outcome) -> Path* {
 	parentCell = outcome.lastCell;
 	const Int cellCount = outcome.cellsExamined;
 	if (outcome.found)
@@ -7358,6 +7580,96 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		goalCell->releaseSearchInfo();
 	}
 	return nullptr;
+ };
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (obj && contextBinding.canTransfer() && m_parallelBatch && m_parallelBatch->active) {
+  for (auto& job:m_parallelBatch->jobs) {
+   if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
+   job.used=true; // One attempt; a changed request never reuses this result later.
+   auto& current=activePathfindSearchContext();
+   const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
+   const auto& before=job.settings;
+   Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,*from) && samePoint(job.to,*rawTo) &&
+    job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
+    !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
+    job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
+    job.start==parentCell && job.goal==goalCell && job.startIndex.x==startCellNdx.x && job.startIndex.y==startCellNdx.y &&
+    before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
+    before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
+    before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
+    before.human==settings.human && !job.reads.overflow;
+#if RETAIL_COMPATIBLE_PATHFINDING
+   valid=valid && job.fixed==s_useFixedPathfinding && !s_forceCleanCells;
+#endif
+   if (valid) valid=job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}) &&
+    job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);});
+   if (valid) for (const auto& query:job.reads.queries) {
+    LiveOccupancyReader live={this,obj};
+    if (!(PathOccupancy::evaluate(query.input,live)==query.result)) {valid=false;break;}
+   }
+   if (valid) for (const auto& height:job.reads.heights) {
+    if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
+   }
+   if (!valid) {++m_parallelBatch->rejected;break;}
+   // The ordinary preparation ran normally; replace only its unexecuted scratch with the validated completion.
+   current.m_openList.reset();current.m_closedList.reset();current.beginSearch();
+   job.context.m_corridor=current.m_corridor;
+   job.context.m_cumulativeCellsAllocated=0;
+   Path* path;
+   {
+    SearchContextBinding<PathfindSearchContext> resultBinding(job.context);
+    PathfindSearchContext::AdmissionScope resultAdmission(job.context,job.permanent);
+    path=finish(job.outcome);
+   }
+   current.m_cumulativeCellsAllocated+=job.context.m_cumulativeCellsAllocated;
+   current.m_isTunneling=job.context.m_isTunneling;
+   current.m_ignoreObstacleID=job.context.m_ignoreObstacleID;
+   current.m_corridor.swap(job.context.m_corridor);
+   ++m_parallelBatch->accepted;
+   return path;
+  }
+ }
+#endif
+	// GeneralsX @refactor Codex 27/10/2026 Keep completion processing inside the caller's context/admission phase.
+	OrdinarySearchOutcome outcome{parentCell, 0, false};
+	Bool dispatched = false;
+#if defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER) && !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
+	// GeneralsX @feature Codex 27/10/2026 Freeze the simulation by waiting here; only the loop owns scratch off-thread.
+	if (!m_exclusiveWorkerUnavailable && contextBinding.canTransfer() && TheGlobalData->m_debugAI == 0 &&
+		!PathOccupancy::validationPaused().load() &&
+		(!settings.crusher || TheNameKeyGenerator->findExistingNameKey("SquishCollide") != NAMEKEY_INVALID)) {
+		if (!m_exclusiveWorker) {
+			try {
+				m_exclusiveWorker = new PathfindExclusiveWorker;
+				fprintf(stderr, "[PATH_SEARCH_WORKER] enabled mode=exclusive scope=ordinary_fine main_waits=true\n");
+			} catch (const std::system_error& error) {
+				m_exclusiveWorkerUnavailable = true;
+				fprintf(stderr, "[PATH_SEARCH_WORKER] unavailable: %s; using caller\n", error.what());
+			}
+		}
+		if (m_exclusiveWorker) {
+			auto& context = activePathfindSearchContext();
+			try {
+				contextBinding.transferAndWait([&] {
+					m_exclusiveWorker->worker.run([&] {
+						SearchContextBinding<PathfindSearchContext> workerBinding(context);
+						outcome = runOrdinarySearchLoop(parentCell, goalCell, movement,
+							isHuman, centerInCell, radius, startCellNdx, obj);
+					});
+				});
+				++m_exclusiveWorker->searches;
+				dispatched = true;
+			} catch (const ExclusiveSearchWorker::EnvironmentError& error) {
+				// Environment setup fails before the loop starts, so a caller retry has no duplicate search effects.
+				m_exclusiveWorkerUnavailable = true;
+				fprintf(stderr, "[PATH_SEARCH_WORKER] unavailable: %s; using caller\n", error.what());
+			}
+		}
+	}
+#endif
+	if (!dispatched) outcome = runOrdinarySearchLoop(parentCell, goalCell, movement,
+		isHuman, centerInCell, radius, startCellNdx, obj);
+	return finish(outcome);
 }
 
 /**
@@ -7581,6 +7893,10 @@ struct MADStruct
 
 void Pathfinder::moveAlliesAwayFromDestination(Object *obj,const Coord3D& destination)
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	MADStruct info;
 	info.obj = obj;
 	info.ignoreID = obj->getAI()->getIgnoredObstacleID();
@@ -10409,6 +10725,10 @@ Bool Pathfinder::isGroundPathPassable( Bool isCrusher, const Coord3D& startWorld
  */
 void Pathfinder::changeBridgeState( PathfindLayerEnum layer, Bool repaired)
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
+
 	if (m_layers[layer].isUnused()) return;
 	if (m_layers[layer].setDestroyed(!repaired)) {
 		m_zoneManager.markZonesDirty();
@@ -10843,6 +11163,9 @@ if (g_UT_startTiming) return false;
 			return FALSE; // Only move units if it is required.
 		}
 	}
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ invalidateParallelResults();
+#endif
 	LatchRestore<Int> recursiveDepth(m_moveAlliesDepth, m_moveAlliesDepth+1);
 	if (m_moveAlliesDepth > 2) {
 		return false;

@@ -5,6 +5,7 @@
 #include <functional>
 #include <mutex>
 #include <stdexcept>
+#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -54,7 +55,8 @@ public:
   m_thread.join();
  }
  static bool onWorker(){return workerFlag();}
- void run(std::function<void()> job){
+ // GeneralsX @feature Codex 27/10/2026 Join both independent tasks before returning, including either task's failure.
+ void runPair(std::function<void()> job, std::function<void()> caller){
   if(std::this_thread::get_id()!=m_owner) throw std::logic_error("Exclusive search dispatch requires its owner thread");
   std::fenv_t environment;
   if(std::fegetenv(&environment)!=0) throw EnvironmentError("Cannot capture search floating-point environment");
@@ -62,8 +64,14 @@ public:
   if(!m_done||m_stop) throw std::logic_error("Exclusive search worker is not idle");
   m_environment=environment;m_error=nullptr;m_job=std::move(job);m_done=false;m_pending=true;
   m_wake.notify_one();
+  lock.unlock();
+  std::exception_ptr callerError;
+  try {caller();}catch(...){callerError=std::current_exception();}
+  lock.lock();
   m_finished.wait(lock,[&]{return m_done;});
   auto error=m_error;lock.unlock();
+  if(callerError) std::rethrow_exception(callerError);
   if(error) std::rethrow_exception(error);
  }
+ void run(std::function<void()> job){runPair(std::move(job),[]{});}
 };

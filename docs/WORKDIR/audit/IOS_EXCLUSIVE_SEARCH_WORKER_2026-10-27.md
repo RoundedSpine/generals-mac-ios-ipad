@@ -1,5 +1,9 @@
 # Real ordinary-search loop worker — 2026-10-27
 
+This records the exclusive-worker stage. Device log 40453771952 subsequently
+confirmed 3,094 worker searches and normal exit. The next implementation is
+documented in [Two-request ordinary pathfinding batch](IOS_PARALLEL_PATH_BATCH_2026-10-27.md).
+
 ## Implemented behavior
 
 `GENERALS_EXCLUSIVE_PATH_WORKER` enables one worker that executes the actual

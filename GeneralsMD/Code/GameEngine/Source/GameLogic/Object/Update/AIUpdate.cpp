@@ -393,6 +393,21 @@ to call use the PathfindServicesInterface to do a pathfind operation.  This shou
 (and in fact is very hard to do because PathfindServicesInterace is private to the pathfinder)
 except by the pathfinder during pathfind queue processing.  jba */
 //-------------------------------------------------------------------------------------------------
+// GeneralsX @feature Codex 27/10/2026 Predict without destroying paths, setting goals, waking units or changing waiting flags.
+#if defined(GENERALS_PARALLEL_PATH_BATCH)
+Bool AIUpdateInterface::predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored)
+{
+ if (!m_waitingForPath || m_isSafePath || m_isApproachPath || m_isAttackPath || m_isBlockedAndStuck ||
+     !m_isFinalGoal || canComputeQuickPath() ||
+     (m_stateMachine->getCurrentStateID() == AI_FOLLOW_EXITPRODUCTION_PATH && canPathThroughUnits())) return false;
+ Region3D extent;
+ TheTerrainLogic->getMaximumPathfindExtent(&extent);
+ if (!extent.isInRegionNoZ(&m_requestedDestination) || !extent.isInRegionNoZ(getObject()->getPosition())) return false;
+ from = *getObject()->getPosition(); to = m_requestedDestination; ignored = getIgnoredObstacleID();
+ return true;
+}
+#endif
+
 void AIUpdateInterface::doPathfind( PathfindServicesInterface *pathfinder )
 {
 	if (!m_waitingForPath) {

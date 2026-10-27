@@ -354,3 +354,12 @@ caller-only path construction/cleanup, context handoff, rounding mode, exception
 restoration, reuse and read-only name-key lookup. The experiment enables
 `GENERALS_EXCLUSIVE_PATH_WORKER`; it defaults OFF elsewhere. This is exclusive
 ordinary-search execution, not parallel prefetch or a measured throughput gain.
+
+Run `python3 scripts/qa/test_parallel_path_batch.py` (or add `--tsan`) to compile
+the production two-request dispatcher, independent cell/record contexts, ordinary
+search, queue loop and ordered consumption with controlled world services. Checks
+actual overlap, route/budget equivalence, dependency invalidation, predictor state,
+single-use queue positions, bounded overflow, lifecycle, FP environment and joined
+exceptions. `GENERALS_PARALLEL_PATH_BATCH` defaults OFF; the experiment enables
+it for eligible ordinary requests only. This adds real parallel reuse, with
+unmeasured device performance and remaining special-search integration.

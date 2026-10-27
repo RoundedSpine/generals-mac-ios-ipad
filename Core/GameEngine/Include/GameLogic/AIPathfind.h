@@ -33,6 +33,7 @@
 #include "Common/Snapshot.h"
 
 #include <vector>
+#include <array>
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
 #include "searchcontextbinding.h"
@@ -48,6 +49,14 @@ struct PathfindOccupancyValidation;
 #if defined(GENERALS_EXCLUSIVE_PATH_WORKER) && defined(GENERALS_ZH_SEARCH_CONTEXT)
 #define GENERALS_ZH_EXCLUSIVE_PATH_WORKER 1
 struct PathfindExclusiveWorker;
+#endif
+// GeneralsX @feature Codex 27/10/2026 Frozen two-request batches require the real worker and explicit occupancy decisions.
+#if defined(GENERALS_PARALLEL_PATH_BATCH) && defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER) && defined(GENERALS_ZH_OCCUPANCY_WORKER)
+#define GENERALS_ZH_PARALLEL_PATH_BATCH 1
+struct PathfindParallelBatch;
+struct PathfindParallelJob;
+struct PathfindParallelReads;
+void observeParallelCorridor(std::size_t block, Bool passable);
 #endif
 //#include "GameLogic/Locomotor.h"	// no, do not include this, unless you like long recompiles
 #include "GameLogic/LocomotorSet.h"
@@ -354,6 +363,9 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
  BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;
  unsigned m_transientRecords = 0;
  SearchContextOwnership m_ownership;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ PathfindParallelReads* m_parallelReads = nullptr;
+#endif
  // GeneralsX @refactor Codex 27/10/2026 Admission reads an explicit frozen count while an ordinary phase is bound.
  bool m_hasAdmissionSnapshot = false;
  unsigned m_permanentAdmission = 0;
@@ -482,6 +494,16 @@ public:
 	Bool setTypeAsObstacle( Object *obstacle, Bool isFence, const ICoord2D &pos );				///< flag this cell as an obstacle, from the given one
 	Bool removeObstacle( Object *obstacle );				///< unflag this cell as an obstacle, from the given one
 	void setType( CellType type );	///< set the cell type
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // GeneralsX @feature Codex 27/10/2026 Compare permanent values exactly, excluding padding and all search scratch.
+ std::array<unsigned, 19> permanentSearchValues() const {
+  return {{static_cast<unsigned>(m_info != nullptr), static_cast<unsigned>(m_obstacleID), m_obstacleIsFence, m_obstacleIsTransparent,
+   m_zone, m_aircraftGoal, m_pinched, m_type, m_flags, m_connectsToLayer, m_layer,
+   static_cast<unsigned>(getGoalUnit()), static_cast<unsigned>(getGoalAircraft()), static_cast<unsigned>(getPosUnit()),
+   static_cast<unsigned>(m_info ? m_info->m_pos.x : 0), static_cast<unsigned>(m_info ? m_info->m_pos.y : 0),
+   static_cast<unsigned>(isObstacleFence()), static_cast<unsigned>(isObstacleTransparent()), static_cast<unsigned>(getObstacleID())}};
+ }
+#endif
 	CellType getType() const { return (CellType)m_type; }				///< get the cell type
 	CellFlags getFlags() const { return (CellFlags)m_flags; }				///< get the cell type
 	Bool isAircraftGoal() const {return m_aircraftGoal != 0;}
@@ -1009,6 +1031,17 @@ protected:
 		Bool found;
 	};
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ friend struct PathfindParallelBatch;
+ friend struct PathfindParallelJob;
+ PathfindParallelBatch* m_parallelBatch;
+ unsigned long long m_parallelWorldEpoch;
+ void prepareParallelBatch();
+ void clearParallelBatch();
+ void observeParallelCell(PathfindCell* cell);
+ Real searchGroundHeight(Real x, Real y);
+ void invalidateParallelResults() {++m_parallelWorldEpoch;}
+#endif
 	PathfindExclusiveWorker *m_exclusiveWorker;
 	Bool m_exclusiveWorkerUnavailable;
 #endif
@@ -1242,10 +1275,13 @@ inline PathfindCell *Pathfinder::getCell( PathfindLayerEnum layer, Int x, Int y 
 		if (layer > LAYER_GROUND && layer <= LAYER_LAST)
 		{
 			cell = m_layers[layer].getCell(x, y);
-			if (cell)
-				return cell;
 		}
-		return &m_map[x][y];
+  if (!cell) cell = &m_map[x][y];
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+  if (auto* context=SearchContextBinding<PathfindSearchContext>::current())
+   if (context->m_parallelReads) observeParallelCell(cell);
+#endif
+  return cell;
 	}
 	else
 	{

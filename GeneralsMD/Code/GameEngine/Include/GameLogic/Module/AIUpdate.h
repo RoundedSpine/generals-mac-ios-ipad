@@ -459,6 +459,10 @@ private:
 #endif
 
 public:
+// GeneralsX @feature Codex 27/10/2026 Read-only prediction of the ordinary final-goal branch; execution remains in doPathfind.
+#if defined(GENERALS_PARALLEL_PATH_BATCH)
+ Bool predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored);
+#endif
 	void doPathfind( PathfindServicesInterface *pathfinder );
 	void requestPath( Coord3D *destination, Bool isGoalDestination );	///< Queues a request to pathfind to destination.
 	void requestAttackPath( ObjectID victimID, const Coord3D* victimPos );	///< computes path to attack the current target, returns false if no path
