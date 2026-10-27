@@ -97,6 +97,13 @@ validation and the AI fallback branch with controlled quick-check/hierarchy/worl
 Path services. They do not establish full-engine replay equivalence, full-world
 race freedom, device movement, memory high-water mark or frame-time improvement.
 
+The first SDK attempt, [run 40531271316](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40531271316),
+remained queued waiting for a macOS runner without starting any steps. The runner
+configuration is unchanged from successful run 40520080544. At the user's request,
+trigger a fresh attempt with the same engine/workflow and cancel the queued
+attempt through the existing per-branch concurrency rule; SDK validation is still
+pending, with no build failure established by the queue delay.
+
 The latest supplied log identifies the prior `b97fa0c` binary, reaches the score
 screen and exits 0. It records 280 pairs/560 primary completions: 546 accepted
 (97.5%), 14 rejected, none unused, and 280 worker tasks. Parallel safe, closest and
