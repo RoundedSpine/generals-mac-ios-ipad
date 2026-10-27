@@ -139,7 +139,7 @@ struct Pathfinder {
  static void pathXY(int x,int y,bool center,Coord3D&p){p.x=center?(float(x)+.5f)*10:(float(x)+.05)*10;p.y=center?(float(y)+.5f)*10:(float(y)+.05)*10;}
  Path*internalFindPath(Object*,const LocomotorSet&,const Coord3D*,const Coord3D*);
 };
-''' + block(SOURCE, 'struct LiveOccupancyReader {') + '\n' + block(SOURCE, 'struct PathfindExclusiveWorker {') + '\n' + block(SOURCE, 'struct PathfindParallelReads {') + '\n' + block(SOURCE, 'struct PathfindParallelJob {') + '\n' + block(SOURCE, 'struct PathfindParallelBatch {')
+''' + block(SOURCE, 'struct PathfindExclusiveWorker {') + '\n' + block(SOURCE, 'struct PathfindParallelReads {') + '\n' + block(SOURCE, 'struct PathfindParallelJob {') + '\n' + block(SOURCE, 'struct PathfindParallelBatch {')
     # Pathfinder needs only a forward declaration before the worker state definition.
     source = source.replace('struct PathfindMovementInput;\nstruct Pathfinder', 'struct PathfindExclusiveWorker;\nvoid observeParallelCorridor(std::size_t,Bool);\nstruct PathfindMovementInput;\nstruct Pathfinder', 1)
     source += '\n' + block(SOURCE, 'struct PathfindMovementInput {') + '\n' + block(SOURCE, 'struct ExamineCellsStruct\n')
@@ -152,9 +152,13 @@ struct Pathfinder {
     a=HEADER.index('inline PathfindCell *Pathfinder::getCell( PathfindLayerEnum layer, Int x, Int y )')
     source += HEADER[a:HEADER.index('\n}',a)+2]
     source += '\n#define PROFILER_PLOT(a,b) ((void)0)\n'
+    # Preserve production declaration order: a fixture must not silently predeclare the reader for the validator.
+    reader=block(SOURCE,'struct LiveOccupancyReader {')
+    validator=function('PathfindParallelJob* Pathfinder::takeParallelResult(')
+    source += '\n'.join(part for _,part in sorted([(SOURCE.index('struct LiveOccupancyReader {'),reader),
+                                                  (SOURCE.index('PathfindParallelJob* Pathfinder::takeParallelResult('),validator)]))+'\n'
     source += '\n'.join(function(m) for m in [
         'void Pathfinder::processPathfindQueue()', 'void observeParallelCorridor(', 'void Pathfinder::observeParallelCell(', 'Real Pathfinder::searchGroundHeight(',
-        'PathfindParallelJob* Pathfinder::takeParallelResult(',
         'void Pathfinder::clearParallelBatch()', 'void Pathfinder::prepareParallelBatch()',
         'void Pathfinder::beginSearchState()', 'void Pathfinder::cleanOpenAndClosedLists()',
         'PathfindMovementSettings Pathfinder::captureMovementSettings(',

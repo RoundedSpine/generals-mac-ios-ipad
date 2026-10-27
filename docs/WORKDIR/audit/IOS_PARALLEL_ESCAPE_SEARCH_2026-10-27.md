@@ -67,6 +67,14 @@ missing crusher name keys and unsupported requests remain ineligible.
   all nine new escape tests pass ASan/UBSan. Actionlint and diff checks pass.
   The real iOS SDK/package build and device testing remain pending.
 
+Run 40485884866 also passed all 142 Mac QA tests and its race checks, but SDK
+compilation found the shared validator above the `LiveOccupancyReader` definition.
+The isolated fixture had hidden this by emitting the reader first. Move the
+validator below the reader and preserve their real relative order in the fixture.
+All 24 batch tests pass after this build correction; a negative control restoring
+the old order fails compilation. The subsequent SDK run must pass before an IPA
+is available. The failure did not produce a new installable artifact.
+
 Only session summaries are added: the existing batch counters plus
 `[PATH_PARALLEL_SAFE] stopped searches=N accepted=A`. N counts both caller and
 worker escape computations; A counts validated reused escape completions,

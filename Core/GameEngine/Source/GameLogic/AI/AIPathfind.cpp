@@ -4377,45 +4377,6 @@ Real Pathfinder::searchGroundHeight(Real x, Real y) {
  }
  return height;
 }
-// GeneralsX @feature Codex 27/10/2026 Both search kinds consume once at their original queue position and validate the same live dependencies.
-PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
- const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
- PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings)
-{
- if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
- for (auto& job:m_parallelBatch->jobs) {
-  if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
-  job.used=true;
-  auto& current=activePathfindSearchContext();
-   const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
-   const auto& before=job.settings;
-   Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,from) && samePoint(job.to,to) &&
-    job.safe==(repulsor2!=nullptr) && (!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius)) &&
-    job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
-    !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
-    job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
-    job.start==start && job.goal==goal && job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y &&
-    before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
-    before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
-    before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
-    before.human==settings.human && !job.reads.overflow;
-#if RETAIL_COMPATIBLE_PATHFINDING
-   valid=valid && job.fixed==s_useFixedPathfinding && !s_forceCleanCells;
-#endif
-   if (valid) valid=job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}) &&
-    job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);});
-   if (valid) for (const auto& query:job.reads.queries) {
-    LiveOccupancyReader live={this,obj};
-    if (!(PathOccupancy::evaluate(query.input,live)==query.result)) {valid=false;break;}
-   }
-   if (valid) for (const auto& height:job.reads.heights) {
-    if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
-   }
-   if (!valid) {++m_parallelBatch->rejected;break;}
-  return &job;
- }
- return nullptr;
-}
 
 void Pathfinder::clearParallelBatch() {
  if (!m_parallelBatch) return;
@@ -5589,6 +5550,48 @@ static_assert(static_cast<int>(PathfindCell::NO_UNITS) == PathOccupancy::NoUnits
 	static_cast<int>(PathfindCell::UNIT_GOAL_OTHER_MOVING) == PathOccupancy::GoalOtherMoving, "Occupancy flags must match");
 static_assert(static_cast<int>(PathfindCell::CELL_OBSTACLE) == PathOccupancy::Obstacle && static_cast<int>(PathfindCell::CELL_IMPASSABLE) == PathOccupancy::Impassable &&
 	static_cast<int>(PathfindCell::CELL_BRIDGE_IMPASSABLE) == PathOccupancy::BridgeImpassable, "Occupancy types must match");
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @feature Codex 27/10/2026 Both search kinds consume once at their original queue position and validate the same live dependencies.
+PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
+ const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
+ PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings)
+{
+ if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
+ for (auto& job:m_parallelBatch->jobs) {
+  if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
+  job.used=true;
+  auto& current=activePathfindSearchContext();
+   const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
+   const auto& before=job.settings;
+   Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,from) && samePoint(job.to,to) &&
+    job.safe==(repulsor2!=nullptr) && (!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius)) &&
+    job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
+    !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
+    job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
+    job.start==start && job.goal==goal && job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y &&
+    before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
+    before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
+    before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
+    before.human==settings.human && !job.reads.overflow;
+#if RETAIL_COMPATIBLE_PATHFINDING
+   valid=valid && job.fixed==s_useFixedPathfinding && !s_forceCleanCells;
+#endif
+   if (valid) valid=job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}) &&
+    job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);});
+   if (valid) for (const auto& query:job.reads.queries) {
+    LiveOccupancyReader live={this,obj};
+    if (!(PathOccupancy::evaluate(query.input,live)==query.result)) {valid=false;break;}
+   }
+   if (valid) for (const auto& height:job.reads.heights) {
+    if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
+   }
+   if (!valid) {++m_parallelBatch->rejected;break;}
+  return &job;
+ }
+ return nullptr;
+}
+#endif
 
 PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, const PathOccupancy::Input& input)
 {
