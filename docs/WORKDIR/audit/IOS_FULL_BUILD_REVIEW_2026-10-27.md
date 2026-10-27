@@ -13,9 +13,16 @@ to have verified every line of the roughly 500,000-line engine or every mod.
 Run [40476386557](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40476386557)
 for code commit f3fb2f9e8 passed all 131 Mac QA tests, ThreadSanitizer, iOS
 compilation, actual platform/rpath packaging checks and IPA artifact upload.
-The latest supplied device log was the preceding 40453771952 exclusive-worker
-build; it is not device validation of parallel pairs or these audit fixes.
-Device testing remains pending. Community Patch asset integration remains on its
+The latest supplied device log identifies revision `~f3fb2f9`: it reaches the
+score screen and exits with code 0 after 999 completed parallel pairs. Of 1,998
+speculative results, 1,862 were reused (93.2%), 129 failed validation and used the
+ordinary search fallback, and seven were never consumed. The worker's 999-search
+summary agrees with one worker task per pair. No primitive-restart warning or
+fatal error is recorded. Both CSF passes completed (6,422 and 6,364 labels).
+The stable `quad-lists-v1` cache reports `state=new` on this launch; reuse on a
+subsequent launch is still unverified. These counters establish on-device use,
+not a measured speedup or validation of interrupted gestures, audio pause/resume,
+every route or replay equivalence. Community Patch asset integration remains on its
 separate branch; only its shared CSF parser correction is brought into this branch here.
 
 ## Confirmed issues corrected
