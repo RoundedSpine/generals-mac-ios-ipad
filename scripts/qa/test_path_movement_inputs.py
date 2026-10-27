@@ -20,6 +20,7 @@ def block(text, marker):
 
 def fixture(enabled):
     return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + r'''
+#include "searchcontextbinding.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -55,6 +56,12 @@ struct LocomotorSet{
  int getValidSurfaces()const{++reads;return surfaces;}bool isDownhillOnly()const{++reads;return downhill;}
 };
 ''' + block(HEADER, 'struct PathfindMovementSettings {') + r'''
+struct PathfindSearchContext{
+ SearchContextOwnership m_ownership;
+ struct AdmissionScope{AdmissionScope(PathfindSearchContext&,unsigned){}};
+ static unsigned permanentRecordsInUse(){return 0;}
+};
+PathfindSearchContext&activePathfindSearchContext(){static PathfindSearchContext context;return context;}
 struct PathfindMovementInput;
 struct PathfindCell;
 struct CellList{

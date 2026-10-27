@@ -43,6 +43,7 @@ jobs:
               "test_dxvk_cache_reset.py", "test_search_context.py",
               "test_search_record_pool.py", "test_owned_path_route.py", "test_path_request_inputs.py",
               "test_path_movement_inputs.py", "test_occupancy_worker.py",
+              "test_search_context_binding.py",
           ]
           for test in tests:
               result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)
@@ -58,7 +59,9 @@ jobs:
         if: github.ref_name == 'experiment/ios-mod-testing'
         env:
           CXX: clang++
-        run: python3 scripts/qa/test_occupancy_worker.py --tsan
+        run: |
+          python3 scripts/qa/test_occupancy_worker.py --tsan
+          python3 scripts/qa/test_search_context_binding.py --tsan
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk

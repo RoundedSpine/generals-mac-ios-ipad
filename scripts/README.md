@@ -341,3 +341,9 @@ reset and shutdown. Add `--tsan` for ThreadSanitizer (requires compiler/runtime
 support). The mod-testing workflow enables `GENERALS_OCCUPANCY_WORKER` and runs
 this sanitizer check. This is a shadow query validator, not gameplay pathfinding
 on a worker. The compiled harness accepts optional `extra_flags` for sanitizer runs.
+
+Run `python3 scripts/qa/test_search_context_binding.py` to exercise explicit
+context selection on real cell/list/corridor code, nested/exception restoration,
+rejected simultaneous ownership and captured admission during independent permanent
+pool churn. Add `--tsan` for ThreadSanitizer. This tests scratch isolation, not the
+thread safety of live object, terrain, recovery or engine UI calls.

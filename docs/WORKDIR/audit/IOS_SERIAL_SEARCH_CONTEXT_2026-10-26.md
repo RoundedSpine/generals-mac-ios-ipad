@@ -383,3 +383,14 @@ enables one bounded copied-query replay worker. It never searches the live world
 or applies routes; gameplay searches remain serial. All 88 QA tests pass, and the
 seven new tests pass ASan/UBSan and ThreadSanitizer. Complete world snapshots,
 selected search contexts and main-thread stale-path validation remain unresolved.
+
+
+## Follow-up: explicit scratch binding and admission scope — 2026-10-27
+
+See [the exclusive search phase contract](IOS_EXCLUSIVE_SEARCH_PHASE_2026-10-27.md).
+Search record/state/corridor operations now use a lexical selected context; map
+lifetime remains on main storage. Ordinary fine search binds its context and
+captures admission after pending cleanup, restoring both policies on exit. This
+implements scratch selection and a frozen admission input, not an engine-wide
+world freeze, complete stale-path validation or gameplay worker dispatch. Retail
+repair still changes permanent map state and calls UI/audio on the main thread.

@@ -38,7 +38,7 @@ constexpr ObjectID INVALID_ID=0;
 struct ICoord2D {int x,y;};
 class PathfindCell;
 constexpr unsigned PATHFIND_CELLS_PER_FRAME=5000;
-bool s_useFixedPathfinding=''' + ('true' if fixed else 'false') + '; bool s_forceCleanCells=false;\n' + '#include "stampedsearchcontext.h"\n#include "boundedkeyedpool.h"\n' + state + info + queue + r'''
+bool s_useFixedPathfinding=''' + ('true' if fixed else 'false') + '; bool s_forceCleanCells=false;\n' + '#include "stampedsearchcontext.h"\n#include "boundedkeyedpool.h"\n#include "searchcontextbinding.h"\n' + state + info + queue + r'''
 class PathfindCell {
 public:
  PathfindCellInfo* m_info=nullptr;

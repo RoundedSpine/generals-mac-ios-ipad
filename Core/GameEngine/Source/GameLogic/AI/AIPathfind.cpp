@@ -1121,7 +1121,7 @@ Bool s_forceCleanCells = false;
 void PathfindCellInfo::forceCleanPathFindCellInfos()
 {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- mainPathfindSearchContext().beginSearch();
+ activePathfindSearchContext().beginSearch();
 #else
 	for (Int i = 0; i < CELL_INFOS_TO_ALLOCATE - 1; i++) {
 		s_infoArray[i].search().m_nextOpen = nullptr;
@@ -1560,7 +1560,7 @@ void PathfindCell::releaseSearchInfo()
  const auto& state = record->search();
  DEBUG_ASSERTCRASH(!state.m_nextOpen && !state.m_prevOpen && !state.m_open && !state.m_closed, ("Shouldn't be linked."));
  if (state.m_nextOpen || state.m_prevOpen || state.m_open || state.m_closed) return;
- mainPathfindSearchContext().releaseRecord(this);
+ activePathfindSearchContext().releaseRecord(this);
 #else
  releaseInfo();
 #endif
@@ -3372,7 +3372,7 @@ void PathfindZoneManager::clearPassableFlags()
 		for (blockY = 0; blockY<m_zoneBlockExtent.y; blockY++) {
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- mainPathfindSearchContext().setCorridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY, false);
+ activePathfindSearchContext().setCorridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY, false);
 #else
  m_zoneBlocks[blockX][blockY].setPassable(false);
 #endif
@@ -3390,7 +3390,7 @@ void PathfindZoneManager::setAllPassable()
 		for (blockY = 0; blockY<m_zoneBlockExtent.y; blockY++) {
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- mainPathfindSearchContext().setCorridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY, true);
+ activePathfindSearchContext().setCorridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY, true);
 #else
  m_zoneBlocks[blockX][blockY].setPassable(true);
 #endif
@@ -3416,7 +3416,7 @@ void PathfindZoneManager::setPassable(Int cellX, Int cellY, Bool passable)
 	}
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- mainPathfindSearchContext().setCorridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY, passable);
+ activePathfindSearchContext().setCorridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY, passable);
 #else
  m_zoneBlocks[blockX][blockY].setPassable(passable);
 #endif
@@ -3440,7 +3440,7 @@ Bool PathfindZoneManager::isPassable(Int cellX, Int cellY) const
 	}
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- return mainPathfindSearchContext().corridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY);
+ return activePathfindSearchContext().corridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY);
 #else
  return m_zoneBlocks[blockX][blockY].isPassable();
 #endif
@@ -3462,7 +3462,7 @@ Bool PathfindZoneManager::clipIsPassable(Int cellX, Int cellY) const
 	}
 
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- return mainPathfindSearchContext().corridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY);
+ return activePathfindSearchContext().corridorPassable(static_cast<std::size_t>(blockX) * m_zoneBlockExtent.y + blockY);
 #else
  return m_zoneBlocks[blockX][blockY].isPassable();
 #endif
@@ -5269,7 +5269,7 @@ void Pathfinder::beginSearchState()
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
 	if (!searchState().m_openList.empty() || !searchState().m_closedList.empty()) cleanOpenAndClosedLists();
 	DEBUG_ASSERTCRASH(searchState().m_openList.empty() && searchState().m_closedList.empty(), ("Search lists must be empty before generation change."));
-	mainPathfindSearchContext().beginSearch();
+	activePathfindSearchContext().beginSearch();
 #endif
 }
 
@@ -6965,6 +6965,11 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
 Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+	// GeneralsX @refactor Codex 27/10/2026 Serial phase owns its selected scratch until route construction and cleanup finish.
+	SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
+#endif
+
 	//CRCDEBUG_LOG(("Pathfinder::findPath()"));
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("internal find path..."));
@@ -7003,6 +7008,11 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	if (m_isMapReady == false) {
 		return nullptr;
 	}
+
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+	// Capture only after beginSearchState has finished any pending retail repair.
+	PathfindSearchContext::AdmissionScope admission(activePathfindSearchContext(), PathfindSearchContext::permanentRecordsInUse());
+#endif
 
 	Coord3D adjustTo = *rawTo;
 	Coord3D *to = &adjustTo;

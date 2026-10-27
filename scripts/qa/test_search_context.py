@@ -22,6 +22,7 @@ def allocator_fixture(enabled=True):
     return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + r'''
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
+#include "searchcontextbinding.h"
 #include <cassert>
 #include <cstdio>
 #include <vector>
@@ -44,6 +45,7 @@ class SearchContextTest(unittest.TestCase):
         run_cpp(r'''
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
+#include "searchcontextbinding.h"
 #include <cassert>
 struct Node{int cost=0;void*parent=nullptr;bool open=false;};
 int main(){StampedSearchContext<Node,8,unsigned char> c;
@@ -95,10 +97,12 @@ int main(){for(int pass=0;pass<2;++pass){
 #define GENERALS_ZH_SEARCH_CONTEXT 1
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
+#include "searchcontextbinding.h"
 #include <cassert>
 #define DEBUG_ASSERTCRASH(c,m) assert(c)
 struct Node{int value=0;};
 StampedSearchContext<Node,8>&mainPathfindSearchContext(){static StampedSearchContext<Node,8> c;return c;}
+auto&activePathfindSearchContext(){return mainPathfindSearchContext();}
 struct List{bool occupied=false;bool empty(){return !occupied;}};
 struct Pathfinder{
  List m_openList,m_closedList;unsigned previous=0;int cleaned=0;

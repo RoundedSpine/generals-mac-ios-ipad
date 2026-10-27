@@ -35,6 +35,7 @@
 #include <vector>
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
+#include "searchcontextbinding.h"
 
 #if defined(GENERALS_SEARCH_CONTEXT) && RTS_ZEROHOUR
 #define GENERALS_ZH_SEARCH_CONTEXT 1
@@ -348,11 +349,36 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
  // GeneralsX @refactor Codex 26/10/2026 Searches own records and never attach them to permanent map cells.
  BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;
  unsigned m_transientRecords = 0;
+ SearchContextOwnership m_ownership;
+ // GeneralsX @refactor Codex 27/10/2026 Admission reads an explicit frozen count while an ordinary phase is bound.
+ bool m_hasAdmissionSnapshot = false;
+ unsigned m_permanentAdmission = 0;
+ static unsigned permanentRecordsInUse() { return PathfindCellInfo::s_recordsInUse; }
+ struct AdmissionScope {
+  PathfindSearchContext& context;
+  bool previousCaptured;
+  unsigned previousAdmission;
+  AdmissionScope(PathfindSearchContext& selected, unsigned permanentUse):context(selected),
+   previousCaptured(selected.m_hasAdmissionSnapshot),previousAdmission(selected.m_permanentAdmission) {
+   if (SearchContextBinding<PathfindSearchContext>::current()!=&context)
+    throw std::logic_error("Admission capture requires a bound search context");
+   if (permanentUse>PATHFIND_RECORD_CAPACITY)
+    throw std::invalid_argument("Permanent search admission exceeds record capacity");
+   context.m_hasAdmissionSnapshot=true;context.m_permanentAdmission=permanentUse;
+  }
+  ~AdmissionScope() {
+   context.m_hasAdmissionSnapshot=previousCaptured;context.m_permanentAdmission=previousAdmission;
+  }
+  AdmissionScope(const AdmissionScope&)=delete;
+  AdmissionScope& operator=(const AdmissionScope&)=delete;
+ };
+
  PathfindCellInfo* findRecord(const PathfindCell* cell) { return m_records.find(cell); }
  PathfindCellInfo* allocateRecord(PathfindCell* cell, const ICoord2D& pos, Bool persistent) {
   if (auto* record = findRecord(cell)) return record;
   // Occupied cells already consume permanent capacity; only other search cells consume extra credit.
-  if (!persistent && PathfindCellInfo::s_recordsInUse + m_transientRecords >= PATHFIND_RECORD_CAPACITY) return nullptr;
+  const unsigned permanentUse = m_hasAdmissionSnapshot ? m_permanentAdmission : PathfindCellInfo::s_recordsInUse;
+  if (!persistent && permanentUse + m_transientRecords >= PATHFIND_RECORD_CAPACITY) return nullptr;
   auto* record = m_records.acquire(cell);
   if (!record) return nullptr;
   record->m_cell = cell; record->m_pos = pos;
@@ -404,6 +430,11 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
 inline PathfindSearchContext& mainPathfindSearchContext() {
  static PathfindSearchContext context;
  return context;
+}
+// GeneralsX @refactor Codex 27/10/2026 Cell and corridor helpers use the selected scratch owner; map lifetime uses main storage.
+inline PathfindSearchContext& activePathfindSearchContext() {
+ if (auto* selected=SearchContextBinding<PathfindSearchContext>::current()) return *selected;
+ return mainPathfindSearchContext();
 }
 inline PathfindSearchNodes& mainPathfindSearchNodes() { return mainPathfindSearchContext(); }
 
@@ -528,7 +559,7 @@ public:
  // Search admission is separate from persistent unit/obstacle allocation.
  PathfindCellInfo* searchInfo() const {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-  auto& context = mainPathfindSearchContext();
+  auto& context = activePathfindSearchContext();
   if (auto* record = context.findRecord(this)) return record;
   // Persistent cells historically already had info: materialize private scratch without new capacity credit.
   return m_info ? context.allocateRecord(const_cast<PathfindCell*>(this), m_info->m_pos, true) : nullptr;
@@ -539,7 +570,7 @@ public:
  Bool hasSearchInfo() const { return searchInfo() != nullptr; }
  Bool allocateSearchInfo(const ICoord2D& pos) {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-  return mainPathfindSearchContext().allocateRecord(this, pos, m_info != nullptr) != nullptr;
+  return activePathfindSearchContext().allocateRecord(this, pos, m_info != nullptr) != nullptr;
 #else
   return allocateInfo(pos);
 #endif
@@ -1087,7 +1118,7 @@ private:
  // GeneralsX @refactor Codex 26/10/2026 Route all search scratch through one serial owner.
  PathfindSearchBookkeeping& searchState() const {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-  return mainPathfindSearchContext();
+  return activePathfindSearchContext();
 #else
   return m_legacySearchState;
 #endif
