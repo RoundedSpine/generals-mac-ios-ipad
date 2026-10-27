@@ -183,3 +183,15 @@ implementation to adapt, not proof that a direct iOS port is already correct.
 
 This review changes no engine behavior and adds no worker dispatch. No unchanged
 code tests were rerun merely to repeat previously passing checks.
+
+
+## SDK follow-up during this review
+
+Run 40449121660 subsequently failed iOS compilation at the two occupancy adapters:
+RTS_GENERALS is undefined for this Zero Hour build, so it cannot be used as an
+ordinary C++ expression. The isolated query fixtures had always defined it to zero
+or one. Replaced those assignments with preprocessor guards and added an actual
+undefined-macro compile/execution case. All eight occupancy tests pass local
+ThreadSanitizer, and the new regression passes ASan/UBSan. This fixes a build
+blocker; it does not introduce full worker searches. All 94 workflow QA tests pass
+locally. A new SDK build is required.

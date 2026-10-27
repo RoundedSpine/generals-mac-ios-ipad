@@ -22,7 +22,7 @@ def legacy(marker):
 
 
 def fixture(generals=0, infantry=1):
-    return f'#define RTS_GENERALS {generals}\n#define RETAIL_COMPATIBLE_PATHFINDING 1\n' + ('#define INFANTRY_MOVES_THROUGH_INFANTRY 1\n' if infantry else '') + r'''
+    return (f'#define RTS_GENERALS {generals}\n' if generals is not None else '') + '#define RETAIL_COMPATIBLE_PATHFINDING 1\n' + ('#define INFANTRY_MOVES_THROUGH_INFANTRY 1\n' if infantry else '') + r'''
 #define GENERALS_ZH_OCCUPANCY_WORKER 1
 #include "occupancyvalidationworker.h"
 #include <cassert>
@@ -79,6 +79,15 @@ struct Baseline:Pathfinder{
 
 
 class OccupancyTests(unittest.TestCase):
+    def test_zero_hour_with_undefined_base_game_macro(self):
+        run_cpp(fixture(None) + r'''
+int main(){Pathfinder p;Baseline baseline;Object mover;mover.id=1;
+ TCheckMovementInfo a{{1,1},1,0,true,false,1},b=a;
+ assert(p.checkForMovement(&mover,a)==baseline.checkForMovement(&mover,b));
+ assert(p.checkDestination(&mover,1,1,1,0,true)==baseline.checkDestination(&mover,1,1,1,0,true));
+}
+''')
+
     def test_original_and_explicit_queries_match_random_worlds(self):
         main = r'''
 int main(){std::mt19937 random(4481);Pathfinder p;Baseline baseline;

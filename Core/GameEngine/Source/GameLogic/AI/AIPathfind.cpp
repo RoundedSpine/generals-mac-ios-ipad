@@ -5418,7 +5418,10 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
 	PathOccupancy::Input input;
 	input.destination = true; input.x = cellX; input.y = cellY; input.layer = layer;
 	input.radius = iRadius; input.center = centerInCell; input.invalidID = INVALID_ID;
-	input.legacy = RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING;
+// GeneralsX @bugfix Codex 27/10/2026 Zero Hour may leave RTS_GENERALS undefined; evaluate it only in preprocessing.
+#if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
+	input.legacy = true;
+#endif
 	return evaluateOccupancyQuery(obj, input).allowed;
 #else
 	// If obj==nullptr, means we are checking for any ground units present.  jba.
@@ -5515,7 +5518,10 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 	input.x = info.cell.x; input.y = info.cell.y; input.layer = info.layer;
 	input.radius = info.radius; input.center = info.centerInCell;
 	input.considerTransient = info.considerTransient; input.invalidID = INVALID_ID;
-	input.legacy = RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING;
+// GeneralsX @bugfix Codex 27/10/2026 Zero Hour may leave RTS_GENERALS undefined; evaluate it only in preprocessing.
+#if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
+	input.legacy = true;
+#endif
 #ifdef INFANTRY_MOVES_THROUGH_INFANTRY
 	input.infantryThroughInfantry = true;
 #endif
