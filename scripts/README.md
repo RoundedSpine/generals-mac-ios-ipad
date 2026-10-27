@@ -327,3 +327,9 @@ existing tails, cleanup, value ownership and capacity bounds.
 Run `python3 scripts/qa/test_path_request_inputs.py` to check ordinary request
 endpoint copies, aliased inputs, unchanged failure/stage ordering, legacy pointer
 semantics and virtual fine-search dispatch using the production entry functions.
+
+Run `python3 scripts/qa/test_path_movement_inputs.py` to compile ordinary fine
+search, neighbor expansion and the line callback with captured/live policies.
+Checks route/expansion equivalence on controlled grids, source mutation, null
+unit defaults, legacy callers, attack-cost branches and live relationship reads.
+These fixtures do not replace full-engine replay or iOS device testing.

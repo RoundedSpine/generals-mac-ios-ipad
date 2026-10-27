@@ -292,3 +292,84 @@ Full iOS SDK compilation and device/replay behavior remain separate checks.
 Validation for the endpoint stage: all 74 workflow QA tests passed locally; the
 four new request tests also passed ASan/UBSan. Actionlint and diff checks passed.
 Full iOS compilation and device/replay checks remain pending.
+
+
+## Follow-up: ordinary fine-search movement policy — 2026-10-27
+
+### Capture and consumption
+
+Experimental internalFindPath captures PathfindMovementSettings after its existing
+footprint and human/computer reads. It owns only scalar values: valid surface mask,
+downhill-only flag, start layer, crusher capability, unit pass-through flag,
+dozer/vehicle kind flags, radius, centering and human policy. The last three were
+already local values; they are copied into the policy without recomputing footprint
+or player state. The capture happens at **fine-search entry**, after the public
+entry's quick and hierarchical stages, not as a single atomic snapshot of the
+entire ordinary request. No whole LocomotorSet copy: its private copy operations
+and vector of Locomotor pointers make it unsuitable as a worker input payload.
+
+PathfindMovementInput is an explicit synchronous adapter selecting captured values
+or the previous live getters. It is passed by reference into the shared expansion
+kernel and by pointer into the stack-owned line callback payload. Neither adapter
+nor callback escapes the call. There is no global/current movement policy; nested
+calls do not overwrite another request's policy. The value payload has no object,
+locomotor, cell, path-node or terrain pointers. The adapter still names live Object
+and LocomotorSet dependencies and is not itself a worker-safe request.
+
+Ordinary fine-search zone checks, source/destination movement validity, neighbor
+rules, line checks and the surface mask passed to buildActualPath now consume that
+policy. Preserve coordinate conversion with REAL_TO_INT (truncation, not floor),
+existing heuristic/cost arithmetic, neighbor order, open/closed handling, tunneling
+transitions, corridor lookup, bounds and path construction. The shared legacy
+neighbor entry wraps its inputs in a live adapter, so closest/safe/attack and other
+callers do not implicitly inherit an ordinary request's captured settings. Disabled
+builds also use live getters. Unit-kind getters explicitly return false for null
+objects; this avoids a null dereference in the previous dozer/vehicle checks.
+
+### Live dependency accounting after this stage
+
+| Read or side effect | Call sites | Status / future contract |
+| --- | --- | --- |
+| Quick reachability and hierarchical policy | clientSafeQuickDoesPathExist, findHierarchicalPath | Still use the live LocomotorSet and independent player read before fine capture |
+| Radius, centering, human policy | getRadiusAndCenter and internalFindPath entry | Owned values after entry; original geometry/player reads remain serial |
+| Surface, downhill, layer, crusher, pass-through and dozer/vehicle flags | Ordinary fine search, shared expansion, line callback | Captured for ordinary fine search; live adapter for other APIs |
+| Unit identity, ignored obstacle ID, aircraft destination behavior | checkDestination, checkForMovement | Still read mover/AI; need explicit scalar query inputs and validation coverage |
+| Infantry kind and crush/squish capability | checkForMovement, checkDestination, optimization helpers | Still live; crusher level alone does not capture canCrushOrSquish behavior |
+| Other objects, relationships, moving/fixed/idle state | checkForMovement, checkDestination, dozer obstacle exception | Still live, directional relationship semantics matter; require world view or revisions |
+| Cells, goals, obstacles, terrain heights/layers, bridge connectivity, extents and zones | getCell, validMovementPosition, checkChangeLayers, expansion and path optimization | Still live; require topology/map identity and dynamic occupancy coverage |
+| Pool admission | allocateSearchInfo | Still reads serial permanent-pool usage; must explicitly freeze/adapt for a worker |
+| Main-context selection | Cell search helpers | Still select the serial main context; private storage alone is insufficient |
+| Path optimization and debug/statistics calls | buildActualPath and failure/success paths | Remain on main thread; not part of a pure result application boundary |
+
+Do not equate copied policy with a complete search read set. In particular, no
+unit-ID-only validator or cell-only invalidation token is added. The regression
+suite changes a relationship after capture and observes a different dozer obstacle
+admission with the same copied policy: this is deliberate proof of an unresolved
+live dependency, not evidence that such mutation is safe during a real search.
+
+### Next stages and validation scope
+
+1. Separate query inputs for checkDestination/checkForMovement (identity, ignored
+   obstacle, aircraft/infantry rules), preserving null-unit and directional team
+   semantics. Consolidate early hierarchy/fine capture only after these contracts
+   are explicit; keep closest destination writeback and safe-path start semantics.
+2. Define a complete world-read/side-effect contract and immutable view or revision
+   mechanism. Establish serial baseline comparisons including missing/deleted units,
+   changed movement settings, diplomacy/occupancy, bridges/terrain and map reloads.
+3. Validate speculative results on the main thread before application, with a safe
+   serial fallback. Only then consider one opt-in bounded worker with ARM64 and iOS
+   lifecycle handling. No eight-request batching or search-budget increases.
+
+The seven tests compile the production capture, view, coordinate overload, fine
+search, expansion and line callback. Controlled mock world/cells provide 48
+route/expansion comparisons per enabled/disabled mode (24 scenarios, retail/fixed
+list setup), policy ownership/null defaults, changed caller settings, legacy live
+calls, attack cost branches, relationship changes and negative-coordinate
+truncation. These exercise actual search control flow but not engine allocation,
+real terrain, footprint computation, world services, optimization, replay CRCs or
+iOS behavior. No throughput or memory improvement is claimed.
+
+Validation result: all 81 workflow QA tests passed locally. All seven movement
+input tests also passed AddressSanitizer and UndefinedBehaviorSanitizer. Actionlint
+and diff checks passed. Full iOS SDK compilation, device movement/performance and
+replay CRC verification remain pending.

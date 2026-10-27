@@ -788,6 +788,21 @@ public:
 
 };
 
+// GeneralsX @refactor Codex 27/10/2026 Owned ordinary fine-search policy; world relationships stay live.
+struct PathfindMovementSettings {
+	LocomotorSurfaceTypeMask surfaces;
+	Bool downhillOnly;
+	PathfindLayerEnum layer;
+	Bool crusher;
+	Bool throughUnits;
+	Bool dozer;
+	Bool vehicle;
+	Int radius;
+	Bool centerInCell;
+	Bool human;
+};
+struct PathfindMovementInput;
+
 /**
  * The Pathfinding engine itself.
  */
@@ -966,6 +981,11 @@ protected:
 	Bool checkForPossible(Bool isCrusher, Int fromZone,  Bool center, const LocomotorSet& locomotorSet,
 		Int cellX, Int cellY, PathfindLayerEnum layer, Coord3D *dest, Bool startingInObstacle) ;
 	void getRadiusAndCenter(const Object *obj, Int &iRadius, Bool &center);
+	PathfindMovementSettings captureMovementSettings(const Object *obj, const LocomotorSet& locomotorSet,
+		Int radius, Bool centerInCell, Bool human);
+	Bool validMovementPosition(Bool crusher, PathfindLayerEnum layer,
+		const PathfindMovementInput& movement, const Coord3D *pos);
+
 	void adjustCoordToCell(Int cellX, Int cellY, Bool centerInCell, Coord3D &pos, PathfindLayerEnum layer);
 	Bool checkDestination(const Object *obj, Int cellX, Int cellY, PathfindLayerEnum layer, Int iRadius, Bool centerInCell);
 	Bool checkForMovement(const Object *obj, TCheckMovementInfo &info);
@@ -978,6 +998,10 @@ protected:
 										const LocomotorSet& locomotorSet, Bool isHumanPlayer,
 										Bool centerInCell, Int radius, const ICoord2D &startCellNdx,
 										const Object *obj, Int attackDistance);
+
+	Int examineNeighboringCellsWithMovement(PathfindCell *parentCell, PathfindCell *goalCell,
+		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
+		const ICoord2D& startCellNdx, const Object *obj, Int attackDistance);
 
 	Int checkPathCost(Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 		const Coord3D *to);

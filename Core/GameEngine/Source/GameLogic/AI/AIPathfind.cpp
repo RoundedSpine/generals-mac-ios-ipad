@@ -6402,10 +6402,47 @@ bool Pathfinder::checkCellOutsideExtents(ICoord2D& cell) {
 }
 
 
+// GeneralsX @refactor Codex 27/10/2026 Explicit value policy or legacy live reads, without ambient context state.
+struct PathfindMovementInput {
+	const Object *obj;
+	const LocomotorSet& locomotorSet;
+	const PathfindMovementSettings *captured;
+	LocomotorSurfaceTypeMask getValidSurfaces() const {
+		return captured ? captured->surfaces : locomotorSet.getValidSurfaces();
+	}
+	Bool isDownhillOnly() const { return captured ? captured->downhillOnly : locomotorSet.isDownhillOnly(); }
+	PathfindLayerEnum getLayer() const { return captured ? captured->layer : (obj ? obj->getLayer() : LAYER_GROUND); }
+	Bool isCrusher() const { return captured ? captured->crusher : (obj ? obj->getCrusherLevel() > 0 : false); }
+	Bool canPathThroughUnits() const {
+		if (captured) return captured->throughUnits;
+		return obj && obj->getAIUpdateInterface() ? obj->getAIUpdateInterface()->canPathThroughUnits() : false;
+	}
+	Bool isDozer() const { return captured ? captured->dozer : (obj && obj->isKindOf(KINDOF_DOZER)); }
+	Bool isVehicle() const { return captured ? captured->vehicle : (obj && obj->isKindOf(KINDOF_VEHICLE)); }
+};
+
+// GeneralsX @refactor Codex 27/10/2026 Copy only consumed scalar settings, never the pointer-owning LocomotorSet.
+PathfindMovementSettings Pathfinder::captureMovementSettings(const Object *obj, const LocomotorSet& locomotorSet,
+		Int radius, Bool centerInCell, Bool human)
+{
+	const PathfindMovementInput live = {obj, locomotorSet, nullptr};
+	return {live.getValidSurfaces(), live.isDownhillOnly(), live.getLayer(), live.isCrusher(),
+		live.canPathThroughUnits(), live.isDozer(), live.isVehicle(), radius, centerInCell, human};
+}
+
+// GeneralsX @refactor Codex 27/10/2026 Preserve the coordinate overload's truncation and cell lookup order.
+Bool Pathfinder::validMovementPosition(Bool crusher, PathfindLayerEnum layer,
+		const PathfindMovementInput& movement, const Coord3D *pos)
+{
+	Int x = REAL_TO_INT(pos->x/PATHFIND_CELL_SIZE);
+	Int y = REAL_TO_INT(pos->y/PATHFIND_CELL_SIZE);
+	return validMovementPosition(crusher, movement.getValidSurfaces(), getCell(layer, x, y));
+}
+
 struct ExamineCellsStruct
 {
 	Pathfinder					*thePathfinder;
-	const LocomotorSet	*theLoco;
+	const PathfindMovementInput *movement;
 	Bool								centerInCell;
 	Bool								isHuman;
 	Int									radius;
@@ -6416,10 +6453,10 @@ struct ExamineCellsStruct
 /*static*/ Int Pathfinder::examineCellsCallback(Pathfinder* pathfinder, PathfindCell* from, PathfindCell* to, Int to_x, Int to_y, void* userData)
 {
 	ExamineCellsStruct* d = (ExamineCellsStruct*)userData;
-	Bool isCrusher = d->obj ? d->obj->getCrusherLevel() > 0 : false;
+	Bool isCrusher = d->movement->isCrusher();
 	if (d->thePathfinder->searchState().m_isTunneling) return 1; // abort.
 	if (from && to) {
-			if (!d->thePathfinder->validMovementPosition( isCrusher, d->theLoco->getValidSurfaces(), to, from )) {
+			if (!d->thePathfinder->validMovementPosition( isCrusher, d->movement->getValidSurfaces(), to, from )) {
 				return 1;
 			}
 			if ( (to->getLayer() == LAYER_GROUND) && !d->thePathfinder->m_zoneManager.isPassable(to_x, to_y) ) {
@@ -6443,7 +6480,7 @@ struct ExamineCellsStruct
 			info.centerInCell = d->centerInCell;
 			info.radius = d->radius;
 			info.considerTransient = false;
-			info.acceptableSurfaces = d->theLoco->getValidSurfaces();
+			info.acceptableSurfaces = d->movement->getValidSurfaces();
 			if (!d->thePathfinder->checkForMovement(d->obj, info)) {
 				return 1; //abort.
 			}
@@ -6508,15 +6545,22 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 																				 Bool isHuman, Bool centerInCell, Int radius, const ICoord2D &startCellNdx,
 																				 const Object *obj, Int attackDistance)
 {
-		Bool canPathThroughUnits = false;
-		if (obj && obj->getAIUpdateInterface()) {
-			canPathThroughUnits = obj->getAIUpdateInterface()->canPathThroughUnits();
-		}
-		Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
-		if (attackDistance==NO_ATTACK && !searchState().m_isTunneling && !locomotorSet.isDownhillOnly() && goalCell) {
+	const PathfindMovementInput movement = {obj, locomotorSet, nullptr};
+	return examineNeighboringCellsWithMovement(parentCell, goalCell, movement, isHuman,
+		centerInCell, radius, startCellNdx, obj, attackDistance);
+}
+
+// GeneralsX @refactor Codex 27/10/2026 Share expansion rules between captured ordinary inputs and live callers.
+Int Pathfinder::examineNeighboringCellsWithMovement(PathfindCell *parentCell, PathfindCell *goalCell,
+		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
+		const ICoord2D& startCellNdx, const Object *obj, Int attackDistance)
+{
+		Bool canPathThroughUnits = movement.canPathThroughUnits();
+		Bool isCrusher = movement.isCrusher();
+		if (attackDistance==NO_ATTACK && !searchState().m_isTunneling && !movement.isDownhillOnly() && goalCell) {
 			ExamineCellsStruct info;
 			info.thePathfinder = this;
-			info.theLoco = &locomotorSet;
+			info.movement = &movement;
 			info.centerInCell = centerInCell;
 			info.radius = radius;
 			info.obj = obj;
@@ -6582,7 +6626,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			}
 
 			// do the gravity check here
-			if ( locomotorSet.isDownhillOnly() )
+			if ( movement.isDownhillOnly() )
 			{
 				Coord3D fromPos;
 				fromPos.x = parentCell->getXIndex() * PATHFIND_CELL_SIZE_F ;
@@ -6598,9 +6642,9 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 					continue;
 			}
 
-			Bool movementValid = validMovementPosition(isCrusher, locomotorSet.getValidSurfaces(), newCell, parentCell);
+			Bool movementValid = validMovementPosition(isCrusher, movement.getValidSurfaces(), newCell, parentCell);
 			Bool dozerHack = false;
-			if (!movementValid && obj->isKindOf(KINDOF_DOZER) && newCell->getType() == PathfindCell::CELL_OBSTACLE) {
+			if (!movementValid && movement.isDozer() && newCell->getType() == PathfindCell::CELL_OBSTACLE) {
 				Object* obstacle = TheGameLogic->findObjectByID(newCell->getObstacleID());
 				if (obstacle && !(obj->getRelationship(obstacle) == ENEMIES)) {
 					movementValid = true;
@@ -6621,7 +6665,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			info.centerInCell = centerInCell;
 			info.radius = radius;
 			info.considerTransient = false;
-			info.acceptableSurfaces = locomotorSet.getValidSurfaces();
+			info.acceptableSurfaces = movement.getValidSurfaces();
 			Int dx = newCellCoord.x-startCellNdx.x;
 			Int dy = newCellCoord.y-startCellNdx.y;
 			if (dx<0) dx = -dx;
@@ -6694,7 +6738,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 					if (costRemaining<0)
 						costRemaining=0;
 					if (info.allyGoal) {
-						if (obj->isKindOf(KINDOF_VEHICLE)) {
+						if (movement.isVehicle()) {
 							newCostSoFar += 3*COST_ORTHOGONAL;
 						}	else {
 							// Infantry can pass through infantry.
@@ -6713,7 +6757,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			}
 
 			if (searchState().m_isTunneling) {
-				if (!validMovementPosition( isCrusher, locomotorSet.getValidSurfaces(), newCell, parentCell )) {
+				if (!validMovementPosition( isCrusher, movement.getValidSurfaces(), newCell, parentCell )) {
 					newCostSoFar += 10*COST_ORTHOGONAL;
 				}
 			}
@@ -6810,6 +6854,14 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		isHuman = false; // computer gets to cheat.
 	}
 
+	// GeneralsX @refactor Codex 27/10/2026 Freeze ordinary fine-search movement policy at entry.
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+	const PathfindMovementSettings settings = captureMovementSettings(obj, locomotorSet, radius, centerInCell, isHuman);
+	const PathfindMovementInput movement = {obj, locomotorSet, &settings};
+#else
+	const PathfindMovementInput movement = {obj, locomotorSet, nullptr};
+#endif
+
 	if (rawTo->x == 0.0f && rawTo->y == 0.0f) {
 		DEBUG_LOG(("Attempting pathfind to 0,0, generally a bug."));
 		return nullptr;
@@ -6852,7 +6904,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	worldToCell(&clipFrom, &startCellNdx);
 	PathfindLayerEnum layer = LAYER_GROUND;
 	if (obj) {
-		layer = obj->getLayer();
+		layer = movement.getLayer();
 	}
 	PathfindCell *parentCell = getClippedCell( layer,&clipFrom );
 	if (parentCell == nullptr) {
@@ -6880,9 +6932,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	searchState().m_isTunneling = parentCell->getType() == PathfindCell::CELL_OBSTACLE;
 
 	Int zone1, zone2;
-	Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
-	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, parentCell->getZone());
-	zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, goalCell->getZone());
+	Bool isCrusher = movement.isCrusher();
+	zone1 = m_zoneManager.getEffectiveZone(movement.getValidSurfaces(), isCrusher, parentCell->getZone());
+	zone2 =  m_zoneManager.getEffectiveZone(movement.getValidSurfaces(), isCrusher, goalCell->getZone());
 
 	if ( (layer==LAYER_WALL && zone1 == 0) || (destinationLayer==LAYER_WALL && zone2 == 0) ) {
 #if RETAIL_COMPATIBLE_PATHFINDING
@@ -6898,9 +6950,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	if (goalCell->isObstaclePresent(searchState().m_ignoreObstacleID) || searchState().m_isTunneling) {
 		// Use terrain zones instead of building zones, since we are moving into or out of a building.
 		zone2 = m_zoneManager.getEffectiveTerrainZone(zone2);
-		zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, zone2);
+		zone2 =  m_zoneManager.getEffectiveZone(movement.getValidSurfaces(), isCrusher, zone2);
 		zone1 = m_zoneManager.getEffectiveTerrainZone(zone1);
-		zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, zone1);
+		zone1 = m_zoneManager.getEffectiveZone(movement.getValidSurfaces(), isCrusher, zone1);
 	}
 
 	//DEBUG_LOG(("Zones %d to %d", zone1, zone2));
@@ -6913,7 +6965,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	}
 
 	// sanity check - if destination is invalid, can't path there
-	if (!validMovementPosition( isCrusher, destinationLayer, locomotorSet, to ))	{
+	if (!validMovementPosition( isCrusher, destinationLayer, movement, to ))	{
 		searchState().m_isTunneling = false;
 		goalCell->releaseSearchInfo();
 		parentCell->releaseSearchInfo();
@@ -6921,7 +6973,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	}
 
 	// sanity check - if source is invalid, we have to cheat
-	if (!validMovementPosition( isCrusher, layer, locomotorSet, from ))	{
+	if (!validMovementPosition( isCrusher, layer, movement, from ))	{
 		// somehow we got to an impassable location.
 		searchState().m_isTunneling = true;
 	}
@@ -6979,7 +7031,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 			searchState().m_isTunneling = false;
 			// construct and return path
-			Path *path =  buildActualPath( obj, locomotorSet.getValidSurfaces(), from, goalCell, centerInCell, false );
+			Path *path =  buildActualPath( obj, movement.getValidSurfaces(), from, goalCell, centerInCell, false );
 #if RETAIL_COMPATIBLE_PATHFINDING
 			if (!s_useFixedPathfinding)
 			{
@@ -7001,7 +7053,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		// Check to see if we can change layers in this cell.
 		checkChangeLayers(parentCell);
 
-		cellCount += examineNeighboringCells(parentCell, goalCell, locomotorSet, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
+		cellCount += examineNeighboringCellsWithMovement(parentCell, goalCell, movement, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
 
 	}
 
@@ -7059,7 +7111,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	if (obj)
 	{
 		Bool valid;
-		valid = validMovementPosition( isCrusher, obj->getLayer(), locomotorSet, to ) ;
+		valid = validMovementPosition( isCrusher, movement.getLayer(), movement, to ) ;
 
 		DEBUG_LOG(("%d Pathfind failed from (%f,%f) to (%f,%f), OV %d --", TheGameLogic->getFrame(), from->x, from->y, to->x, to->y, valid));
 		DEBUG_LOG(("Unit '%s', time %f, cells %d", obj->getTemplate()->getName().str(), (::GetTickCount()-startTimeMS)/1000.0f,cellCount));
