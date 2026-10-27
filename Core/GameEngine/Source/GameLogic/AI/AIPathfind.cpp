@@ -32,6 +32,7 @@
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
 #include "boundedsearchreads.h"
 #include <new>
+#include <memory>
 #endif
 #if defined(GENERALS_ZH_OCCUPANCY_WORKER) || defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER)
 #include "occupancyvalidationworker.h"
@@ -4345,7 +4346,12 @@ struct PathfindParallelJob {
  std::uint64_t lifecycle = 0;
  Int queueIndex = -1;
  Bool captured = false, ready = false, used = false, tunneling = false, fixed = false;
+ // GeneralsX @feature Codex 27/10/2026 Retain ordinary failure and closest scratch separately until each phase is validated on main.
+ std::unique_ptr<PathfindParallelJob> fallback;
+ Bool fallbackResult=false, fallbackAllowed=false;
  void reset() {
+  if (fallback) fallback->reset();
+  fallbackResult=fallbackAllowed=false;
   context.m_parallelReads=nullptr;
   context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
   context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;
@@ -4357,12 +4363,15 @@ struct PathfindParallelBatch {
  PathfindParallelJob* preparing = nullptr;
  unsigned long long batches=0, accepted=0, rejected=0, unused=0, safeSearches=0, safeAccepted=0;
  unsigned long long closestSearches=0, closestAccepted=0;
+ unsigned long long fallbackSearches=0, fallbackAccepted=0, fallbackRejected=0, fallbackUnused=0;
  Bool active=false;
  ~PathfindParallelBatch() {
   fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2\n",
    batches,accepted,rejected,unused);
   fprintf(stderr,"[PATH_PARALLEL_SAFE] stopped searches=%llu accepted=%llu\n",safeSearches,safeAccepted);
   fprintf(stderr,"[PATH_PARALLEL_CLOSEST] stopped searches=%llu accepted=%llu\n",closestSearches,closestAccepted);
+  fprintf(stderr,"[PATH_PARALLEL_FALLBACK] stopped searches=%llu accepted=%llu rejected=%llu unused=%llu\n",
+   fallbackSearches,fallbackAccepted,fallbackRejected,fallbackUnused);
  }
 };
 
@@ -4387,6 +4396,7 @@ void Pathfinder::clearParallelBatch() {
  if (!m_parallelBatch) return;
  for (auto& job:m_parallelBatch->jobs) {
   if(job.ready && !job.used) ++m_parallelBatch->unused;
+  if(job.fallback && job.fallback->ready && !job.fallback->used) ++m_parallelBatch->fallbackUnused;
   job.reset();
  }
  m_parallelBatch->preparing=nullptr;m_parallelBatch->active=false;
@@ -5564,7 +5574,9 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
  const PathfindClosestSettings* closest)
 {
  if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
- for (auto& job:m_parallelBatch->jobs) {
+ for (auto& primary:m_parallelBatch->jobs) {
+  // GeneralsX @feature Codex 27/10/2026 A closest fallback is eligible only after its ordinary failure was accepted and finalized.
+  auto& job=closest && !primary.closest && primary.fallbackAllowed && primary.fallback ? *primary.fallback : primary;
   if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
   job.used=true;
   auto& current=activePathfindSearchContext();
@@ -5573,6 +5585,7 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
    Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,from) && samePoint(job.to,to) &&
     job.safe==(repulsor2!=nullptr) && (!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius)) &&
     job.closest==(closest!=nullptr) && (!closest || job.closestSettings==*closest) &&
+    (!job.fallbackResult || (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getPath()==nullptr)) &&
     job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
     !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
     job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
@@ -5593,7 +5606,11 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
    if (valid) for (const auto& height:job.reads.heights) {
     if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
    }
-   if (!valid) {++m_parallelBatch->rejected;break;}
+   if (!valid) {
+    if (job.fallbackResult) ++m_parallelBatch->fallbackRejected;
+    else ++m_parallelBatch->rejected;
+    break;
+   }
   return &job;
  }
  return nullptr;
@@ -7219,7 +7236,7 @@ void Pathfinder::prepareParallelBatch()
   if (!m_exclusiveWorker) {
    m_exclusiveWorker=new PathfindExclusiveWorker;
    m_exclusiveWorker->mode="parallel";
-   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_safe_closest worker=1 caller=1\n");
+   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_safe_closest_fallback worker=1 caller=1\n");
   }
   auto& batch=*m_parallelBatch;
   for (Int i=0;i<2;++i) {
@@ -7241,6 +7258,25 @@ void Pathfinder::prepareParallelBatch()
   }
   batch.active=true;
   if (batch.jobs[0].captured && batch.jobs[1].captured) {
+   for (Int i=0;i<2;++i) {
+    auto& job=batch.jobs[i];
+    // GeneralsX @feature Codex 27/10/2026 Prepare a read-only fallback on main; execute it in the same task only if ordinary expansion fails.
+    // Reference: dement123, ZeroHourReimagined_1.0.0_source, combined ordinary/closest request execution.
+    if (!job.safe && !job.closest && objects[i]->getAIUpdateInterface()->getPath()==nullptr) {
+     if (!job.fallback) job.fallback.reset(new PathfindParallelJob);
+     auto& fallback=*job.fallback;
+     fallback.reset();fallback.fallbackResult=true;fallback.closest=true;fallback.safe=false;
+     fallback.obj=job.obj;fallback.id=job.id;fallback.locomotor=job.locomotor;
+     fallback.from=job.from;fallback.to=job.to;fallback.ignored=job.ignored;fallback.queueIndex=job.queueIndex;
+     fallback.epoch=job.epoch;fallback.lifecycle=job.lifecycle;
+     fallback.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
+     fallback.context.m_ignoreObstacleID=job.ignored;fallback.context.m_parallelReads=&fallback.reads;
+     batch.preparing=&fallback;
+     {SearchContextBinding<PathfindSearchContext> binding(fallback.context);
+      findClosestPath(fallback.obj,*fallback.locomotor,&fallback.from,&fallback.to,false,0,false);}
+     batch.preparing=nullptr;
+    }
+   }
    auto execute=[&](Int index) {
     auto& job=batch.jobs[index];
     SearchContextBinding<PathfindSearchContext> binding(job.context);
@@ -7251,14 +7287,29 @@ void Pathfinder::prepareParallelBatch()
       job.settings.centerInCell,job.settings.radius,job.startIndex,job.closestSettings);
     else job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
       job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
+    if (!job.safe && !job.closest && !job.outcome.found && job.fallback && job.fallback->captured) {
+     auto& fallback=*job.fallback;
+     SearchContextBinding<PathfindSearchContext> fallbackBinding(fallback.context);
+     PathfindSearchContext::AdmissionScope fallbackAdmission(fallback.context,fallback.permanent);
+     const PathfindMovementInput fallbackMovement={fallback.obj,*fallback.locomotor,&fallback.settings};
+     fallback.closestOutcome=runClosestSearchLoop(fallback.start,fallback.goal,fallbackMovement,fallback.settings.human,
+       fallback.settings.centerInCell,fallback.settings.radius,fallback.startIndex,fallback.closestSettings);
+     fallback.ready=true;
+    }
    };
    // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
    m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
-   for (auto& job:batch.jobs) {job.ready=true;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;}
+   for (auto& job:batch.jobs) {
+    job.ready=true;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;
+    if(job.fallback && job.fallback->ready) ++batch.fallbackSearches;
+   }
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
   }
-  for (auto& job:batch.jobs) job.context.m_parallelReads=nullptr;
+  for (auto& job:batch.jobs) {
+   job.context.m_parallelReads=nullptr;
+   if(job.fallback) job.fallback->context.m_parallelReads=nullptr;
+  }
  } catch (const ExclusiveSearchWorker::EnvironmentError& error) {
   clearParallelBatch();m_exclusiveWorkerUnavailable=true;
   fprintf(stderr,"[PATH_PARALLEL_BATCH] unavailable: %s; using ordinary dispatch\n",error.what());
@@ -7676,6 +7727,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
    current.m_isTunneling=job->context.m_isTunneling;
    current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
    current.m_corridor.swap(job->context.m_corridor);
+   job->fallbackAllowed=!path && !job->outcome.found && job->fallback && job->fallback->ready;
    ++m_parallelBatch->accepted;
    return path;
   }
@@ -10065,7 +10117,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
    current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
    current.m_isTunneling=job->context.m_isTunneling;current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
    current.m_corridor.swap(job->context.m_corridor);
-   ++m_parallelBatch->accepted;++m_parallelBatch->closestAccepted;
+   if (job->fallbackResult) ++m_parallelBatch->fallbackAccepted;
+   else {++m_parallelBatch->accepted;++m_parallelBatch->closestAccepted;}
    return path;
   }
  }

@@ -67,14 +67,29 @@ computations in pairs and reused completions, including valid no-path results.
 Code `08d17c2e0` passed all 153 Mac QA tests, the workflow race checks, actual iOS
 SDK compilation, platform/rpath packaging checks and unsigned IPA upload in
 [run 40502028264](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40502028264).
-Artifact: `GeneralsXZH-iOS-unsigned`. Device closest-search, lifecycle, memory and
-performance validation remain pending.
+Artifact: `GeneralsXZH-iOS-unsigned`. Device movement, lifecycle, memory and
+performance validation remain pending; first closest-result reuse is recorded below.
+
+## Device log from the closest-capable IPA
+
+The latest supplied `generals-stderr.log` identifies `revision=~08d17c2`, reaches
+the score screen and exits with code 0. Its 742 pairs account for 1,484 primary
+results: 1,397 accepted (94.1%), 87 rejected and none unused. Worker tasks total
+742. Four closest computations completed in pairs, with two accepted; the
+kind-specific count includes caller participation and valid no-path completions,
+so it does not identify which closest computations ran on the worker or establish
+route correctness. Escape counters remain zero. Both CSF tables finish and no
+primitive-restart warning appears. Cache-directory state is reused, not a measured
+pipeline hit rate. This log contains no frame-time or memory measurements.
 
 ## Remaining Reimagined work
 
-Normal-search failure followed by closest fallback still runs on the caller;
-its behavior is covered by a regression. Supporting that combined prediction
-without extra retained arenas or speculative engine effects is the next stage.
+The subsequent [fallback stage](IOS_PARALLEL_FALLBACK_SEARCH_2026-10-27.md) adds
+conditional closest computation after eligible ordinary fine-loop failures.
+It retains a separate bounded fallback arena per request so both phases preserve
+their original main-thread cleanup; it does not adopt a scalar cleanup substitute.
+Early ordinary preparation rejection and path-materialization failure still use
+caller fallback. That newer code requires its own SDK and device validation.
 Hierarchical search and Path optimization remain on main. Larger worker pools,
 eight-request scheduling and dense map-sized node storage are not adopted here.
 The previous escape-capable device log had zero parallel escape searches, so

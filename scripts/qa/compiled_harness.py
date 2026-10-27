@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / 'Core/Libraries/Source/WWVegas/WWLib'
 
 
-def run_cpp(source, extra_flags=()):
+# GeneralsX @build Codex 27/10/2026 Keep the default deadlock guard while allowing bounded larger sanitizer workloads.
+def run_cpp(source, extra_flags=(), timeout=10):
     with tempfile.TemporaryDirectory() as temporary:
         code = Path(temporary) / 'test.cpp'
         binary = Path(temporary) / 'test'
@@ -17,5 +18,5 @@ def run_cpp(source, extra_flags=()):
                                  '-D_UNIX', *extra_flags, '-I', str(LIB), str(code), '-o', str(binary)], text=True, capture_output=True)
         if result.returncode:
             raise AssertionError(result.stderr)
-        return subprocess.run([str(binary)], text=True, capture_output=True, check=True, timeout=10)
+        return subprocess.run([str(binary)], text=True, capture_output=True, check=True, timeout=timeout)
 

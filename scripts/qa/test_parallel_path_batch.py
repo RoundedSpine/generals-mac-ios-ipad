@@ -49,6 +49,8 @@ struct AIUpdateInterface {
  void doPathfind(Pathfinder*);
  Object* obj=nullptr;LocomotorSet locomotor;Coord3D from{25,25,0},to{95,95,0};ObjectID ignored=0;
  bool eligible=true,through=false,idle=true;
+ bool existingPath=false;
+ const void*getPath()const{return existingPath?&existingPath:nullptr;}
  bool safe=false;Coord3D repulsor1{25,25,0},repulsor2{25,25,0};Real repulsorRadius=60;
  bool closest=false,blocked=false;Real pathCostMultiplier=.2f;
  ObjectID getIgnoredObstacleID()const{return ignored;}bool isAircraftThatAdjustsDestination()const{return false;}bool isIdle()const{return idle;}
@@ -105,6 +107,7 @@ struct Pathfinder {
  }m_zoneManager;
  ObjectID m_queuedPathfindRequests[512]{};int m_queuePRHead=0,m_queuePRTail=2;
  std::atomic<int> workerLoops{0},callerLoops{0};bool rendezvous=false;
+ std::atomic<int> workerFallbackLoops{0},callerFallbackLoops{0},fallbackArrived{0};bool fallbackRendezvous=false;
  std::vector<ICoord2D> serialExpansion;
  std::atomic<int> arrived{0};
  std::map<ObjectID,Path> results;
@@ -208,6 +211,10 @@ bool Pathfinder::checkDestination(const Object*obj,int x,int y,int layer,int rad
 }
 void Pathfinder::checkChangeLayers(PathfindCell*cell) {
  if(ExclusiveSearchWorker::onWorker())++workerLoops;else ++callerLoops;
+ if(m_parallelBatch)for(auto&job:m_parallelBatch->jobs)if(job.fallback && &searchState()==&job.fallback->context){
+  if(ExclusiveSearchWorker::onWorker())++workerFallbackLoops;else ++callerFallbackLoops;
+  if(fallbackRendezvous&&cell==job.fallback->start){++fallbackArrived;while(fallbackArrived.load()<2)std::this_thread::yield();}
+ }
  if(!searchState().m_parallelReads)serialExpansion.push_back({cell->getXIndex(),cell->getYIndex()});
  // Both jobs must reach the kernel before either can proceed: catches a silently serialized executor.
  if(rendezvous && searchState().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}
@@ -407,7 +414,7 @@ int main(){World w;Pathfinder p;w.queue(p);w.a.ai.closest=w.b.ai.closest=true;
 }
 ''')
 
-    def test_ordinary_failure_closest_fallback_remains_on_caller(self):
+    def test_ordinary_failure_closest_fallback_is_validated_and_finalized_on_main(self):
         run_cpp(fixture()+r'''
 int main(){World w;Pathfinder p;w.queue(p);
  for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
@@ -416,6 +423,164 @@ int main(){World w;Pathfinder p;w.queue(p);
  assert(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));
  assert(w.a.ai.to.x<60&&p.hierarchicalCalls==1&&p.workerLoops==workerSteps&&p.m_exclusiveWorker->searches==dispatched);
  assert(p.m_parallelBatch->closestSearches==0&&p.m_parallelBatch->closestAccepted==0);
+ assert(p.m_parallelBatch->fallbackSearches==2&&p.m_parallelBatch->fallbackAccepted==1);
+}
+''')
+
+    def test_combined_fallback_routes_targets_budget_and_flags_match_serial(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radius:{0,1})for(int mask=0;mask<4;++mask)for(int seed=0;seed<8;++seed){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;p.testCenter=center;p.testRadius=radius;
+ w.a.ai.to.x=mask&1?95:45;w.b.ai.to.x=mask&2?95:45;
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ for(int x=0;x<5;++x)for(int y=4;y<=6;++y)if((x*31+y*17+seed*13)%19==0&&x!=2)p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ unsigned failures=0;auto consume=[&](Object&o){auto*path=w.consume(p,o);if(!path){++failures;path=p.findClosestPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to,false,0,false);}return route(path);};
+ const auto originalA=w.a.ai.to,originalB=w.b.ai.to;auto&state=mainPathfindSearchContext();state.m_cumulativeCellsAllocated=0;
+ auto a=consume(w.a),b=consume(w.b);const unsigned serialFailures=failures;failures=0;auto budget=state.m_cumulativeCellsAllocated;auto records=state.m_records.size();
+ const auto targetA=w.a.ai.to,targetB=w.b.ai.to;auto corridor=state.m_corridor;
+ w.a.ai.to=originalA;w.b.ai.to=originalB;state.m_cumulativeCellsAllocated=0;state.m_isTunneling=false;p.hierarchicalCalls=0;
+ p.prepareParallelBatch();assert(p.m_parallelBatch->batches==1&&p.hierarchicalCalls==0);
+ assert(w.a.ai.to.x==originalA.x&&w.a.ai.to.y==originalA.y&&w.b.ai.to.x==originalB.x&&w.b.ai.to.y==originalB.y);
+ assert(consume(w.a)==a&&consume(w.b)==b);
+ assert(w.a.ai.to.x==targetA.x&&w.a.ai.to.y==targetA.y&&w.b.ai.to.x==targetB.x&&w.b.ai.to.y==targetB.y);
+ auto&batch=*p.m_parallelBatch;assert(batch.accepted==2&&batch.rejected==0);
+ assert(failures==serialFailures);
+ assert(batch.fallbackSearches==failures&&batch.fallbackAccepted==failures&&batch.fallbackRejected==0);
+ assert(p.hierarchicalCalls==int(failures)&&state.m_cumulativeCellsAllocated==budget);
+ assert(state.m_corridor==corridor&&!state.m_isTunneling&&state.m_ignoreObstacleID==0&&state.m_openList.empty()&&state.m_closedList.empty());
+ // Transferred phases retain their original residual records in their own contexts; main has no active list.
+ if(!mask)assert(state.m_records.size()<=records);
+ for(auto&job:batch.jobs)assert(!job.fallback->fallback);
+}}
+''', timeout=45)  # 256 four-arena lifetimes exceed the normal 10-second guard under TSan.
+
+    def test_combined_fallbacks_really_overlap_without_an_extra_worker_dispatch(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.fallbackRendezvous=true;
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();assert(p.fallbackArrived==2&&p.workerFallbackLoops>0&&p.callerFallbackLoops>0);
+ assert(p.m_exclusiveWorker->searches==1&&p.m_parallelBatch->fallbackSearches==2&&p.hierarchicalCalls==0);
+ for(Object*o:{&w.a,&w.b}){assert(!w.consume(p,*o));assert(p.findClosestPath(o,o->ai.locomotor,&o->ai.from,&o->ai.to,false,0,false));}
+ assert(p.m_parallelBatch->accepted==2&&p.m_parallelBatch->fallbackAccepted==2&&p.hierarchicalCalls==2);
+}
+''')
+
+    def test_fallback_requires_an_accepted_ordinary_failure_before_consumption(self):
+        run_cpp(fixture()+r'''
+int main(){for(int change=0;change<4;++change){World w;Pathfinder p;w.queue(p);
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();auto&job=p.m_parallelBatch->jobs[0];assert(job.fallback->ready);
+ if(change==0)job.reads.overflow=true;
+ if(change==1)++p.m_parallelWorldEpoch;
+ if(change==2)PathOccupancy::validationLifecycleEpoch().fetch_add(1);
+ if(change!=3)assert(!w.consume(p,w.a));
+ // Case 3 attempts the closest phase before the ordinary phase; none may use its completion.
+ assert(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));
+ assert(p.m_parallelBatch->fallbackAccepted==0&&!job.fallbackAllowed&&!job.fallback->used);
+ assert(p.m_parallelBatch->rejected==1);p.clearParallelBatch();assert(p.m_parallelBatch->fallbackUnused==2);
+}}
+''')
+
+    def test_fallback_revalidates_its_own_policies_world_and_request(self):
+        run_cpp(fixture()+r'''
+int main(){for(int change=0;change<16;++change){World w;Pathfinder p;w.queue(p);
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();assert(!w.consume(p,w.a));auto&job=*p.m_parallelBatch->jobs[0].fallback;
+ assert(p.m_parallelBatch->jobs[0].fallbackAllowed);bool blocked=false,moveAllies=false;Real cost=0;
+ switch(change){
+ case 0:blocked=true;break;
+ case 1:cost=.2f;break;
+ case 2:moveAllies=true;break;
+ case 3:p.hierarchical=false;break;
+ case 4:job.reads.corridor.matches([&](std::size_t block){if(p.restrictCorridor<0)p.restrictCorridor=int(block);return true;});assert(p.restrictCorridor>=0);break;
+ case 5:mainPathfindSearchContext().m_ignoreObstacleID=57;break;
+ case 6:w.a.ai.to.x-=1;break;
+ case 7:w.a.ai.locomotor.downhill=true;break;
+ case 8:++p.m_parallelWorldEpoch;break;
+ case 9:PathOccupancy::validationLifecycleEpoch().fetch_add(1);break;
+ case 10:p.storage[2][2].setPinched(true);break;
+ case 11:job.reads.overflow=true;break;
+ case 12:PathOccupancy::validationPaused().store(true);break;
+ case 13:s_useFixedPathfinding=!s_useFixedPathfinding;break;
+ case 14:p.testCenter=false;break;
+ case 15:w.a.ai.existingPath=true;break;
+ }
+ p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,blocked,cost,moveAllies);
+ assert(p.m_parallelBatch->accepted==1&&p.m_parallelBatch->fallbackAccepted==0&&p.m_parallelBatch->fallbackRejected==1&&job.used);
+ p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,blocked,cost,moveAllies);
+ assert(p.m_parallelBatch->fallbackRejected==1);s_useFixedPathfinding=true;
+}}
+''')
+
+    def test_fallback_is_not_computed_after_success_or_with_an_existing_path(self):
+        run_cpp(fixture()+r'''
+int main(){for(int fail=0;fail<2;++fail){World w;Pathfinder p;w.queue(p);w.b.ai.existingPath=true;
+ if(fail)for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
+ assert(batch.fallbackSearches==unsigned(fail)&&batch.jobs[0].fallback&&!batch.jobs[1].fallback);
+ assert(!batch.jobs[0].fallback->fallback&&batch.jobs[0].fallback->ready==bool(fail));
+ if(!fail){assert(w.consume(p,w.a));assert(!batch.jobs[0].fallbackAllowed);}
+ p.clearParallelBatch();assert(batch.fallbackUnused==unsigned(fail));
+}}
+''')
+
+    def test_fallback_queue_budget_and_discard_keep_original_request_order(self):
+        source=fixture().replace('PATHFIND_CELLS_PER_FRAME=5000','PATHFIND_CELLS_PER_FRAME=1')
+        source=source.replace('else p->internalFindPath(obj,locomotor,&from,&to);',
+                              'else if(!p->internalFindPath(obj,locomotor,&from,&to)&&!existingPath)p->findClosestPath(obj,locomotor,&from,&to,false,0,false);')
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;w.queue(p);
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.processPathfindQueue();assert((applied==std::vector<ObjectID>{1})&&p.m_queuePRHead==1&&p.m_parallelBatch->fallbackAccepted==1);
+ assert(p.m_parallelBatch->unused==1&&p.m_parallelBatch->fallbackUnused==1);
+ auto dispatched=p.m_exclusiveWorker->searches;p.processPathfindQueue();
+ assert((applied==std::vector<ObjectID>{1,2})&&p.m_exclusiveWorker->searches==dispatched&&p.hierarchicalCalls==2);
+ assert(p.m_parallelBatch->fallbackAccepted==1);
+ for(auto&job:p.m_parallelBatch->jobs)if(job.fallback)assert(!job.fallback->context.m_parallelReads&&!job.fallbackAllowed&&!job.fallback->ready);
+}
+''')
+
+    def test_fallback_rechecks_live_occupancy_and_height_after_ordinary_failure(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool height:{false,true}){World w;Pathfinder p;w.queue(p);
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ Object third;third.id=3;logic.objects[3]=&third;p.storage[2][7].setPosUnit(3,{2,7});w.b.ai.locomotor.downhill=height;
+ p.prepareParallelBatch();assert(!w.consume(p,w.b));auto&job=*p.m_parallelBatch->jobs[1].fallback;
+ if(height){assert(!job.reads.heights.empty());terrain.bias=1;}
+ else {w.b.relation=ALLIES;bool changed=false;
+  for(const auto&q:job.reads.queries){LiveOccupancyReader live={&p,&w.b};if(!(PathOccupancy::evaluate(q.input,live)==q.result))changed=true;}
+  assert(changed);
+ }
+ p.findClosestPath(&w.b,w.b.ai.locomotor,&w.b.ai.from,&w.b.ai.to,false,0,false);
+ assert(p.m_parallelBatch->accepted==1&&p.m_parallelBatch->fallbackAccepted==0&&p.m_parallelBatch->fallbackRejected==1);
+ terrain.bias=0;p.storage[2][7].setPosUnit(0,{2,7});logic.objects.erase(3);
+}}
+''')
+
+    def test_fallback_reset_reuses_bounded_storage_without_old_completions(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();auto*a=p.m_parallelBatch->jobs[0].fallback.get();auto*b=p.m_parallelBatch->jobs[1].fallback.get();
+ assert(a&&b&&a->ready&&b->ready);p.clearParallelBatch();assert(p.m_parallelBatch->unused==2&&p.m_parallelBatch->fallbackUnused==2);
+ for(auto*job:{a,b})assert(!job->ready&&!job->captured&&!job->used&&!job->fallbackAllowed&&!job->context.m_parallelReads);
+ w.a.ai.existingPath=w.b.ai.existingPath=true;p.prepareParallelBatch();
+ assert(p.m_parallelBatch->jobs[0].fallback.get()==a&&p.m_parallelBatch->jobs[1].fallback.get()==b&&!a->captured&&!b->captured);
+ assert(!w.consume(p,w.a)&&!w.consume(p,w.b));
+ assert(p.m_parallelBatch->fallbackSearches==2&&p.m_parallelBatch->fallbackAccepted==0);
+ p.clearParallelBatch();w.a.ai.existingPath=w.b.ai.existingPath=false;p.m_queuePRHead=0;
+ p.prepareParallelBatch();assert(p.m_parallelBatch->jobs[0].fallback.get()==a&&p.m_parallelBatch->jobs[1].fallback.get()==b);
+ assert(a->ready&&b->ready&&!a->used&&!b->used&&p.m_parallelBatch->fallbackSearches==4);
+ assert(!a->fallback&&!b->fallback);
+}
+''')
+
+    def test_fallback_is_not_prepared_when_the_other_request_cannot_form_a_pair(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);w.b.ai.locomotor.surfaces=0;
+ p.prepareParallelBatch();assert(p.m_parallelBatch&&!p.m_parallelBatch->jobs[1].captured);
+ assert(!p.m_parallelBatch->jobs[0].fallback&&!p.m_parallelBatch->jobs[1].fallback&&p.m_parallelBatch->batches==0);
 }
 ''')
 
