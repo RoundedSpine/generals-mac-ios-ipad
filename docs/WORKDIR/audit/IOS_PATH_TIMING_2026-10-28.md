@@ -72,6 +72,26 @@ with timing enabled in the fixture; the five new cases pass ASan/UBSan. Actionli
 and git diff checks pass. Actual iOS SDK and device timing verification remain
 pending; local fixtures cannot establish native iOS timing overhead or a speedup.
 
+## SDK failure and interface correction
+
+The uploaded logs for [run 40595200430](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40595200430)
+show successful macos-15-arm64 provisioning, all 177 Mac QA tests and the complete
+race-check step, including all 59 batch cases. Compilation then fails at the three
+serial timing probes: searchState() returns PathfindSearchBookkeeping, whereas
+m_parallelReads belongs to the derived PathfindSearchContext. No IPA was produced.
+The vcpkg setup pathspec diagnostic did not stop its step or configuration; it is
+not the reported build blocker.
+
+Read that context-only pointer through activePathfindSearchContext() in ordinary,
+closest and safe kernels. Keep searchState()'s existing interface. The fixture now
+extracts the accessor directly from the production header instead of returning a
+broader type; mock-only context operations likewise use the context accessor.
+An explicit negative compilation confirms the original bad probes are rejected
+by this corrected fixture. All 177 local QA tests, all 59 batch TSan cases and the
+five timing ASan/UBSan cases pass with the production accessor. Actionlint/diff
+checks pass. Replacement SDK verification remains pending. This correction does
+not change search or timing policy.
+
 ## Device test and interpretation
 
 Play a normal game with group moves, tight spaces and bridges, then exit normally

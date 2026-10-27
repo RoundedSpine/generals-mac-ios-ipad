@@ -7461,7 +7461,8 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Speculative kernels have private metrics; only caller fallback writes the serial aggregate.
- PathSearchTiming::Scope serialTiming(searchState().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+ // GeneralsX @bugfix Codex 28/10/2026 Read context-only metadata through the context accessor, not its bookkeeping base.
+ PathSearchTiming::Scope serialTiming(activePathfindSearchContext().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
 #endif
 	Int cellCount = 0;
 
@@ -9808,7 +9809,7 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Caller closest recomputation has separate timing from speculative tasks.
- PathSearchTiming::Scope serialTiming(searchState().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+ PathSearchTiming::Scope serialTiming(activePathfindSearchContext().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
 #endif
  const Object* obj=movement.obj;
  PathfindCell* closesetCell=nullptr;
@@ -12343,7 +12344,7 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Time caller escape recomputation only when no private speculative read log is installed.
- PathSearchTiming::Scope serialTiming(searchState().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+ PathSearchTiming::Scope serialTiming(activePathfindSearchContext().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
 #endif
  const Real repulsorDistSqr=repulsorRadius*repulsorRadius;
  const Int MAX_CELLS=MAX_SAFE_PATH_CELL_COUNT;

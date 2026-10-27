@@ -115,7 +115,7 @@ struct Pathfinder {
  std::atomic<int> arrived{0};
  std::map<ObjectID,Path> results;
  Pathfinder();~Pathfinder();
- PathfindSearchContext&searchState(){return activePathfindSearchContext();}
+ PRODUCTION_SEARCH_STATE_ACCESSOR
  int testRadius=0;bool testCenter=true;
  void getRadiusAndCenter(const Object*,int&r,bool&c){r=testRadius;c=testCenter;}
  void clip(Coord3D*,Coord3D*){}
@@ -138,7 +138,7 @@ struct Pathfinder {
  PathfindParallelJob*takeParallelResult(const Object*,const LocomotorSet&,const Coord3D&,const Coord3D&,const Coord3D*,Real,
   PathfindCell*,PathfindCell*,const ICoord2D&,const PathfindMovementSettings&,const PathfindClosestSettings* =nullptr);
  void beginSearchState();void cleanOpenAndClosedLists();
- void forceCleanCells(){++m_parallelWorldEpoch;searchState().m_openList.reset();searchState().m_closedList.reset();searchState().beginSearch();}
+ void forceCleanCells(){++m_parallelWorldEpoch;searchState().m_openList.reset();searchState().m_closedList.reset();activePathfindSearchContext().beginSearch();}
  void debugShowSearch(bool){}
  bool rejectDestinations=false;
  bool checkDestination(const Object*,int,int,int,int,bool);
@@ -171,6 +171,9 @@ struct Pathfinder {
  Path*internalFindPath(Object*,const LocomotorSet&,const Coord3D*,const Coord3D*);
 };
 ''' + block(SOURCE, 'struct PathfindExclusiveWorker {') + '\n' + block(SOURCE, 'struct PathfindParallelReads {') + '\n' + block(SOURCE, 'struct PathfindParallelJob {') + '\n' + block(SOURCE, 'struct PathfindParallelBatch {')
+    # GeneralsX @bugfix Codex 28/10/2026 Compile the production accessor: a broader fixture return type hid the iOS timing build error.
+    a=HEADER.index('PathfindSearchBookkeeping& searchState() const {')
+    source=source.replace('PRODUCTION_SEARCH_STATE_ACCESSOR',HEADER[a:HEADER.index('\n }',a)+3])
     # Pathfinder needs only a forward declaration before the worker state definition.
     source = source.replace('struct PathfindMovementInput;\nstruct Pathfinder', 'struct PathfindExclusiveWorker;\nvoid observeParallelCorridor(std::size_t,Bool);\nstruct PathfindMovementInput;\nstruct Pathfinder', 1)
     source += '\n' + block(SOURCE, 'struct PathfindMovementInput {') + '\n' + block(SOURCE, 'struct ExamineCellsStruct\n')
@@ -213,7 +216,7 @@ Pathfinder::Pathfinder(){mainPathfindSearchContext().resizeCorridor(9);
 Pathfinder::~Pathfinder(){clearParallelBatch();delete m_parallelBatch;delete m_exclusiveWorker;mainPathfindSearchContext().releaseStorage();}
 PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object*obj,const PathOccupancy::Input&input){
  LiveOccupancyReader live={this,obj};auto result=PathOccupancy::evaluate(input,live);
- if(auto* reads=searchState().m_parallelReads)reads->query(input,result);
+ if(auto* reads=activePathfindSearchContext().m_parallelReads)reads->query(input,result);
  return result;
 }
 bool Pathfinder::checkDestination(const Object*obj,int x,int y,int layer,int radius,bool center){
@@ -223,13 +226,13 @@ bool Pathfinder::checkDestination(const Object*obj,int x,int y,int layer,int rad
 }
 void Pathfinder::checkChangeLayers(PathfindCell*cell) {
  if(ExclusiveSearchWorker::onWorker())++workerLoops;else ++callerLoops;
- if(m_parallelBatch)for(auto&job:m_parallelBatch->jobs)if(job.fallback && &searchState()==&job.fallback->context){
+ if(m_parallelBatch)for(auto&job:m_parallelBatch->jobs)if(job.fallback && &activePathfindSearchContext()==&job.fallback->context){
   if(ExclusiveSearchWorker::onWorker())++workerFallbackLoops;else ++callerFallbackLoops;
   if(fallbackRendezvous&&cell==job.fallback->start){++fallbackArrived;while(fallbackArrived.load()<2)std::this_thread::yield();}
  }
- if(!searchState().m_parallelReads)serialExpansion.push_back({cell->getXIndex(),cell->getYIndex()});
+ if(!activePathfindSearchContext().m_parallelReads)serialExpansion.push_back({cell->getXIndex(),cell->getYIndex()});
  // Both jobs must reach the kernel before either can proceed: catches a silently serialized executor.
- if(rendezvous && searchState().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}
+ if(rendezvous && activePathfindSearchContext().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}
 }
 Path*Pathfinder::buildActualPath(const Object*o,int,const Coord3D*,PathfindCell*c,bool,bool blocked){
  assert(std::this_thread::get_id()==owner);auto&path=results[o->getID()];path=Path{};
@@ -241,7 +244,7 @@ Path*Pathfinder::findClosestHierarchicalPath(Bool,const LocomotorSet&,const Coor
  assert(std::this_thread::get_id()==owner&&(!m_parallelBatch||!m_parallelBatch->preparing));
  ++hierarchicalCalls;searchState().m_isTunneling=false;searchState().m_cumulativeCellsAllocated+=2;
  if(!hierarchical)return nullptr;
- m_zoneManager.setAllPassable();if(restrictCorridor>=0)searchState().setCorridorPassable(restrictCorridor,false);
+ m_zoneManager.setAllPassable();if(restrictCorridor>=0)activePathfindSearchContext().setCorridorPassable(restrictCorridor,false);
  return new Path;
 }
 struct World {
@@ -258,8 +261,8 @@ struct World {
   return p.internalFindPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to);}
 };
 '''
-    source=source.replace('if(rendezvous && searchState().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}',
-                          'if(rendezvous && searchState().m_parallelReads){static thread_local PathfindSearchContext*last=nullptr;if(last!=&searchState()){last=&searchState();++arrived;while(arrived.load()<2)std::this_thread::yield();}}')
+    source=source.replace('if(rendezvous && activePathfindSearchContext().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}',
+                          'if(rendezvous && activePathfindSearchContext().m_parallelReads){static thread_local PathfindSearchContext*last=nullptr;if(last!=&activePathfindSearchContext()){last=&activePathfindSearchContext();++arrived;while(arrived.load()<2)std::this_thread::yield();}}')
     return source
 
 
