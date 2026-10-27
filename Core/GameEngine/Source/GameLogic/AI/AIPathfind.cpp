@@ -4348,10 +4348,11 @@ struct PathfindParallelJob {
  Bool captured = false, ready = false, used = false, tunneling = false, fixed = false;
  // GeneralsX @feature Codex 27/10/2026 Retain ordinary failure and closest scratch separately until each phase is validated on main.
  std::unique_ptr<PathfindParallelJob> fallback;
- Bool fallbackResult=false, fallbackAllowed=false;
+ Bool fallbackResult=false, fallbackAllowed=false, earlyFallback=false;
  void reset() {
   if (fallback) fallback->reset();
-  fallbackResult=fallbackAllowed=false;
+  fallbackResult=fallbackAllowed=earlyFallback=false;
+  outcome={nullptr,0,false};
   context.m_parallelReads=nullptr;
   context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
   context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;
@@ -4364,14 +4365,15 @@ struct PathfindParallelBatch {
  unsigned long long batches=0, accepted=0, rejected=0, unused=0, safeSearches=0, safeAccepted=0;
  unsigned long long closestSearches=0, closestAccepted=0;
  unsigned long long fallbackSearches=0, fallbackAccepted=0, fallbackRejected=0, fallbackUnused=0;
+ unsigned long long primarySearches=0, fallbackOnly=0, earlyFallbackSearches=0, earlyFallbackAccepted=0;
  Bool active=false;
  ~PathfindParallelBatch() {
-  fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2\n",
-   batches,accepted,rejected,unused);
+  fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2 primary=%llu fallback_only=%llu\n",
+   batches,accepted,rejected,unused,primarySearches,fallbackOnly);
   fprintf(stderr,"[PATH_PARALLEL_SAFE] stopped searches=%llu accepted=%llu\n",safeSearches,safeAccepted);
   fprintf(stderr,"[PATH_PARALLEL_CLOSEST] stopped searches=%llu accepted=%llu\n",closestSearches,closestAccepted);
-  fprintf(stderr,"[PATH_PARALLEL_FALLBACK] stopped searches=%llu accepted=%llu rejected=%llu unused=%llu\n",
-   fallbackSearches,fallbackAccepted,fallbackRejected,fallbackUnused);
+  fprintf(stderr,"[PATH_PARALLEL_FALLBACK] stopped searches=%llu accepted=%llu rejected=%llu unused=%llu early_searches=%llu early_accepted=%llu\n",
+   fallbackSearches,fallbackAccepted,fallbackRejected,fallbackUnused,earlyFallbackSearches,earlyFallbackAccepted);
  }
 };
 
@@ -5567,6 +5569,22 @@ static_assert(static_cast<int>(PathfindCell::CELL_OBSTACLE) == PathOccupancy::Ob
 	static_cast<int>(PathfindCell::CELL_BRIDGE_IMPASSABLE) == PathOccupancy::BridgeImpassable, "Occupancy types must match");
 
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @feature Codex 27/10/2026 A real caller-side failure can authorize independently validated fallback after early checks or recomputation.
+void Pathfinder::confirmParallelFallback(const Object* obj, const LocomotorSet& locomotorSet,
+ const Coord3D& from, const Coord3D& to, Bool blocked)
+{
+ if (!obj || blocked || !m_parallelBatch || !m_parallelBatch->active ||
+     SearchContextBinding<PathfindSearchContext>::current() || PathOccupancy::validationPaused().load()) return;
+ const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
+ for (auto& primary:m_parallelBatch->jobs) {
+  if (primary.safe || primary.closest || primary.queueIndex!=m_queuePRHead || primary.obj!=obj ||
+      primary.id!=obj->getID() || primary.locomotor!=&locomotorSet ||
+      !samePoint(primary.from,from) || !samePoint(primary.to,to) ||
+      !primary.fallback || !primary.fallback->ready || primary.fallback->used) continue;
+  if (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getPath()==nullptr) primary.fallbackAllowed=true;
+ }
+}
+
 // GeneralsX @feature Codex 27/10/2026 All search kinds consume once at their original queue position and validate the same live dependencies.
 PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
  const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
@@ -5575,7 +5593,7 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 {
  if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
  for (auto& primary:m_parallelBatch->jobs) {
-  // GeneralsX @feature Codex 27/10/2026 A closest fallback is eligible only after its ordinary failure was accepted and finalized.
+  // GeneralsX @feature Codex 27/10/2026 Fallback requires accepted ordinary failure or confirmation from the actual AI no-path branch.
   auto& job=closest && !primary.closest && primary.fallbackAllowed && primary.fallback ? *primary.fallback : primary;
   if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
   job.used=true;
@@ -7253,19 +7271,26 @@ void Pathfinder::prepareParallelBatch()
    {SearchContextBinding<PathfindSearchContext> binding(job.context);
     if (job.safe) findSafePath(job.obj,*job.locomotor,&job.from,&job.to,&job.repulsor2,job.repulsorRadius);
     else if (job.closest) findClosestPath(job.obj,*job.locomotor,&job.from,&job.to,blocked[i],pathCostMultiplier[i],false);
-    else internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
+    // Outer terrain rejection stays authoritative on main; prepare only the fallback kernel when it already rules out ordinary search.
+    else if (clientSafeQuickDoesPathExist(*job.locomotor,&job.from,&job.to)) internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
    batch.preparing=nullptr;
   }
   batch.active=true;
-  if (batch.jobs[0].captured && batch.jobs[1].captured) {
+  Bool canPair=true;
+  for (auto& job:batch.jobs) {
+   if (!job.captured && (job.safe || job.closest || job.locomotor->getValidSurfaces()==0 ||
+       job.obj->getAIUpdateInterface()->getPath()!=nullptr)) canPair=false;
+  }
+  if (canPair) {
    for (Int i=0;i<2;++i) {
     auto& job=batch.jobs[i];
-    // GeneralsX @feature Codex 27/10/2026 Prepare a read-only fallback on main; execute it in the same task only if ordinary expansion fails.
+    // GeneralsX @feature Codex 27/10/2026 Prepare a read-only fallback on main for ordinary expansion failure or early caller rejection.
     // Reference: dement123, ZeroHourReimagined_1.0.0_source, combined ordinary/closest request execution.
     if (!job.safe && !job.closest && objects[i]->getAIUpdateInterface()->getPath()==nullptr) {
      if (!job.fallback) job.fallback.reset(new PathfindParallelJob);
      auto& fallback=*job.fallback;
      fallback.reset();fallback.fallbackResult=true;fallback.closest=true;fallback.safe=false;
+     fallback.earlyFallback=!job.captured;
      fallback.obj=job.obj;fallback.id=job.id;fallback.locomotor=job.locomotor;
      fallback.from=job.from;fallback.to=job.to;fallback.ignored=job.ignored;fallback.queueIndex=job.queueIndex;
      fallback.epoch=job.epoch;fallback.lifecycle=job.lifecycle;
@@ -7277,16 +7302,21 @@ void Pathfinder::prepareParallelBatch()
      batch.preparing=nullptr;
     }
    }
+  }
+  const auto hasWork=[](const PathfindParallelJob& job){return job.captured || (job.fallback && job.fallback->captured);};
+  if (hasWork(batch.jobs[0]) && hasWork(batch.jobs[1])) {
    auto execute=[&](Int index) {
     auto& job=batch.jobs[index];
-    SearchContextBinding<PathfindSearchContext> binding(job.context);
-    PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
-    const PathfindMovementInput movement={job.obj,*job.locomotor,&job.settings};
-    if (job.safe) job.outcome=runSafeSearchLoop(job.start,movement,job.settings.human,job.settings.centerInCell,job.settings.radius,job.startIndex,job.to,job.repulsor2,job.repulsorRadius);
-    else if (job.closest) job.closestOutcome=runClosestSearchLoop(job.start,job.goal,movement,job.settings.human,
-      job.settings.centerInCell,job.settings.radius,job.startIndex,job.closestSettings);
-    else job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
-      job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
+    if (job.captured) {
+     SearchContextBinding<PathfindSearchContext> binding(job.context);
+     PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
+     const PathfindMovementInput movement={job.obj,*job.locomotor,&job.settings};
+     if (job.safe) job.outcome=runSafeSearchLoop(job.start,movement,job.settings.human,job.settings.centerInCell,job.settings.radius,job.startIndex,job.to,job.repulsor2,job.repulsorRadius);
+     else if (job.closest) job.closestOutcome=runClosestSearchLoop(job.start,job.goal,movement,job.settings.human,
+       job.settings.centerInCell,job.settings.radius,job.startIndex,job.closestSettings);
+     else job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
+       job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
+    }
     if (!job.safe && !job.closest && !job.outcome.found && job.fallback && job.fallback->captured) {
      auto& fallback=*job.fallback;
      SearchContextBinding<PathfindSearchContext> fallbackBinding(fallback.context);
@@ -7300,8 +7330,12 @@ void Pathfinder::prepareParallelBatch()
    // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
    m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
    for (auto& job:batch.jobs) {
-    job.ready=true;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;
-    if(job.fallback && job.fallback->ready) ++batch.fallbackSearches;
+    job.ready=job.captured;
+    if(job.ready) {++batch.primarySearches;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;}
+    else ++batch.fallbackOnly;
+    if(job.fallback && job.fallback->ready) {
+     ++batch.fallbackSearches;if(job.fallback->earlyFallback) ++batch.earlyFallbackSearches;
+    }
    }
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
@@ -10117,7 +10151,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
    current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
    current.m_isTunneling=job->context.m_isTunneling;current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
    current.m_corridor.swap(job->context.m_corridor);
-   if (job->fallbackResult) ++m_parallelBatch->fallbackAccepted;
+   if (job->fallbackResult) {
+    ++m_parallelBatch->fallbackAccepted;if(job->earlyFallback) ++m_parallelBatch->earlyFallbackAccepted;
+   }
    else {++m_parallelBatch->accepted;++m_parallelBatch->closestAccepted;}
    return path;
   }

@@ -1766,6 +1766,10 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 	}
 	if (theNewPath==nullptr && m_path==nullptr) {
 		Real pathCostFactor = 0.0f;
+#if defined(GENERALS_PARALLEL_PATH_BATCH)
+  // GeneralsX @feature Codex 27/10/2026 The actual caller failure authorizes checking a prepared closest result, including early rejection.
+  TheAI->pathfinder()->confirmParallelFallback(getObject(),m_locomotorSet,*getObject()->getPosition(),*destination,m_isBlockedAndStuck);
+#endif
 		theNewPath = pathServices->findClosestPath( getObject(), m_locomotorSet, getObject()->getPosition(),
 			destination, m_isBlockedAndStuck, pathCostFactor, FALSE );
 		m_retryPath = true;

@@ -48,6 +48,13 @@ It is not full Reimagined prefetch parity or evidence of faster gameplay.
 
 ## Bounded memory tradeoff
 
+The subsequent [early-rejection stage](IOS_PARALLEL_EARLY_FALLBACK_2026-10-27.md)
+extends these same arenas to ordinary preparation/terrain rejection and adds an
+explicit confirmation at the real AI no-path branch. That stage also distinguishes
+completed primary kernels from fallback-only tasks in session accounting. The
+remaining caller-only scope and two-completions-per-batch invariant below describe
+this earlier stage, not the newer dispatcher.
+
 At most one fallback context is allocated per primary job, lazily on its first
 eligible no-path request, and reused. There are at most four search contexts total
 for the two queued requests, never recursive fallback contexts. Each phase retains

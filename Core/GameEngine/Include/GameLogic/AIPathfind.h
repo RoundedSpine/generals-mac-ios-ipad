@@ -926,6 +926,11 @@ public:
 
 	Bool queueForPath(ObjectID id);	 ///< The object wants to request a pathfind, so put it on the list to process.
 	void processPathfindQueue(); ///< Process some or all of the queued pathfinds.
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // GeneralsX @feature Codex 27/10/2026 Called only by the actual AI no-path branch after the caller's ordinary attempt has failed.
+ void confirmParallelFallback(const Object* obj, const LocomotorSet& locomotorSet,
+  const Coord3D& from, const Coord3D& to, Bool blocked);
+#endif
 	void forceMapRecalculation();	///< Force pathfind map recomputation. If region is given, only that area is recomputed
 
 	/** Returns an aircraft path to the goal.  */

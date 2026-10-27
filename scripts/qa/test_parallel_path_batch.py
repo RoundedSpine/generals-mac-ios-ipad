@@ -124,6 +124,14 @@ struct Pathfinder {
  Real searchGroundHeight(Real,Real);
  void processPathfindQueue();unsigned m_occupancySamplesRemaining=0;
  void prepareParallelBatch();void clearParallelBatch();
+ void confirmParallelFallback(const Object*,const LocomotorSet&,const Coord3D&,const Coord3D&,Bool);
+ bool quickAllowed=true;int ordinaryHierarchicalCalls=0;
+ bool clientSafeQuickDoesPathExist(const LocomotorSet&,const Coord3D*,const Coord3D*){assert(std::this_thread::get_id()==owner);return quickAllowed;}
+ Path*findPathWithInputs(Object*,const LocomotorSet&,const Coord3D*,const Coord3D*);
+ Path*findHierarchicalPath(Bool,const LocomotorSet&,const Coord3D*,const Coord3D*,Bool){
+  assert(std::this_thread::get_id()==owner);++ordinaryHierarchicalCalls;searchState().m_cumulativeCellsAllocated+=2;
+  m_zoneManager.setAllPassable();return new Path;
+ }
  PathfindParallelJob*takeParallelResult(const Object*,const LocomotorSet&,const Coord3D&,const Coord3D&,const Coord3D*,Real,
   PathfindCell*,PathfindCell*,const ICoord2D&,const PathfindMovementSettings&,const PathfindClosestSettings* =nullptr);
  void beginSearchState();void cleanOpenAndClosedLists();
@@ -180,6 +188,7 @@ struct Pathfinder {
     source += '\n'.join(function(m) for m in [
         'void Pathfinder::processPathfindQueue()', 'void observeParallelCorridor(', 'void Pathfinder::observeParallelCell(', 'Real Pathfinder::searchGroundHeight(',
         'void Pathfinder::clearParallelBatch()', 'void Pathfinder::prepareParallelBatch()',
+        'void Pathfinder::confirmParallelFallback(', 'Path *Pathfinder::findPathWithInputs(',
         'void Pathfinder::beginSearchState()', 'void Pathfinder::cleanOpenAndClosedLists()',
         'PathfindMovementSettings Pathfinder::captureMovementSettings(',
         'Bool Pathfinder::validMovementPosition(Bool crusher, PathfindLayerEnum layer,',
@@ -324,6 +333,186 @@ def large_closest_case():
 
 
 class ParallelBatchTests(unittest.TestCase):
+    def test_early_fallback_routes_targets_and_budgets_match_serial(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fixed:{false,true})for(int reason=0;reason<3;++reason)for(int mask=1;mask<4;++mask)for(int seed=0;seed<8;++seed){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;
+ for(int i=0;i<2;++i)if(mask&(1<<i)){
+  auto*c=p.getCell(1,i?&w.b.ai.to:&w.a.ai.to);
+  if(reason==0)c->setType(PathfindCell::CELL_OBSTACLE);else if(reason==1)c->setZone(2);
+ }
+ if(reason==2)p.quickAllowed=false;
+ for(int x=3;x<7;++x)for(int y=4;y<7;++y)if((x*31+y*17+seed*13)%11==0)p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ auto consume=[&](Object&o){
+  auto&ai=o.ai;p.m_queuePRHead=o.id-1;auto*path=p.findPathWithInputs(&o,ai.locomotor,&ai.from,&ai.to);
+  if(!path){p.confirmParallelFallback(&o,ai.locomotor,ai.from,ai.to,false);path=p.findClosestPath(&o,ai.locomotor,&ai.from,&ai.to,false,0,false);}
+  return route(path);
+ };
+ const auto originalA=w.a.ai.to,originalB=w.b.ai.to;auto&state=mainPathfindSearchContext();state.m_cumulativeCellsAllocated=0;
+ const auto a=consume(w.a),b=consume(w.b);const auto budget=state.m_cumulativeCellsAllocated;
+ const auto targetA=w.a.ai.to,targetB=w.b.ai.to;auto corridor=state.m_corridor;
+ w.a.ai.to=originalA;w.b.ai.to=originalB;p.m_queuePRHead=0;state.m_cumulativeCellsAllocated=0;state.m_isTunneling=false;
+ p.ordinaryHierarchicalCalls=p.hierarchicalCalls=0;p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
+ assert(batch.batches==1&&p.hierarchicalCalls==0&&p.ordinaryHierarchicalCalls==0);
+ assert(consume(w.a)==a&&consume(w.b)==b);
+ assert(w.a.ai.to.x==targetA.x&&w.a.ai.to.y==targetA.y&&w.b.ai.to.x==targetB.x&&w.b.ai.to.y==targetB.y);
+ assert(state.m_cumulativeCellsAllocated==budget&&state.m_corridor==corridor&&!state.m_isTunneling&&state.m_ignoreObstacleID==0);
+ assert(state.m_openList.empty()&&state.m_closedList.empty());
+ const unsigned early=reason==2?2:bool(mask&1)+bool(mask&2);
+ assert(batch.primarySearches+batch.fallbackOnly==2&&batch.fallbackOnly==early);
+ assert(batch.earlyFallbackSearches==early&&batch.earlyFallbackAccepted==early&&batch.fallbackRejected==0);
+ assert(batch.accepted+batch.rejected+batch.unused==batch.primarySearches);
+}}
+''', timeout=45)
+
+    def test_early_fallback_only_tasks_overlap_and_require_caller_confirmation(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.fallbackRendezvous=true;
+ p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
+ assert(batch.batches==1&&batch.primarySearches==0&&batch.fallbackOnly==2&&batch.earlyFallbackSearches==2);
+ assert(p.fallbackArrived==2&&p.workerFallbackLoops>0&&p.callerFallbackLoops>0&&p.m_exclusiveWorker->searches==1);
+ assert(!batch.jobs[0].ready&&!batch.jobs[1].ready&&!batch.jobs[0].fallbackAllowed);
+ assert(!p.findPathWithInputs(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to));
+ p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+ assert(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));
+ assert(batch.earlyFallbackAccepted==1&&batch.accepted==0);
+ p.clearParallelBatch();assert(batch.unused==0&&batch.fallbackUnused==1);
+}
+''')
+
+    def test_early_fallback_confirmation_checks_queue_identity_and_callback_inputs(self):
+        run_cpp(fixture()+r'''
+int main(){for(int change=0;change<10;++change){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.prepareParallelBatch();
+ auto&ai=w.a.ai;auto from=ai.from,to=ai.to;bool blocked=false;LocomotorSet copy=ai.locomotor;const LocomotorSet*loco=&ai.locomotor;
+ assert(!p.findPathWithInputs(&w.a,ai.locomotor,&ai.from,&ai.to));
+ switch(change){
+ case 0:p.m_queuePRHead=1;break;case 1:from.z+=1;break;case 2:to.x+=1;break;case 3:loco=&copy;break;
+ case 4:blocked=true;break;case 5:ai.existingPath=true;break;case 6:PathOccupancy::validationPaused().store(true);break;
+ case 7:p.m_parallelBatch->active=false;break;case 8:w.a.hasAI=false;break;case 9:w.a.id=999;break;
+ }
+ p.confirmParallelFallback(&w.a,*loco,from,to,blocked);
+ assert(!p.m_parallelBatch->jobs[0].fallbackAllowed&&!p.m_parallelBatch->jobs[0].fallback->used);
+}}
+''')
+
+    def test_early_fallback_cannot_be_consumed_without_confirmation_or_from_a_nested_search(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.prepareParallelBatch();
+ auto&ai=w.a.ai;auto original=ai.to;
+ {SearchContextBinding<PathfindSearchContext> bound(mainPathfindSearchContext());p.confirmParallelFallback(&w.a,ai.locomotor,ai.from,ai.to,false);}
+ assert(!p.m_parallelBatch->jobs[0].fallbackAllowed);
+ assert(p.findClosestPath(&w.a,ai.locomotor,&ai.from,&ai.to,false,0,false));
+ assert(p.m_parallelBatch->fallbackAccepted==0&&!p.m_parallelBatch->jobs[0].fallback->used);
+ ai.to=original;p.clearParallelBatch();assert(p.m_parallelBatch->fallbackUnused==2);
+}
+''')
+
+    def test_caller_recomputed_failure_can_authorize_an_independently_valid_fallback(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool stale:{false,true}){World w;Pathfinder p;w.queue(p);
+ for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();p.m_parallelBatch->jobs[0].reads.overflow=true;
+ if(stale)p.storage[2][2].setPinched(true);
+ auto&ai=w.a.ai;assert(!p.findPathWithInputs(&w.a,ai.locomotor,&ai.from,&ai.to));
+ assert(p.m_parallelBatch->rejected==1&&!p.m_parallelBatch->jobs[0].fallbackAllowed);
+ p.confirmParallelFallback(&w.a,ai.locomotor,ai.from,ai.to,false);
+ assert(p.findClosestPath(&w.a,ai.locomotor,&ai.from,&ai.to,false,0,false));
+ assert(p.m_parallelBatch->fallbackAccepted==unsigned(!stale)&&p.m_parallelBatch->fallbackRejected==unsigned(stale));
+}}
+''')
+
+    def test_early_fallback_validation_rejects_changed_world_after_confirmation(self):
+        run_cpp(fixture()+r'''
+int main(){for(int change=0;change<7;++change){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.prepareParallelBatch();auto&ai=w.a.ai;
+ assert(!p.findPathWithInputs(&w.a,ai.locomotor,&ai.from,&ai.to));p.confirmParallelFallback(&w.a,ai.locomotor,ai.from,ai.to,false);
+ assert(p.m_parallelBatch->jobs[0].fallbackAllowed);
+ switch(change){case 0:++p.m_parallelWorldEpoch;break;case 1:PathOccupancy::validationLifecycleEpoch().fetch_add(1);break;
+ case 2:p.storage[2][2].setPinched(true);break;case 3:p.m_parallelBatch->jobs[0].fallback->reads.overflow=true;break;
+ case 4:ai.locomotor.downhill=true;break;case 5:ai.existingPath=true;break;case 6:p.hierarchical=false;break;}
+ p.findClosestPath(&w.a,ai.locomotor,&ai.from,&ai.to,false,0,false);
+ assert(p.m_parallelBatch->fallbackRejected==1&&p.m_parallelBatch->fallbackAccepted==0);
+}}
+''')
+
+    def test_early_fallback_pairs_with_queued_safe_and_closest_searches(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fixed:{false,true})for(int kind=0;kind<2;++kind)for(int first=0;first<2;++first){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;p.quickAllowed=false;
+ auto&other=first?w.a:w.b;other.ai.safe=kind==0;other.ai.closest=kind==1;
+ auto&early=first?w.b:w.a;
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ auto consume=[&](Object&o){p.m_queuePRHead=o.id-1;if(o.ai.safe||o.ai.closest)return route(w.consume(p,o));
+  auto&ai=o.ai;auto*path=p.findPathWithInputs(&o,ai.locomotor,&ai.from,&ai.to);
+  if(!path){p.confirmParallelFallback(&o,ai.locomotor,ai.from,ai.to,false);path=p.findClosestPath(&o,ai.locomotor,&ai.from,&ai.to,false,0,false);}return route(path);};
+ auto originalA=w.a.ai.to,originalB=w.b.ai.to;auto&state=mainPathfindSearchContext();state.m_cumulativeCellsAllocated=0;
+ auto a=consume(w.a),b=consume(w.b);auto budget=state.m_cumulativeCellsAllocated;auto targetA=w.a.ai.to,targetB=w.b.ai.to;
+ w.a.ai.to=originalA;w.b.ai.to=originalB;state.m_cumulativeCellsAllocated=0;state.m_isTunneling=false;p.m_queuePRHead=0;
+ p.prepareParallelBatch();assert(consume(w.a)==a&&consume(w.b)==b);
+ assert(w.a.ai.to.x==targetA.x&&w.a.ai.to.y==targetA.y&&w.b.ai.to.x==targetB.x&&w.b.ai.to.y==targetB.y);
+ auto&batch=*p.m_parallelBatch;assert(batch.primarySearches==1&&batch.fallbackOnly==1&&batch.accepted==1&&batch.earlyFallbackAccepted==1);
+ assert(state.m_cumulativeCellsAllocated==budget);
+}}
+''')
+
+    def test_early_fallback_queue_budget_discards_the_second_result(self):
+        source=fixture().replace('PATHFIND_CELLS_PER_FRAME=5000','PATHFIND_CELLS_PER_FRAME=1')
+        source=source.replace('else p->internalFindPath(obj,locomotor,&from,&to);',
+          'else if(!p->findPathWithInputs(obj,locomotor,&from,&to)&&!existingPath){p->confirmParallelFallback(obj,locomotor,from,to,false);p->findClosestPath(obj,locomotor,&from,&to,false,0,false);}')
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;
+ p.processPathfindQueue();assert((applied==std::vector<ObjectID>{1})&&p.m_queuePRHead==1);
+ auto&batch=*p.m_parallelBatch;assert(batch.fallbackOnly==2&&batch.earlyFallbackAccepted==1&&batch.fallbackUnused==1&&batch.unused==0);
+ auto dispatched=p.m_exclusiveWorker->searches;p.processPathfindQueue();
+ assert((applied==std::vector<ObjectID>{1,2})&&p.m_exclusiveWorker->searches==dispatched&&batch.earlyFallbackAccepted==1&&p.hierarchicalCalls==2);
+}
+''')
+
+    def test_caller_success_discards_an_early_fallback_prediction(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.prepareParallelBatch();p.quickAllowed=true;
+ auto&ai=w.a.ai;assert(p.findPathWithInputs(&w.a,ai.locomotor,&ai.from,&ai.to));
+ assert(!p.m_parallelBatch->jobs[0].fallbackAllowed&&p.m_parallelBatch->fallbackAccepted==0);
+ p.clearParallelBatch();assert(p.m_parallelBatch->fallbackUnused==2&&p.m_parallelBatch->unused==0);
+}
+''')
+
+    def test_real_ai_no_path_branch_confirms_before_closest_and_skips_existing_paths(self):
+        ai_source=(ROOT/'GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/AIUpdate.cpp').read_text()
+        a=ai_source.index('if (theNewPath==nullptr && m_path==nullptr) {')
+        branch=ai_source[a:ai_source.index('\n\tTheAI->pathfinder()->setIgnoreObstacleID',a)]
+        for enabled in [False,True]:
+            run_cpp(('#define GENERALS_PARALLEL_PATH_BATCH 1\n' if enabled else '')+r'''
+#include <cassert>
+#include <vector>
+using Bool=bool;using Real=float;
+#define FALSE false
+struct Coord3D{float x=0,y=0,z=0;};struct Path{};struct LocomotorSet{};
+struct Object{Coord3D p;const Coord3D*getPosition(){return &p;}};
+std::vector<int>events;Path result;
+struct Pathfinder{
+ void confirmParallelFallback(Object*,const LocomotorSet&,const Coord3D&,const Coord3D&,bool){events.push_back(1);}
+ Path*findClosestPath(Object*,const LocomotorSet&,const Coord3D*,Coord3D*,Bool,Real cost,Bool allies){assert(cost==0&&!allies);events.push_back(2);return &result;}
+}pathfinder;
+struct AI{Pathfinder*pathfinder(){return &::pathfinder;}}ai;auto*TheAI=&ai;
+struct AIUpdateInterface{
+ Path*m_path=nullptr;LocomotorSet m_locomotorSet;bool m_isBlockedAndStuck=false,m_retryPath=false;Object object;
+ Object*getObject(){return &object;}
+ void finish(Path*&theNewPath,Coord3D*destination){auto*pathServices=&pathfinder;
+'''+branch+r'''
+ }
+};
+int main(){AIUpdateInterface ai;Coord3D to;Path*path=nullptr;ai.finish(path,&to);assert(path==&result&&ai.m_retryPath);
+#ifdef GENERALS_PARALLEL_PATH_BATCH
+ assert((events==std::vector<int>{1,2}));
+#else
+ assert((events==std::vector<int>{2}));
+#endif
+ events.clear();ai.m_retryPath=false;ai.finish(path,&to);assert(events.empty()&&!ai.m_retryPath);
+ path=nullptr;ai.m_path=&result;ai.finish(path,&to);assert(events.empty()&&!ai.m_retryPath&&path==nullptr);
+}
+''')
+
     def test_closest_serial_matches_previous_routes_destinations_and_budget(self):
         result=run_cpp(fixture()+closest_route_cases()).stdout
         # Recorded from 368e8f942's monolithic closest search using these same controlled world services.

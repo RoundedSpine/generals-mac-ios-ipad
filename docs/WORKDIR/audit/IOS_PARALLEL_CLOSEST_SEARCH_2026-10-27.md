@@ -88,9 +88,11 @@ The subsequent [fallback stage](IOS_PARALLEL_FALLBACK_SEARCH_2026-10-27.md) adds
 conditional closest computation after eligible ordinary fine-loop failures.
 It retains a separate bounded fallback arena per request so both phases preserve
 their original main-thread cleanup; it does not adopt a scalar cleanup substitute.
-Early ordinary preparation rejection and path-materialization failure still use
-caller fallback. That newer code passed its own SDK workflow in run 40520080544;
-its device validation remains pending.
+Early ordinary preparation rejection and path-materialization failure retain
+caller fallback in that stage. The subsequent
+[early-rejection stage](IOS_PARALLEL_EARLY_FALLBACK_2026-10-27.md) extends coverage
+using confirmation from the actual AI no-path branch. The first fallback stage
+passed its SDK workflow in run 40520080544; its device fallback counter remains zero.
 Hierarchical search and Path optimization remain on main. Larger worker pools,
 eight-request scheduling and dense map-sized node storage are not adopted here.
 The previous escape-capable device log had zero parallel escape searches, so
