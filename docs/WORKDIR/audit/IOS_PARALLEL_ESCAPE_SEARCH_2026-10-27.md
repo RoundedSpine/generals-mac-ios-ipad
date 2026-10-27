@@ -68,7 +68,19 @@ missing crusher name keys and unsupported requests remain ineligible.
   Corrected code `61122e025` also passed all 142 Mac QA tests, the workflow race
   checks, actual iOS SDK compilation, platform/rpath packaging checks and unsigned
   IPA upload in [run 40487632736](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40487632736).
-  The artifact is `GeneralsXZH-iOS-unsigned`. Device testing remains pending.
+  The artifact is `GeneralsXZH-iOS-unsigned`.
+- The next supplied device log identifies `~61122e0`, reaches the score screen
+  and exits with code 0. It completes 87 parallel pairs: 167 accepted results,
+  six validation rejections and one unused result, accounting for all 174
+  speculative completions (96.0% reuse). The worker reports 87 searches.
+  `PATH_PARALLEL_SAFE` reports zero searches and zero accepted results, so the
+  new parallel escape kernel was not exercised. This does not establish whether
+  safe requests were absent, unpaired or ineligible. The cache directory reports
+  `state=reused`; this confirms directory reuse, not individual pipeline-cache
+  hits or a timing improvement. Both CSF tables load fully, and no primitive-restart
+  warning or fatal error is recorded. Specific escape, lifecycle and performance
+  validation remain pending; opening the replay menu does not establish replay
+  playback or deterministic equivalence.
 
 Run 40485884866 also passed all 142 Mac QA tests and its race checks, but SDK
 compilation found the shared validator above the `LiveOccupancyReader` definition.
