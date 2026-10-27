@@ -464,6 +464,7 @@ public:
  Bool predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored);
  // GeneralsX @feature Codex 27/10/2026 Copy the escape request's repulsor positions and radius without changing AI state.
  Bool predictSafePath(Coord3D& from, Coord3D& repulsor1, Coord3D& repulsor2, Real& radius);
+ Bool predictClosestPath(Coord3D& from, Coord3D& to, Bool& blocked, Real& pathCostMultiplier);
 #endif
 	void doPathfind( PathfindServicesInterface *pathfinder );
 	void requestPath( Coord3D *destination, Bool isGoalDestination );	///< Queues a request to pathfind to destination.

@@ -865,6 +865,22 @@ struct PathfindMovementSettings {
 };
 struct PathfindMovementInput;
 
+// GeneralsX @feature Codex 27/10/2026 Closest-loop policy and preparation decisions are explicit result dependencies.
+struct PathfindClosestSettings {
+ Bool blocked;
+ Real pathCostMultiplier;
+ Bool moveAllies;
+ Bool goalOnObstacle;
+ Bool startedStuck;
+ Bool gotHierarchicalPath;
+ ObjectID initialIgnored;
+ Bool operator==(const PathfindClosestSettings& other) const {
+  return blocked==other.blocked && pathCostMultiplier==other.pathCostMultiplier && moveAllies==other.moveAllies &&
+   goalOnObstacle==other.goalOnObstacle && startedStuck==other.startedStuck &&
+   gotHierarchicalPath==other.gotHierarchicalPath && initialIgnored==other.initialIgnored;
+ }
+};
+
 /**
  * The Pathfinding engine itself.
  */
@@ -1030,6 +1046,12 @@ protected:
 		Int cellsExamined;
 		Bool found;
 	};
+ struct ClosestSearchOutcome {
+  PathfindCell* lastCell;
+  PathfindCell* closestCell;
+  Int cellsExamined;
+  Bool reachedGoal;
+ };
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  friend struct PathfindParallelBatch;
@@ -1042,7 +1064,8 @@ protected:
  Real searchGroundHeight(Real x, Real y);
  PathfindParallelJob* takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
   const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
-  PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings);
+  PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings,
+  const PathfindClosestSettings* closest=nullptr);
  void invalidateParallelResults() {++m_parallelWorldEpoch;}
 #endif
 	PathfindExclusiveWorker *m_exclusiveWorker;
@@ -1055,6 +1078,10 @@ protected:
  OrdinarySearchOutcome runSafeSearchLoop(PathfindCell* parentCell, const PathfindMovementInput& movement,
   Bool isHuman, Bool centerInCell, Int radius, const ICoord2D& startIndex,
   const Coord3D& repulsor1, const Coord3D& repulsor2, Real repulsorRadius);
+ // GeneralsX @feature Codex 27/10/2026 Only closest scoring/expansion runs off-thread; finalization retains the original effects.
+ ClosestSearchOutcome runClosestSearchLoop(PathfindCell* parentCell, PathfindCell* goalCell,
+  const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
+  const ICoord2D& startIndex, const PathfindClosestSettings& closest);
 	virtual Path *internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to);	///< Find a short, valid path between given locations
 	Path *findHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);
 	Path *findClosestHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);

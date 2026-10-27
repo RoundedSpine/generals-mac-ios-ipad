@@ -419,6 +419,15 @@ Bool AIUpdateInterface::predictSafePath(Coord3D& from, Coord3D& repulsor1, Coord
  radius=getObject()->getVisionRange()+TheAI->getAiData()->m_repulsedDistance;
  return true;
 }
+// GeneralsX @feature Codex 27/10/2026 Predict Reimagined-style queued approach requests without altering AI flags or the destination.
+// Reference: dement123, ZeroHourReimagined_1.0.0_source, AIUpdateInterface::predictPathfind.
+Bool AIUpdateInterface::predictClosestPath(Coord3D& from, Coord3D& to, Bool& blocked, Real& pathCostMultiplier)
+{
+ if (!m_waitingForPath || m_isSafePath || !m_isApproachPath || !isDoingGroundMovement()) return false;
+ from=*getObject()->getPosition();to=m_requestedDestination;
+ blocked=m_isBlockedAndStuck;pathCostMultiplier=0.2f;
+ return true;
+}
 #endif
 
 void AIUpdateInterface::doPathfind( PathfindServicesInterface *pathfinder )

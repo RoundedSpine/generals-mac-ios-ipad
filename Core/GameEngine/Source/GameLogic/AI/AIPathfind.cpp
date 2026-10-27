@@ -4333,10 +4333,13 @@ struct PathfindParallelJob {
  Coord3D from{},to{},repulsor2{};
  Real repulsorRadius=0;
  Bool safe=false;
+ Bool closest=false;
+ PathfindClosestSettings closestSettings{};
  PathfindMovementSettings settings{};
  PathfindCell *start = nullptr, *goal = nullptr;
  ICoord2D startIndex{};
  Pathfinder::OrdinarySearchOutcome outcome{nullptr,0,false};
+ Pathfinder::ClosestSearchOutcome closestOutcome{nullptr,nullptr,0,false};
  unsigned permanent = 0;
  unsigned long long epoch = 0;
  std::uint64_t lifecycle = 0;
@@ -4353,11 +4356,13 @@ struct PathfindParallelBatch {
  PathfindParallelJob jobs[2];
  PathfindParallelJob* preparing = nullptr;
  unsigned long long batches=0, accepted=0, rejected=0, unused=0, safeSearches=0, safeAccepted=0;
+ unsigned long long closestSearches=0, closestAccepted=0;
  Bool active=false;
  ~PathfindParallelBatch() {
   fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2\n",
    batches,accepted,rejected,unused);
   fprintf(stderr,"[PATH_PARALLEL_SAFE] stopped searches=%llu accepted=%llu\n",safeSearches,safeAccepted);
+  fprintf(stderr,"[PATH_PARALLEL_CLOSEST] stopped searches=%llu accepted=%llu\n",closestSearches,closestAccepted);
  }
 };
 
@@ -5552,10 +5557,11 @@ static_assert(static_cast<int>(PathfindCell::CELL_OBSTACLE) == PathOccupancy::Ob
 	static_cast<int>(PathfindCell::CELL_BRIDGE_IMPASSABLE) == PathOccupancy::BridgeImpassable, "Occupancy types must match");
 
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
-// GeneralsX @feature Codex 27/10/2026 Both search kinds consume once at their original queue position and validate the same live dependencies.
+// GeneralsX @feature Codex 27/10/2026 All search kinds consume once at their original queue position and validate the same live dependencies.
 PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
  const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
- PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings)
+ PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings,
+ const PathfindClosestSettings* closest)
 {
  if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
  for (auto& job:m_parallelBatch->jobs) {
@@ -5566,6 +5572,7 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
    const auto& before=job.settings;
    Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,from) && samePoint(job.to,to) &&
     job.safe==(repulsor2!=nullptr) && (!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius)) &&
+    job.closest==(closest!=nullptr) && (!closest || job.closestSettings==*closest) &&
     job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
     !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
     job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
@@ -7194,14 +7201,16 @@ void Pathfinder::prepareParallelBatch()
  Object* objects[2]={TheGameLogic->findObjectByID(ids[0]),TheGameLogic->findObjectByID(ids[1])};
  Coord3D from[2],to[2],repulsor2[2]{};ObjectID ignored[2];
  Bool safe[2]={false,false};Real repulsorRadius[2]={0,0};
+ Bool closest[2]={false,false},blocked[2]={false,false};Real pathCostMultiplier[2]={0,0};
  for (Int i=0;i<2;++i) {
   if (!objects[i] || !objects[i]->getAIUpdateInterface() || objects[i]->isKindOf(KINDOF_DOZER) ||
       (objects[i]->getCrusherLevel()>0 && TheNameKeyGenerator->findExistingNameKey("SquishCollide")==NAMEKEY_INVALID)) return;
   auto* ai=objects[i]->getAIUpdateInterface();
   if (!ai->predictOrdinaryPath(from[i],to[i],ignored[i])) {
-   if (!ai->predictSafePath(from[i],to[i],repulsor2[i],repulsorRadius[i])) return;
-   safe[i]=true;
-   // doPathfind's safe branch inherits the current context's ignored obstacle and tunneling state.
+   if (ai->predictSafePath(from[i],to[i],repulsor2[i],repulsorRadius[i])) safe[i]=true;
+   else if (ai->predictClosestPath(from[i],to[i],blocked[i],pathCostMultiplier[i])) closest[i]=true;
+   else return;
+   // Safe/approach callbacks inherit the context's ignored obstacle; safe also inherits tunneling.
    ignored[i]=mainPathfindSearchContext().m_ignoreObstacleID;
   }
  }
@@ -7210,7 +7219,7 @@ void Pathfinder::prepareParallelBatch()
   if (!m_exclusiveWorker) {
    m_exclusiveWorker=new PathfindExclusiveWorker;
    m_exclusiveWorker->mode="parallel";
-   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_and_safe worker=1 caller=1\n");
+   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_safe_closest worker=1 caller=1\n");
   }
   auto& batch=*m_parallelBatch;
   for (Int i=0;i<2;++i) {
@@ -7218,6 +7227,7 @@ void Pathfinder::prepareParallelBatch()
    job.locomotor=&objects[i]->getAIUpdateInterface()->getLocomotorSet();
    job.from=from[i];job.to=to[i];job.ignored=ignored[i];job.queueIndex=i?next:m_queuePRHead;
    job.safe=safe[i];job.repulsor2=repulsor2[i];job.repulsorRadius=repulsorRadius[i];
+   job.closest=closest[i];job.closestSettings={blocked[i],pathCostMultiplier[i],false,false,false,false,ignored[i]};
    job.epoch=m_parallelWorldEpoch;job.lifecycle=PathOccupancy::validationLifecycleEpoch().load();
    job.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
    job.context.m_ignoreObstacleID=ignored[i];job.context.m_parallelReads=&job.reads;
@@ -7225,6 +7235,7 @@ void Pathfinder::prepareParallelBatch()
    batch.preparing=&job;
    {SearchContextBinding<PathfindSearchContext> binding(job.context);
     if (job.safe) findSafePath(job.obj,*job.locomotor,&job.from,&job.to,&job.repulsor2,job.repulsorRadius);
+    else if (job.closest) findClosestPath(job.obj,*job.locomotor,&job.from,&job.to,blocked[i],pathCostMultiplier[i],false);
     else internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
    batch.preparing=nullptr;
   }
@@ -7236,12 +7247,14 @@ void Pathfinder::prepareParallelBatch()
     PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
     const PathfindMovementInput movement={job.obj,*job.locomotor,&job.settings};
     if (job.safe) job.outcome=runSafeSearchLoop(job.start,movement,job.settings.human,job.settings.centerInCell,job.settings.radius,job.startIndex,job.to,job.repulsor2,job.repulsorRadius);
+    else if (job.closest) job.closestOutcome=runClosestSearchLoop(job.start,job.goal,movement,job.settings.human,
+      job.settings.centerInCell,job.settings.radius,job.startIndex,job.closestSettings);
     else job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
       job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
    };
    // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
    m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
-   for (auto& job:batch.jobs) {job.ready=true;if(job.safe) ++batch.safeSearches;}
+   for (auto& job:batch.jobs) {job.ready=true;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;}
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
   }
@@ -9636,9 +9649,98 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
  * Find a short, valid path between the FROM location and a location NEAR the to location.
  * Uses A* algorithm.
  */
+// GeneralsX @feature Codex 27/10/2026 Preserve closest scoring, tie order and pruning while returning a phase-local outcome.
+Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* parentCell, PathfindCell* goalCell,
+ const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
+ const ICoord2D& startCellNdx, const PathfindClosestSettings& closest)
+{
+ const Object* obj=movement.obj;
+ PathfindCell* closesetCell=nullptr;
+ Real closestDistanceSqr=FLT_MAX;
+ Real closestDistScreenSqr=FLT_MAX;
+ Int count=0;
+	Bool foundGoal = false;
+	while( !searchState().m_openList.empty() )
+	{
+		Real dx;
+		Real dy;
+		Real distSqr;
+		// take head cell off of open list - it has lowest estimated total path cost
+		parentCell = searchState().m_openList.getHead();
+		parentCell->removeFromOpenList(searchState().m_openList);
+
+		if (parentCell == goalCell)
+		{
+			// success - found a path to the goal
+			if (!closest.goalOnObstacle) {
+				// See if the goal is a valid destination.  If not, accept closest cell.
+				if (closesetCell!=nullptr && !movement.canPathThroughUnits() && !checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(), parentCell->getLayer(), radius, centerInCell)) {
+#if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
+					break;
+#else
+					foundGoal = true;
+					// Continue processing the open list to find a possibly closer cell. jba. [8/25/2003]
+					continue;
+#endif
+				}
+			}
+
+			return {parentCell,nullptr,count,true};
+		}
+		// put parent cell onto closed list - its evaluation is finished
+		parentCell->putOnClosedList( searchState().m_closedList );
+		if (!searchState().m_isTunneling && checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(), parentCell->getLayer(), radius, centerInCell)) {
+			if (!closest.startedStuck || validMovementPosition( movement.isCrusher(), movement.getValidSurfaces(), parentCell )) {
+				dx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
+				dy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
+				distSqr = dx*dx+dy*dy;
+				if (distSqr<closestDistScreenSqr) {
+					closestDistScreenSqr = distSqr;
+				}
+				distSqr += (parentCell->getCostSoFar()*(parentCell->getCostSoFar()*COST_TO_DISTANCE_FACTOR_SQR))*closest.pathCostMultiplier;
+				if (distSqr < closestDistanceSqr) {
+					closesetCell = parentCell;
+					closestDistanceSqr = distSqr;
+				}
+			}
+		}
+
+		dx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
+		dy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
+		distSqr = dx*dx+dy*dy;
+		// If we are 2x farther than the closest location already found, don't continue.
+		if (distSqr > closestDistScreenSqr*4) {
+			Bool skip = false;
+			if (!closest.gotHierarchicalPath) {
+				skip = true;
+			}
+			if (count>2000) {
+				skip = true;
+			}
+			if (closestDistScreenSqr < 10*10*PATHFIND_CELL_SIZE_F) {
+				skip = true;
+			}
+			if (skip) {
+				continue;
+			}
+		}
+		// If we haven't already found the goal cell, continue examining. [8/25/2003]
+		if (!foundGoal) {
+			// Check to see if we can change layers in this cell.
+			checkChangeLayers(parentCell);
+			count += examineNeighboringCellsWithMovement(parentCell, goalCell, movement, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
+		}
+	}
+
+ return {parentCell,closesetCell,count,false};
+}
+
 Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 																	Coord3D *rawTo, Bool blocked, Real pathCostMultiplier, Bool moveAllies)
 {
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
+#endif
 	//CRCDEBUG_LOG(("Pathfinder::findClosestPath()"));
 #ifdef DEBUG_LOGGING
 	Int startTimeMS = ::GetTickCount();
@@ -9659,13 +9761,17 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 
 	if (!obj) return nullptr;
 
-	Bool canPathThroughUnits = false;
-	if (obj && obj->getAIUpdateInterface()) {
-		canPathThroughUnits = obj->getAIUpdateInterface()->canPathThroughUnits();
-	}
+ const ObjectID initialIgnored=searchState().m_ignoreObstacleID;
 	Bool centerInCell;
 	Int radius;
 	getRadiusAndCenter(obj, radius, centerInCell);
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ const auto settings=captureMovementSettings(obj,locomotorSet,radius,centerInCell,isHuman);
+ const PathfindMovementInput movement={obj,locomotorSet,&settings};
+#else
+ const PathfindMovementInput movement={obj,locomotorSet,nullptr};
+#endif
+
 
 	Coord3D adjustTo = *rawTo;
 	Coord3D *to = &adjustTo;
@@ -9746,8 +9852,15 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		searchState().m_isTunneling = true; // We can't move from our current location.  So relax the constraints.
 	}
 
-	Bool gotHierarchicalPath = false;
-	if (searchState().m_isTunneling) {
+ Bool gotHierarchicalPath = false;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // Predict against an unrestricted corridor and provisional hierarchy availability. Both are checked after real main-thread preparation.
+ if (m_parallelBatch && m_parallelBatch->preparing && m_parallelBatch->preparing->closest) {
+  gotHierarchicalPath=!searchState().m_isTunneling;
+  m_zoneManager.setAllPassable();
+ } else
+#endif
+ if (searchState().m_isTunneling) {
 		m_zoneManager.setAllPassable(); // can't optimize.
 	}	else {
 		m_zoneManager.clearPassableFlags();
@@ -9763,6 +9876,11 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	beginSearchState();
 #endif
 	const Bool startedStuck = searchState().m_isTunneling;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ PathfindSearchContext::AdmissionScope admission(activePathfindSearchContext(),PathfindSearchContext::permanentRecordsInUse());
+#endif
+ const PathfindClosestSettings closest={blocked,pathCostMultiplier,moveAllies,goalOnObstacle,startedStuck,gotHierarchicalPath,initialIgnored};
+
 
 	ICoord2D pos2d;
 	worldToCell(to, &pos2d);
@@ -9783,10 +9901,6 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	}
 	parentCell->startPathfind(goalCell);
 
-	PathfindCell *closesetCell = nullptr;
-	Real closestDistanceSqr = FLT_MAX;
-	Real closestDistScreenSqr = FLT_MAX;
-
 	// initialize "open" list to contain start cell
 #if RETAIL_COMPATIBLE_PATHFINDING
 	if (!s_useFixedPathfinding) {
@@ -9801,37 +9915,24 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 
 	// "closed" list is initially empty
 	searchState().m_closedList.reset();
-	Int count = 0;
-	//
-	// Continue search until "open" list is empty, or
-	// until goal is found.
-	//
-	Bool foundGoal = false;
-	while( !searchState().m_openList.empty() )
-	{
-		Real dx;
-		Real dy;
-		Real distSqr;
-		// take head cell off of open list - it has lowest estimated total path cost
-		parentCell = searchState().m_openList.getHead();
-		parentCell->removeFromOpenList(searchState().m_openList);
-
-		if (parentCell == goalCell)
-		{
-			// success - found a path to the goal
-			if (!goalOnObstacle) {
-				// See if the goal is a valid destination.  If not, accept closest cell.
-				if (closesetCell!=nullptr && !canPathThroughUnits && !checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(), parentCell->getLayer(), radius, centerInCell)) {
-#if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
-					break;
-#else
-					foundGoal = true;
-					// Continue processing the open list to find a possibly closer cell. jba. [8/25/2003]
-					continue;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (m_parallelBatch && m_parallelBatch->preparing && m_parallelBatch->preparing->closest) {
+  auto& job=*m_parallelBatch->preparing;
+  job.start=parentCell;job.goal=goalCell;job.startIndex=startCellNdx;job.settings=settings;job.closestSettings=closest;
+  job.ignored=searchState().m_ignoreObstacleID;job.tunneling=searchState().m_isTunneling;
+  job.permanent=PathfindSearchContext::permanentRecordsInUse();
+#if RETAIL_COMPATIBLE_PATHFINDING
+  job.fixed=s_useFixedPathfinding;
 #endif
-				}
-			}
-
+  job.captured=!settings.dozer && (!settings.crusher || TheNameKeyGenerator->findExistingNameKey("SquishCollide")!=NAMEKEY_INVALID);
+  return nullptr;
+ }
+#endif
+ auto finish=[&](const ClosestSearchOutcome& outcome)->Path* {
+  parentCell=outcome.lastCell;
+  PathfindCell* closesetCell=outcome.closestCell;
+  const Int count=outcome.cellsExamined;
+  if (outcome.reachedGoal) {
 			Bool show = TheGlobalData->m_debugAI;
 #ifdef INTENSE_DEBUG
 			Int count = 0;
@@ -9871,51 +9972,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			}
 
 			return path;
-		}
-		// put parent cell onto closed list - its evaluation is finished
-		parentCell->putOnClosedList( searchState().m_closedList );
-		if (!searchState().m_isTunneling && checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(), parentCell->getLayer(), radius, centerInCell)) {
-			if (!startedStuck || validMovementPosition( isCrusher, locomotorSet.getValidSurfaces(), parentCell )) {
-				dx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
-				dy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
-				distSqr = dx*dx+dy*dy;
-				if (distSqr<closestDistScreenSqr) {
-					closestDistScreenSqr = distSqr;
-				}
-				distSqr += (parentCell->getCostSoFar()*(parentCell->getCostSoFar()*COST_TO_DISTANCE_FACTOR_SQR))*pathCostMultiplier;
-				if (distSqr < closestDistanceSqr) {
-					closesetCell = parentCell;
-					closestDistanceSqr = distSqr;
-				}
-			}
-		}
-
-		dx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
-		dy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
-		distSqr = dx*dx+dy*dy;
-		// If we are 2x farther than the closest location already found, don't continue.
-		if (distSqr > closestDistScreenSqr*4) {
-			Bool skip = false;
-			if (!gotHierarchicalPath) {
-				skip = true;
-			}
-			if (count>2000) {
-				skip = true;
-			}
-			if (closestDistScreenSqr < 10*10*PATHFIND_CELL_SIZE_F) {
-				skip = true;
-			}
-			if (skip) {
-				continue;
-			}
-		}
-		// If we haven't already found the goal cell, continue examining. [8/25/2003]
-		if (!foundGoal) {
-			// Check to see if we can change layers in this cell.
-			checkChangeLayers(parentCell);
-			count += examineNeighboringCells(parentCell, goalCell, locomotorSet, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
-		}
-	}
+  }
 
 	if (closesetCell) {
 		// success - found a path to near the goal
@@ -9992,6 +10049,28 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		goalCell->releaseSearchInfo();
 	}
 	return nullptr;
+ };
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (contextBinding.canTransfer()) {
+  if (auto* job=takeParallelResult(obj,locomotorSet,*from,*rawTo,nullptr,0,parentCell,goalCell,startCellNdx,settings,&closest)) {
+   auto& current=activePathfindSearchContext();
+   current.m_openList.reset();current.m_closedList.reset();current.beginSearch();
+   job->context.m_corridor=current.m_corridor;job->context.m_cumulativeCellsAllocated=0;
+   Path* path;
+   {
+    SearchContextBinding<PathfindSearchContext> resultBinding(job->context);
+    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->permanent);
+    path=finish(job->closestOutcome);
+   }
+   current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
+   current.m_isTunneling=job->context.m_isTunneling;current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
+   current.m_corridor.swap(job->context.m_corridor);
+   ++m_parallelBatch->accepted;++m_parallelBatch->closestAccepted;
+   return path;
+  }
+ }
+#endif
+ return finish(runClosestSearchLoop(parentCell,goalCell,movement,isHuman,centerInCell,radius,startCellNdx,closest));
 }
 
 

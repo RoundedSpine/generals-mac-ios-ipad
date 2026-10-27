@@ -99,6 +99,10 @@ replay. No device frame-time, memory or universal replay claim is made.
 
 ## Remaining comparison
 
+The follow-up [closest-search stage](IOS_PARALLEL_CLOSEST_SEARCH_2026-10-27.md)
+adds queued approach predictions. The paragraph below describes the scope at the
+escape stage; ordinary-failure fallback remains serial after that follow-up.
+
 Reimagined also predicts closest-destination requests and the closest fallback
 after ordinary failure. Those remain serial here, as do attack/patch requests,
 hierarchical preparation and path optimization. The reference's larger batches,

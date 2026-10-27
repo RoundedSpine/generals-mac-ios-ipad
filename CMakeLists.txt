@@ -83,7 +83,7 @@ if(GENERALS_EXCLUSIVE_PATH_WORKER)
     add_compile_definitions(GENERALS_EXCLUSIVE_PATH_WORKER=1)
 endif()
 # GeneralsX @feature Codex 27/10/2026 Two independent contexts with main participation and validated ordered reuse.
-option(GENERALS_PARALLEL_PATH_BATCH "Enable experimental two-request parallel ordinary and escape searches" OFF)
+option(GENERALS_PARALLEL_PATH_BATCH "Enable experimental two-request parallel ordinary, escape and closest searches" OFF)
 if(GENERALS_PARALLEL_PATH_BATCH)
     if(NOT GENERALS_EXCLUSIVE_PATH_WORKER OR NOT GENERALS_OCCUPANCY_WORKER)
         message(FATAL_ERROR "GENERALS_PARALLEL_PATH_BATCH requires both path worker options")
