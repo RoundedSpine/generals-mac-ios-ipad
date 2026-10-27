@@ -13,10 +13,21 @@ public:
  void reset() {m_entries.beginGeneration();m_order.clear();m_overflow=false;}
  bool contains(Key key) {return m_overflow || m_entries.find(key)!=nullptr;}
  void observe(Key key, const Value& value) {
-  if(m_overflow || m_entries.find(key)) return;
+  observeWith(key,[&value]{return value;});
+ }
+ // GeneralsX @performance Codex 27/10/2026 Acquire once and capture only a new key's first value; duplicates keep the original dependency.
+ template<class Reader> void observeWith(Key key, Reader read) {
+  if(m_overflow) return;
+  const auto previousSize=m_entries.size();
   auto* entry=m_entries.acquire(key);
   if(!entry){m_overflow=true;return;}
-  entry->key=key;entry->value=value;m_order.push_back(entry);
+  if(m_entries.size()==previousSize) return;
+  try {
+   entry->key=key;entry->value=read();m_order.push_back(entry);
+  } catch (...) {
+   // A partial dependency must never appear valid if the caller handles an allocation/reader failure.
+   m_overflow=true;throw;
+  }
  }
  bool overflow() const {return m_overflow;}
  template<class Reader> bool matches(Reader read) const {

@@ -295,6 +295,50 @@ int main(){BoundedSearchReads<Key,int,4> reads;std::array<int,6> values{{3,5,7,9
 }
 """)
 
+    def test_lazy_dependencies_probe_once_and_keep_first_read_at_capacity(self):
+        run_cpp(r"""
+#include "boundedsearchreads.h"
+#include <cassert>
+#include <vector>
+struct Key {int n;bool operator==(Key b)const{return n==b.n;}};
+int hashCalls=0;
+namespace std{template<>struct hash<Key>{size_t operator()(Key)const{++hashCalls;return 0;}};}
+int main(){BoundedSearchReads<Key,int,4> reads;int snapshots=0;
+ for(int i=0;i<4;++i){hashCalls=0;reads.observeWith({i},[&]{++snapshots;return i+10;});assert(hashCalls==1);}
+ assert(snapshots==4);
+ // Even a full table must recognize an existing key without recapturing a changed value.
+ for(int i=0;i<4;++i){hashCalls=0;reads.observeWith({i},[&]{++snapshots;return -1;});assert(hashCalls==1);}
+ assert(snapshots==4&&!reads.overflow());
+ reads.observe({1},99);
+ std::vector<int> order;
+ assert(reads.matches([&](Key k){order.push_back(k.n);return k.n+10;}));
+ assert((order==std::vector<int>{0,1,2,3}));
+ assert(!reads.matches([](Key k){return k.n==2?99:k.n+10;}));
+ hashCalls=0;reads.observeWith({4},[&]{++snapshots;return 14;});
+ assert(hashCalls==1&&snapshots==4&&reads.overflow());
+ hashCalls=0;reads.observeWith({0},[&]{++snapshots;return 10;});assert(hashCalls==0&&snapshots==4);
+ assert(!reads.matches([](Key k){return k.n+10;}));
+ reads.reset();assert(!reads.overflow());
+ reads.observeWith({0},[&]{++snapshots;return 75;});assert(snapshots==5);
+ assert(reads.matches([](Key){return 75;}));
+}
+""")
+
+    def test_failed_dependency_capture_rejects_reuse_until_reset(self):
+        run_cpp(r"""
+#include "boundedsearchreads.h"
+#include <cassert>
+#include <stdexcept>
+int main(){BoundedSearchReads<int,int,4> reads;bool caught=false;
+ reads.observe(1,12);
+ try{reads.observeWith(2,[]{throw std::runtime_error("capture failed");return 23;});}
+ catch(const std::runtime_error&){caught=true;}
+ assert(caught&&reads.overflow());int validations=0;
+ assert(!reads.matches([&](int){++validations;return 0;})&&validations==0);
+ reads.reset();reads.observeWith(2,[]{return 23;});assert(reads.matches([](int){return 23;}));
+}
+""")
+
     def test_pair_executor_joins_both_exceptions_and_preserves_environment(self):
         run_cpp(r"""
 #include "exclusivesearchworker.h"

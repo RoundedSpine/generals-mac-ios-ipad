@@ -4363,7 +4363,8 @@ void observeParallelCorridor(std::size_t block, Bool passable) {
 }
 void Pathfinder::observeParallelCell(PathfindCell* cell) {
  if (auto* reads=activePathfindSearchContext().m_parallelReads)
-  if (!reads->cells.contains(cell)) reads->cells.observe(cell,cell->permanentSearchValues());
+  // GeneralsX @performance Codex 27/10/2026 Avoid contains/find/acquire reprobes while keeping lazy first-read snapshots.
+  reads->cells.observeWith(cell,[cell]{return cell->permanentSearchValues();});
 }
 Real Pathfinder::searchGroundHeight(Real x, Real y) {
  const Real height=TheTerrainLogic->getGroundHeight(x,y);
