@@ -131,6 +131,26 @@ trace/hash and every search limit. Other small tests retain their default guard;
 this changes neither engine execution nor the test's expected output. A new SDK
 attempt is required after this test-harness adjustment.
 
+## Successful Intel SDK build
+
+Code `f2088ba6d` passed all 172 Mac QA tests, the full workflow race-check stage
+(including all 54 batch cases), actual iOS SDK compilation, ARM64/device-platform
+and rpath packaging checks, unsigned artifact upload and dependency-cache save in
+[run 40538565784](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40538565784).
+Artifact: `GeneralsXZH-iOS-unsigned`, including the entitlement sidecar and no
+retail game assets. The build host is Intel; the verified output is ARM64 iOS.
+The larger serial TSan workload completed with its 45-second test guard and
+unchanged golden trace. The runner pool change and test guard resolved the two
+observed CI blockers without altering engine execution or search limits.
+
+The dependency/configuration and native build stages completed successfully on
+the Intel host. Cache save passed, but no future build-duration guarantee follows
+from that result. Device early-fallback use, movement, lifecycle, memory and
+performance validation remain pending. The supplied prior-build logs still have
+zero fallback counters; the user explicitly authorized continuing without that
+specific device scenario. No full-world race freedom, replay equivalence or
+measured iOS speedup is established by the successful build.
+
 The latest supplied log identifies the prior `b97fa0c` binary, reaches the score
 screen and exits 0. It records 280 pairs/560 primary completions: 546 accepted
 (97.5%), 14 rejected, none unused, and 280 worker tasks. Parallel safe, closest and
