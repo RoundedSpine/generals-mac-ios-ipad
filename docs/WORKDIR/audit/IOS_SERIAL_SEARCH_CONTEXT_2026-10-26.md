@@ -394,3 +394,12 @@ captures admission after pending cleanup, restoring both policies on exit. This
 implements scratch selection and a frozen admission input, not an engine-wide
 world freeze, complete stale-path validation or gameplay worker dispatch. Retail
 repair still changes permanent map state and calls UI/audio on the main thread.
+
+
+## Follow-up: actual ordinary-loop execution — 2026-10-27
+
+See [the exclusive worker audit](IOS_EXCLUSIVE_SEARCH_WORKER_2026-10-27.md).
+The experiment now enables a real ordinary A* loop worker with exclusive context
+handoff and caller-side preparation/finalization. Earlier statements that all
+gameplay searches remain serial are historical. This is not parallel prefetch:
+main waits, other search modes remain serial, and no throughput gain is claimed.

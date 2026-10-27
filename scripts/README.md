@@ -347,3 +347,10 @@ context selection on real cell/list/corridor code, nested/exception restoration,
 rejected simultaneous ownership and captured admission during independent permanent
 pool churn. Add `--tsan` for ThreadSanitizer. This tests scratch isolation, not the
 thread safety of live object, terrain, recovery or engine UI calls.
+
+Run `python3 scripts/qa/test_exclusive_search_worker.py` (or add `--tsan`) to
+compare actual ordinary-loop worker dispatch with serial routes/expansions, check
+caller-only path construction/cleanup, context handoff, rounding mode, exception
+restoration, reuse and read-only name-key lookup. The experiment enables
+`GENERALS_EXCLUSIVE_PATH_WORKER`; it defaults OFF elsewhere. This is exclusive
+ordinary-search execution, not parallel prefetch or a measured throughput gain.

@@ -95,6 +95,8 @@ public:
 
 	/// Given a string, convert into a unique integer key.
 	NameKeyType nameToKey(const char* name);
+	// GeneralsX @feature Codex 27/10/2026 Probe worker prerequisites without changing name-key allocation order.
+	NameKeyType findExistingNameKey(const char* name) const;
 	NameKeyType nameToLowercaseKey(const char *name);
 
 	// given a key, return the name. this is almost never needed,

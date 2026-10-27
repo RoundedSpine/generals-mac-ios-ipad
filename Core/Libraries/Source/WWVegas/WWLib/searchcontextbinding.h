@@ -28,5 +28,19 @@ public:
  }
  SearchContextBinding(const SearchContextBinding&)=delete;
  SearchContextBinding& operator=(const SearchContextBinding&)=delete;
+ bool canTransfer() const { return m_acquired && !m_previous && selected()==&m_context; }
+ template<class Function>
+ void transferAndWait(Function function) {
+  if(!canTransfer()) throw std::logic_error("Only a top-level search binding can transfer ownership");
+  selected()=m_previous;m_context.m_ownership.owner.store(nullptr);m_acquired=false;
+  auto restore=[&]{
+   void* expected=nullptr;
+   if(!m_context.m_ownership.owner.compare_exchange_strong(expected,SearchContextOwnership::threadIdentity()))
+    throw std::logic_error("Search handoff returned before context ownership was released");
+   m_acquired=true;selected()=&m_context;
+  };
+  try {function();}catch(...){restore();throw;}
+  restore();
+ }
  static Context* current() { return selected(); }
 };

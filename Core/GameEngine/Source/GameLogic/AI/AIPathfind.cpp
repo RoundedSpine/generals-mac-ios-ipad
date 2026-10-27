@@ -29,10 +29,14 @@
 
 #include "GameLogic/AIPathfind.h"
 #include "ownedpathroute.h"
-#ifdef GENERALS_ZH_OCCUPANCY_WORKER
+#if defined(GENERALS_ZH_OCCUPANCY_WORKER) || defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER)
 #include "occupancyvalidationworker.h"
 #endif
 
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+#include "exclusivesearchworker.h"
+#include "Common/NameKeyGenerator.h"
+#endif
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
 #include "Common/CRCDebug.h"
@@ -4265,9 +4269,20 @@ struct PathfindOccupancyValidation {
 	PathOccupancy::ValidationWorker worker;
 	~PathfindOccupancyValidation() {
 		worker.stop();
-		fprintf(stderr, "[PATH_OCCUPANCY_WORKER] stopped validated=%llu mismatches=%llu skipped=%llu; gameplay_searches=serial\n",
+		fprintf(stderr, "[PATH_OCCUPANCY_WORKER] stopped validated=%llu mismatches=%llu skipped=%llu; occupancy_worker=shadow\n",
 			static_cast<unsigned long long>(worker.validated()), static_cast<unsigned long long>(worker.mismatches()),
 			static_cast<unsigned long long>(worker.skipped()));
+	}
+};
+#endif
+
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+// GeneralsX @feature Codex 27/10/2026 Ordinary fine-search loop worker; no queued results survive the exclusive call.
+struct PathfindExclusiveWorker {
+	ExclusiveSearchWorker worker;
+	unsigned long long searches = 0;
+	~PathfindExclusiveWorker() {
+		fprintf(stderr, "[PATH_SEARCH_WORKER] stopped searches=%llu mode=exclusive\n", searches);
 	}
 };
 #endif
@@ -4276,6 +4291,10 @@ struct PathfindOccupancyValidation {
 
 Pathfinder::Pathfinder() :m_map(nullptr)
 {
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+	m_exclusiveWorker = nullptr;
+	m_exclusiveWorkerUnavailable = false;
+#endif
 #ifdef GENERALS_ZH_OCCUPANCY_WORKER
 	m_occupancyValidation = nullptr;
 	m_occupancyValidationUnavailable = false;
@@ -4288,6 +4307,10 @@ Pathfinder::Pathfinder() :m_map(nullptr)
 
 Pathfinder::~Pathfinder()
 {
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+	delete m_exclusiveWorker;
+	m_exclusiveWorker = nullptr;
+#endif
 #ifdef GENERALS_ZH_OCCUPANCY_WORKER
 	delete m_occupancyValidation;
 	m_occupancyValidation = nullptr;
@@ -5388,16 +5411,21 @@ static_assert(static_cast<int>(PathfindCell::CELL_OBSTACLE) == PathOccupancy::Ob
 PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, const PathOccupancy::Input& input)
 {
 	LiveOccupancyReader live = {this, obj};
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+	// The real search worker reads a frozen world; never start/sample a shadow worker from it.
+	if (ExclusiveSearchWorker::onWorker()) return PathOccupancy::evaluate(input, live);
+#endif
+
 	if (!m_occupancySamplesRemaining || m_occupancyValidationUnavailable || PathOccupancy::validationPaused().load())
 		return PathOccupancy::evaluate(input, live);
 	--m_occupancySamplesRemaining;
 	if (!m_occupancyValidation) {
 		try {
 			m_occupancyValidation = new PathfindOccupancyValidation;
-			fprintf(stderr, "[PATH_OCCUPANCY_WORKER] enabled mode=shadow queries_per_queue_call=4 queue_capacity=1 event_capacity=512; gameplay_searches=serial\n");
+			fprintf(stderr, "[PATH_OCCUPANCY_WORKER] enabled mode=shadow queries_per_queue_call=4 queue_capacity=1 event_capacity=512; occupancy_worker=shadow\n");
 		} catch (const std::system_error& error) {
 			m_occupancyValidationUnavailable = true;
-			fprintf(stderr, "[PATH_OCCUPANCY_WORKER] unavailable: %s; gameplay_searches=serial\n", error.what());
+			fprintf(stderr, "[PATH_OCCUPANCY_WORKER] unavailable: %s; occupancy_worker=shadow\n", error.what());
 			return PathOccupancy::evaluate(input, live);
 		}
 	}
@@ -6968,6 +6996,38 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
  * Find a short, valid path between given locations.
  * Uses A* algorithm.
  */
+// GeneralsX @refactor Codex 27/10/2026 Search execution returns a phase-local completion; caller owns engine path creation and cleanup.
+Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell *parentCell, PathfindCell *goalCell,
+		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
+		const ICoord2D& startCellNdx, const Object *obj)
+{
+	Int cellCount = 0;
+
+	//
+	// Continue search until "open" list is empty, or
+	// until goal is found.
+	//
+	while( !searchState().m_openList.empty() )
+	{
+		// take head cell off of open list - it has lowest estimated total path cost
+		parentCell = searchState().m_openList.getHead();
+		parentCell->removeFromOpenList(searchState().m_openList);
+
+		if (parentCell == goalCell) return {parentCell, cellCount, true};
+
+		// put parent cell onto closed list - its evaluation is finished
+		parentCell->putOnClosedList( searchState().m_closedList );
+
+		// Check to see if we can change layers in this cell.
+		checkChangeLayers(parentCell);
+
+		cellCount += examineNeighboringCellsWithMovement(parentCell, goalCell, movement, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
+
+	}
+
+	return {parentCell, cellCount, false};
+}
+
 Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
@@ -7141,66 +7201,85 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	// "closed" list is initially empty
 	searchState().m_closedList.reset();
 
-	Int cellCount = 0;
-
-	//
-	// Continue search until "open" list is empty, or
-	// until goal is found.
-	//
-	while( !searchState().m_openList.empty() )
-	{
-		// take head cell off of open list - it has lowest estimated total path cost
-		parentCell = searchState().m_openList.getHead();
-		parentCell->removeFromOpenList(searchState().m_openList);
-
-		if (parentCell == goalCell)
-		{
-			// success - found a path to the goal
-			Bool show = TheGlobalData->m_debugAI==AI_DEBUG_PATHS;
-#ifdef INTENSE_DEBUG
-			DEBUG_LOG(("internal find path SUCCESS..."));
-			Int count = 0;
-			if (cellCount>1000 && obj) {
-				show = true;
-				DEBUG_LOG(("cells %d obj %s %x from (%f,%f) to(%f, %f)", count, obj->getTemplate()->getName().str(), obj, from->x, from->y, to->x, to->y));
-#ifdef STATE_MACHINE_DEBUG
-				if( obj->getAIUpdateInterface() )
-				{
-					DEBUG_LOG(("State %s",  obj->getAIUpdateInterface()->getCurrentStateName().str()));
-				}
-#endif
-				TheScriptEngine->AppendDebugMessage("Big path", false);
+	// GeneralsX @refactor Codex 27/10/2026 Keep completion processing inside the caller's context/admission phase.
+	OrdinarySearchOutcome outcome{parentCell, 0, false};
+	Bool dispatched = false;
+#if defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER) && !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
+	// GeneralsX @feature Codex 27/10/2026 Freeze the simulation by waiting here; only the loop owns scratch off-thread.
+	if (!m_exclusiveWorkerUnavailable && contextBinding.canTransfer() && TheGlobalData->m_debugAI == 0 &&
+		!PathOccupancy::validationPaused().load() &&
+		(!settings.crusher || TheNameKeyGenerator->findExistingNameKey("SquishCollide") != NAMEKEY_INVALID)) {
+		if (!m_exclusiveWorker) {
+			try {
+				m_exclusiveWorker = new PathfindExclusiveWorker;
+				fprintf(stderr, "[PATH_SEARCH_WORKER] enabled mode=exclusive scope=ordinary_fine main_waits=true\n");
+			} catch (const std::system_error& error) {
+				m_exclusiveWorkerUnavailable = true;
+				fprintf(stderr, "[PATH_SEARCH_WORKER] unavailable: %s; using caller\n", error.what());
 			}
-#endif
-			if (show)
-				debugShowSearch(true);
-
-			searchState().m_isTunneling = false;
-			// construct and return path
-			Path *path =  buildActualPath( obj, movement.getValidSurfaces(), from, goalCell, centerInCell, false );
-#if RETAIL_COMPATIBLE_PATHFINDING
-			if (!s_useFixedPathfinding)
-			{
-				parentCell->releaseSearchInfo();
-				cleanOpenAndClosedLists();
-			}
-			else
-#endif
-			{
-				cleanOpenAndClosedLists();
-				parentCell->releaseSearchInfo();
-			}
-			return path;
 		}
+		if (m_exclusiveWorker) {
+			auto& context = activePathfindSearchContext();
+			try {
+				contextBinding.transferAndWait([&] {
+					m_exclusiveWorker->worker.run([&] {
+						SearchContextBinding<PathfindSearchContext> workerBinding(context);
+						outcome = runOrdinarySearchLoop(parentCell, goalCell, movement,
+							isHuman, centerInCell, radius, startCellNdx, obj);
+					});
+				});
+				++m_exclusiveWorker->searches;
+				dispatched = true;
+			} catch (const ExclusiveSearchWorker::EnvironmentError& error) {
+				// Environment setup fails before the loop starts, so a caller retry has no duplicate search effects.
+				m_exclusiveWorkerUnavailable = true;
+				fprintf(stderr, "[PATH_SEARCH_WORKER] unavailable: %s; using caller\n", error.what());
+			}
+		}
+	}
+#endif
+	if (!dispatched) outcome = runOrdinarySearchLoop(parentCell, goalCell, movement,
+		isHuman, centerInCell, radius, startCellNdx, obj);
+	parentCell = outcome.lastCell;
+	const Int cellCount = outcome.cellsExamined;
+	if (outcome.found)
+	{
+		// success - found a path to the goal
+		Bool show = TheGlobalData->m_debugAI==AI_DEBUG_PATHS;
+#ifdef INTENSE_DEBUG
+		DEBUG_LOG(("internal find path SUCCESS..."));
+		Int count = 0;
+		if (cellCount>1000 && obj) {
+			show = true;
+			DEBUG_LOG(("cells %d obj %s %x from (%f,%f) to(%f, %f)", count, obj->getTemplate()->getName().str(), obj, from->x, from->y, to->x, to->y));
+#ifdef STATE_MACHINE_DEBUG
+			if( obj->getAIUpdateInterface() )
+			{
+				DEBUG_LOG(("State %s",  obj->getAIUpdateInterface()->getCurrentStateName().str()));
+			}
+#endif
+			TheScriptEngine->AppendDebugMessage("Big path", false);
+		}
+#endif
+		if (show)
+			debugShowSearch(true);
 
-		// put parent cell onto closed list - its evaluation is finished
-		parentCell->putOnClosedList( searchState().m_closedList );
-
-		// Check to see if we can change layers in this cell.
-		checkChangeLayers(parentCell);
-
-		cellCount += examineNeighboringCellsWithMovement(parentCell, goalCell, movement, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
-
+		searchState().m_isTunneling = false;
+		// construct and return path
+		Path *path =  buildActualPath( obj, movement.getValidSurfaces(), from, goalCell, centerInCell, false );
+#if RETAIL_COMPATIBLE_PATHFINDING
+		if (!s_useFixedPathfinding)
+		{
+			parentCell->releaseSearchInfo();
+			cleanOpenAndClosedLists();
+		}
+		else
+#endif
+		{
+			cleanOpenAndClosedLists();
+			parentCell->releaseSearchInfo();
+		}
+		return path;
 	}
 
 	// failure - goal cannot be reached

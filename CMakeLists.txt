@@ -57,6 +57,15 @@ if(GENERALS_OCCUPANCY_WORKER)
     add_compile_definitions(GENERALS_OCCUPANCY_WORKER=1)
 endif()
 
+# GeneralsX @build Codex 27/10/2026 Real ordinary-search loop handoff with frozen simulation and caller-side finalization.
+option(GENERALS_EXCLUSIVE_PATH_WORKER "Run ordinary fine-search loops on one exclusive worker" OFF)
+if(GENERALS_EXCLUSIVE_PATH_WORKER)
+    if(NOT GENERALS_SEARCH_CONTEXT)
+        message(FATAL_ERROR "GENERALS_EXCLUSIVE_PATH_WORKER requires GENERALS_SEARCH_CONTEXT")
+    endif()
+    add_compile_definitions(GENERALS_EXCLUSIVE_PATH_WORKER=1)
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Gate the verified-quad conversion for experimental device testing.
 option(GENERALS_QUAD_LISTS "Convert verified screen/water quads to triangle lists" OFF)
 if(GENERALS_QUAD_LISTS)

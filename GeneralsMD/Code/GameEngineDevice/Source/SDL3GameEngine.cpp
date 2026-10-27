@@ -54,7 +54,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if defined(GENERALS_OCCUPANCY_WORKER) && defined(GENERALS_SEARCH_CONTEXT)
+#if (defined(GENERALS_OCCUPANCY_WORKER) || defined(GENERALS_EXCLUSIVE_PATH_WORKER)) && defined(GENERALS_SEARCH_CONTEXT)
 #include "occupancyvalidationworker.h"
 #endif
 #if defined(__APPLE__)
@@ -121,7 +121,7 @@ static bool SDLCALL iosLifecycleWatcher(void *userdata, SDL_Event *event)
 		default:
 			break;
 	}
-#if defined(GENERALS_OCCUPANCY_WORKER) && defined(GENERALS_SEARCH_CONTEXT)
+#if (defined(GENERALS_OCCUPANCY_WORKER) || defined(GENERALS_EXCLUSIVE_PATH_WORKER)) && defined(GENERALS_SEARCH_CONTEXT)
 	// GeneralsX @feature Codex 27/10/2026 Pause query sampling and invalidate historical validations across iOS transitions.
 	PathOccupancy::setValidationPaused(iosShouldPauseRendering());
 #endif

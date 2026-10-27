@@ -179,6 +179,16 @@ NameKeyType NameKeyGenerator::nameToLowercaseKey(const AsciiString& name)
 }
 
 //-------------------------------------------------------------------------------------------------
+// GeneralsX @feature Codex 27/10/2026 Read-only probe; missing keys must be initialized by normal serial gameplay.
+NameKeyType NameKeyGenerator::findExistingNameKey(const char* name) const
+{
+	const UnsignedInt hash = calcHashForString(name) % SOCKET_COUNT;
+	for (const Bucket *bucket = m_sockets[hash]; bucket; bucket = bucket->m_nextInSocket) {
+		if (strcmp(name, bucket->m_nameString.str()) == 0) return bucket->m_key;
+	}
+	return NAMEKEY_INVALID;
+}
+
 NameKeyType NameKeyGenerator::nameToKey(const char* name)
 {
 	const UnsignedInt hash = calcHashForString(name) % SOCKET_COUNT;

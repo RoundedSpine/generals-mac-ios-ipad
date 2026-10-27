@@ -2,6 +2,7 @@
 """Compile ordinary fine search and expansion against captured/live movement settings."""
 # GeneralsX @refactor Codex 27/10/2026 Compare route ordering and capture ownership without enabling workers.
 import unittest
+import hashlib
 from compiled_harness import ROOT, run_cpp
 
 SOURCE = (ROOT / 'Core/GameEngine/Source/GameLogic/AI/AIPathfind.cpp').read_text()
@@ -18,9 +19,11 @@ def block(text, marker):
     return text[a:text.index('\n};', a) + 3]
 
 
-def fixture(enabled):
-    return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + r'''
+def fixture(enabled, worker=False):
+    return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + ('#define GENERALS_ZH_EXCLUSIVE_PATH_WORKER 1\n' if worker else '') + r'''
 #include "searchcontextbinding.h"
+#include "exclusivesearchworker.h"
+#include "occupancyvalidationworker.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -61,7 +64,11 @@ struct PathfindSearchContext{
  struct AdmissionScope{AdmissionScope(PathfindSearchContext&,unsigned){}};
  static unsigned permanentRecordsInUse(){return 0;}
 };
-PathfindSearchContext&activePathfindSearchContext(){static PathfindSearchContext context;return context;}
+PathfindSearchContext&activePathfindSearchContext(){if(auto*p=SearchContextBinding<PathfindSearchContext>::current())return *p;static PathfindSearchContext context;return context;}
+constexpr int NAMEKEY_INVALID=0;
+struct NameKeyGenerator{bool present=true;int findExistingNameKey(const char*)const{assert(!ExclusiveSearchWorker::onWorker());return present?1:0;}}nameKeys;
+NameKeyGenerator*TheNameKeyGenerator=&nameKeys;
+''' + block(SOURCE, 'struct PathfindExclusiveWorker {') + r'''
 struct PathfindMovementInput;
 struct PathfindCell;
 struct CellList{
@@ -97,6 +104,11 @@ struct Logic{Object obstacle;Object*findObjectByID(int){return &obstacle;}}logic
 struct Path{std::vector<ICoord2D>route;bool blocked=false;};
 struct Pathfinder{
  enum{NO_ATTACK=0};
+ std::thread::id owner=std::this_thread::get_id();int workerExpansions=0;
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+ PathfindExclusiveWorker*m_exclusiveWorker=nullptr;bool m_exclusiveWorkerUnavailable=false;
+ ~Pathfinder(){delete m_exclusiveWorker;}
+#endif
  bool m_isMapReady=true,mutate=false,mutated=false,allied=false;
  Object*sourceObject=nullptr;LocomotorSet*sourceLoco=nullptr;
  struct{ICoord2D lo{0,0},hi{11,11};}m_logicalExtent;
@@ -126,11 +138,11 @@ struct Pathfinder{
   if(o)++o->worldReads;i.allyFixedCount=allied?1:0;return true;
  }
  bool checkCellOutsideExtents(ICoord2D&c){return c.x<0||c.x>11||c.y<0||c.y>11;}
- void checkChangeLayers(PathfindCell*c){expansion.push_back({c->x,c->y});}
- void cleanOpenAndClosedLists(){for(auto&row:cells)for(auto&c:row)c.open=c.closed=false;state.m_openList.reset();state.m_closedList.reset();}
+ void checkChangeLayers(PathfindCell*c){if(ExclusiveSearchWorker::onWorker())++workerExpansions;expansion.push_back({c->x,c->y});}
+ void cleanOpenAndClosedLists(){assert(std::this_thread::get_id()==owner);for(auto&row:cells)for(auto&c:row)c.open=c.closed=false;state.m_openList.reset();state.m_closedList.reset();}
  void debugShowSearch(bool){}
  Path*buildActualPath(const Object*,int,const Coord3D*,PathfindCell*c,bool,bool){
-  for(;c;c=c->parent){result.route.push_back({c->x,c->y});result.blocked|=c->blocked;}return &result;
+  assert(std::this_thread::get_id()==owner);for(;c;c=c->parent){result.route.push_back({c->x,c->y});result.blocked|=c->blocked;}return &result;
  }
  using Callback=int(*)(Pathfinder*,PathfindCell*,PathfindCell*,int,int,void*);
  void iterateCellsAlongLine(ICoord2D start,ICoord2D end,int layer,Callback cb,void* data){
@@ -143,6 +155,8 @@ struct Pathfinder{
  static int examineCellsCallback(Pathfinder*,PathfindCell*,PathfindCell*,int,int,void*);
  int examineNeighboringCells(PathfindCell*,PathfindCell*,const LocomotorSet&,bool,bool,int,const ICoord2D&,const Object*,int);
  int examineNeighboringCellsWithMovement(PathfindCell*,PathfindCell*,const PathfindMovementInput&,bool,bool,int,const ICoord2D&,const Object*,int);
+ struct OrdinarySearchOutcome{PathfindCell*lastCell;int cellsExamined;bool found;};
+ OrdinarySearchOutcome runOrdinarySearchLoop(PathfindCell*,PathfindCell*,const PathfindMovementInput&,bool,bool,int,const ICoord2D&,const Object*);
  Path*internalFindPath(Object*,const LocomotorSet&,const Coord3D*,const Coord3D*);
 };
 ''' + block(SOURCE, 'struct PathfindMovementInput {') + '\n' + block(SOURCE, 'struct ExamineCellsStruct\n') + '\n' + '\n'.join(function(m) for m in [
@@ -151,6 +165,7 @@ struct Pathfinder{
         '/*static*/ Int Pathfinder::examineCellsCallback(',
         'Int Pathfinder::examineNeighboringCells(',
         'Int Pathfinder::examineNeighboringCellsWithMovement(',
+        'Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(',
         'Path *Pathfinder::internalFindPath('])
 
 
@@ -190,7 +205,11 @@ int main(){for(bool fixed:{false,true})for(int scenario=0;scenario<24;++scenario
  assert(o.worldReads>0);assert(p.state.m_openList.empty()&&p.state.m_closedList.empty());
 }}
 '''
-        self.assertEqual(run_cpp(fixture(False) + main).stdout, run_cpp(fixture(True) + main).stdout)
+        baseline = run_cpp(fixture(False) + main).stdout
+        self.assertEqual(baseline, run_cpp(fixture(True) + main).stdout)
+        # Recorded from f7ecc97a3 before extracting the loop, covering routes, expansion order and ally flags.
+        self.assertEqual(hashlib.sha256(baseline.encode()).hexdigest(),
+                         '99d67461e25d0f3326d2fef0bb7464955cef1141285f550b2174c2cb6970c621')
 
     def test_captured_search_uses_policy_after_live_scalar_mutation(self):
         run_cpp(fixture(True) + r'''

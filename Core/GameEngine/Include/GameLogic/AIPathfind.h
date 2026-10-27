@@ -45,6 +45,10 @@
 namespace PathOccupancy { struct Input; struct Result; }
 struct PathfindOccupancyValidation;
 #endif
+#if defined(GENERALS_EXCLUSIVE_PATH_WORKER) && defined(GENERALS_ZH_SEARCH_CONTEXT)
+#define GENERALS_ZH_EXCLUSIVE_PATH_WORKER 1
+struct PathfindExclusiveWorker;
+#endif
 //#include "GameLogic/Locomotor.h"	// no, do not include this, unless you like long recompiles
 #include "GameLogic/LocomotorSet.h"
 #include "GameLogic/GameLogic.h"
@@ -998,6 +1002,19 @@ protected:
 #endif
 	Path *findPathWithInputs(Object *obj, const LocomotorSet& locomotorSet,
 		const Coord3D *from, const Coord3D *to);
+	// GeneralsX @refactor Codex 27/10/2026 Pointers remain valid only while the selected search phase owns its records.
+	struct OrdinarySearchOutcome {
+		PathfindCell *lastCell;
+		Int cellsExamined;
+		Bool found;
+	};
+#ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
+	PathfindExclusiveWorker *m_exclusiveWorker;
+	Bool m_exclusiveWorkerUnavailable;
+#endif
+	OrdinarySearchOutcome runOrdinarySearchLoop(PathfindCell *parentCell, PathfindCell *goalCell,
+		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
+		const ICoord2D& startCellNdx, const Object *obj);
 	virtual Path *internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to);	///< Find a short, valid path between given locations
 	Path *findHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);
 	Path *findClosestHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);
