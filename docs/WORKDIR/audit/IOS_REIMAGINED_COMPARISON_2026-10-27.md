@@ -1,5 +1,9 @@
 # Current implementation versus Reimagined — 2026-10-27
 
+> Historical review of f705c4a15, before actual parallel search integration.
+> For the current implementation and latest device evidence, see
+> [the 28 October comparison](IOS_REIMAGINED_COMPARISON_2026-10-28.md).
+
 ## Scope and conclusion
 
 Reviewed experiment/ios-mod-testing at f705c4a15 against the supplied
