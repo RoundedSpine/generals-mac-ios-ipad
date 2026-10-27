@@ -4328,6 +4328,10 @@ struct PathfindParallelReads {
 struct PathfindParallelJob {
  PathfindSearchContext context;
  PathfindParallelReads reads;
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Each task writes only its own metric; main merges after the join.
+ PathSearchTiming::Metric kernelTime;
+#endif
  Object *obj = nullptr;
  const LocomotorSet *locomotor = nullptr;
  ObjectID id = INVALID_ID, ignored = INVALID_ID;
@@ -4351,6 +4355,9 @@ struct PathfindParallelJob {
  Bool fallbackResult=false, fallbackAllowed=false, earlyFallback=false;
  void reset() {
   if (fallback) fallback->reset();
+#ifdef GENERALS_ZH_PATH_TIMING
+  kernelTime={};
+#endif
   fallbackResult=fallbackAllowed=earlyFallback=false;
   outcome={nullptr,0,false};
   context.m_parallelReads=nullptr;
@@ -4428,6 +4435,10 @@ Pathfinder::Pathfinder() :m_map(nullptr)
 
 Pathfinder::~Pathfinder()
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Report bounded session aggregates after all synchronous queue calls have returned.
+ m_pathTiming.report(stderr);
+#endif
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  clearParallelBatch();delete m_parallelBatch;m_parallelBatch=nullptr;
 #endif
@@ -5592,6 +5603,10 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
  const PathfindClosestSettings* closest)
 {
  if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Include failed validation and candidate lookup, without logging individual requests.
+ PathSearchTiming::Scope validationTiming(&m_pathTiming[PathSearchTiming::Validation]);
+#endif
  for (auto& primary:m_parallelBatch->jobs) {
   // GeneralsX @feature Codex 27/10/2026 Fallback requires accepted ordinary failure or confirmation from the actual AI no-path branch.
   auto& job=closest && !primary.closest && primary.fallbackAllowed && primary.fallback ? *primary.fallback : primary;
@@ -6690,6 +6705,10 @@ void Pathfinder::processPathfindQueue()
 	if (!m_isMapReady) {
 		return;
 	}
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Measure pending queue calls, including zone recalculation and request callbacks.
+ PathSearchTiming::Scope queueTiming(m_queuePRHead!=m_queuePRTail?&m_pathTiming[PathSearchTiming::Queue]:nullptr);
+#endif
 #ifdef DEBUG_QPF
 #ifdef DEBUG_LOGGING
 	Int startTimeMS = ::GetTickCount();
@@ -7223,6 +7242,10 @@ Int Pathfinder::examineNeighboringCellsWithMovement(PathfindCell *parentCell, Pa
 void Pathfinder::prepareParallelBatch()
 {
 #if !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Time attempted preparation, including ineligible pairs, but stop before dispatch.
+ PathSearchTiming::Scope preparationTiming(&m_pathTiming[PathSearchTiming::Preparation]);
+#endif
  if (m_exclusiveWorkerUnavailable || TheGlobalData->m_debugAI!=0 || PathOccupancy::validationPaused().load() ||
      SearchContextBinding<PathfindSearchContext>::current()) return;
  if (m_parallelBatch && m_parallelBatch->active) {
@@ -7304,10 +7327,16 @@ void Pathfinder::prepareParallelBatch()
    }
   }
   const auto hasWork=[](const PathfindParallelJob& job){return job.captured || (job.fallback && job.fallback->captured);};
+#ifdef GENERALS_ZH_PATH_TIMING
+  preparationTiming.stop();
+#endif
   if (hasWork(batch.jobs[0]) && hasWork(batch.jobs[1])) {
    auto execute=[&](Int index) {
     auto& job=batch.jobs[index];
     if (job.captured) {
+#ifdef GENERALS_ZH_PATH_TIMING
+     PathSearchTiming::Scope kernelTiming(&job.kernelTime);
+#endif
      SearchContextBinding<PathfindSearchContext> binding(job.context);
      PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
      const PathfindMovementInput movement={job.obj,*job.locomotor,&job.settings};
@@ -7319,6 +7348,9 @@ void Pathfinder::prepareParallelBatch()
     }
     if (!job.safe && !job.closest && !job.outcome.found && job.fallback && job.fallback->captured) {
      auto& fallback=*job.fallback;
+#ifdef GENERALS_ZH_PATH_TIMING
+     PathSearchTiming::Scope kernelTiming(&fallback.kernelTime);
+#endif
      SearchContextBinding<PathfindSearchContext> fallbackBinding(fallback.context);
      PathfindSearchContext::AdmissionScope fallbackAdmission(fallback.context,fallback.permanent);
      const PathfindMovementInput fallbackMovement={fallback.obj,*fallback.locomotor,&fallback.settings};
@@ -7328,7 +7360,19 @@ void Pathfinder::prepareParallelBatch()
     }
    };
    // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
-   m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
+   {
+#ifdef GENERALS_ZH_PATH_TIMING
+    PathSearchTiming::Scope pairTiming(&m_pathTiming[PathSearchTiming::Pair]);
+#endif
+    m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
+   }
+#ifdef GENERALS_ZH_PATH_TIMING
+   for(Int i=0;i<2;++i) {
+    auto& metric=m_pathTiming[i?PathSearchTiming::WorkerKernel:PathSearchTiming::CallerKernel];
+    metric.merge(batch.jobs[i].kernelTime);
+    if(batch.jobs[i].fallback) metric.merge(batch.jobs[i].fallback->kernelTime);
+   }
+#endif
    for (auto& job:batch.jobs) {
     job.ready=job.captured;
     if(job.ready) {++batch.primarySearches;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;}
@@ -7385,7 +7429,14 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
 	}
 
 	m_zoneManager.clearPassableFlags();
-	Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+	Path *hPat;
+ {
+#ifdef GENERALS_ZH_PATH_TIMING
+  // GeneralsX @feature Codex 28/10/2026 Hierarchy remains a separately measured main-thread phase.
+  PathSearchTiming::Scope hierarchyTiming(&m_pathTiming[PathSearchTiming::Hierarchy]);
+#endif
+  hPat=findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+ }
 	if (hPat) {
 		deleteInstance(hPat);
 	}	else {
@@ -7408,6 +7459,10 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell
 		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
 		const ICoord2D& startCellNdx, const Object *obj)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Speculative kernels have private metrics; only caller fallback writes the serial aggregate.
+ PathSearchTiming::Scope serialTiming(searchState().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+#endif
 	Int cellCount = 0;
 
 	//
@@ -7438,6 +7493,10 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell
 Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Time authoritative fine preparation, including early exits, separately from speculative preparation.
+ PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::CallerPreparation]);
+#endif
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
 	// GeneralsX @refactor Codex 27/10/2026 Serial phase owns its selected scratch until route construction and cleanup finish.
 	SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
@@ -7624,7 +7683,14 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
  }
 #endif
  // GeneralsX @refactor Codex 27/10/2026 Finalize only in the consuming request, after both searches have joined.
+#ifdef GENERALS_ZH_PATH_TIMING
+ callerPreparationTiming.stop();
+#endif
  auto finish = [&](OrdinarySearchOutcome outcome) -> Path* {
+#ifdef GENERALS_ZH_PATH_TIMING
+  // GeneralsX @feature Codex 28/10/2026 Include main-thread Path construction, optimization and original cleanup on success or failure.
+  PathSearchTiming::Scope finalizationTiming(&m_pathTiming[PathSearchTiming::Finalization]);
+#endif
 	parentCell = outcome.lastCell;
 	const Int cellCount = outcome.cellsExamined;
 	if (outcome.found)
@@ -9740,6 +9806,10 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
  const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
  const ICoord2D& startCellNdx, const PathfindClosestSettings& closest)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Caller closest recomputation has separate timing from speculative tasks.
+ PathSearchTiming::Scope serialTiming(searchState().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+#endif
  const Object* obj=movement.obj;
  PathfindCell* closesetCell=nullptr;
  Real closestDistanceSqr=FLT_MAX;
@@ -9824,6 +9894,9 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 																	Coord3D *rawTo, Bool blocked, Real pathCostMultiplier, Bool moveAllies)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::CallerPreparation]);
+#endif
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
  SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
 #endif
@@ -9950,7 +10023,13 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		m_zoneManager.setAllPassable(); // can't optimize.
 	}	else {
 		m_zoneManager.clearPassableFlags();
-		Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+		Path *hPat;
+  {
+#ifdef GENERALS_ZH_PATH_TIMING
+   PathSearchTiming::Scope hierarchyTiming(&m_pathTiming[PathSearchTiming::Hierarchy]);
+#endif
+   hPat=findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+  }
 		if (hPat) {
 			deleteInstance(hPat);
 			gotHierarchicalPath = true;
@@ -10014,7 +10093,13 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
   return nullptr;
  }
 #endif
+#ifdef GENERALS_ZH_PATH_TIMING
+ callerPreparationTiming.stop();
+#endif
  auto finish=[&](const ClosestSearchOutcome& outcome)->Path* {
+#ifdef GENERALS_ZH_PATH_TIMING
+  PathSearchTiming::Scope finalizationTiming(&m_pathTiming[PathSearchTiming::Finalization]);
+#endif
   parentCell=outcome.lastCell;
   PathfindCell* closesetCell=outcome.closestCell;
   const Int count=outcome.cellsExamined;
@@ -12256,6 +12341,10 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
  const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius, const ICoord2D& startIndex,
  const Coord3D& repulsor1, const Coord3D& repulsor2, Real repulsorRadius)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Time caller escape recomputation only when no private speculative read log is installed.
+ PathSearchTiming::Scope serialTiming(searchState().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+#endif
  const Real repulsorDistSqr=repulsorRadius*repulsorRadius;
  const Int MAX_CELLS=MAX_SAFE_PATH_CELL_COUNT;
  Int cellCount=0;
@@ -12291,6 +12380,9 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
 Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet,
   const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::CallerPreparation]);
+#endif
  if (m_isMapReady == false) return nullptr;
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
  SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
@@ -12338,7 +12430,13 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
   return nullptr;
  }
 #endif
+#ifdef GENERALS_ZH_PATH_TIMING
+ callerPreparationTiming.stop();
+#endif
  auto finish=[&](const OrdinarySearchOutcome& outcome)->Path* {
+#ifdef GENERALS_ZH_PATH_TIMING
+  PathSearchTiming::Scope finalizationTiming(&m_pathTiming[PathSearchTiming::Finalization]);
+#endif
   parentCell=outcome.lastCell;
   const Int cellCount=outcome.cellsExamined;
   if (outcome.found) {

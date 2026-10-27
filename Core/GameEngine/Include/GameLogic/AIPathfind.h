@@ -58,6 +58,11 @@ struct PathfindParallelJob;
 struct PathfindParallelReads;
 void observeParallelCorridor(std::size_t block, Bool passable);
 #endif
+// GeneralsX @feature Codex 28/10/2026 Timing storage exists only in the optional experimental profiler.
+#if defined(GENERALS_PATH_TIMING) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)
+#define GENERALS_ZH_PATH_TIMING 1
+#include "pathsearchtiming.h"
+#endif
 //#include "GameLogic/Locomotor.h"	// no, do not include this, unless you like long recompiles
 #include "GameLogic/LocomotorSet.h"
 #include "GameLogic/GameLogic.h"
@@ -1062,6 +1067,9 @@ protected:
  friend struct PathfindParallelBatch;
  friend struct PathfindParallelJob;
  PathfindParallelBatch* m_parallelBatch;
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming m_pathTiming;
+#endif
  unsigned long long m_parallelWorldEpoch;
  void prepareParallelBatch();
  void clearParallelBatch();

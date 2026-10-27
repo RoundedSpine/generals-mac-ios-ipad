@@ -364,13 +364,16 @@ independently of the live occupancy adapter. Temporary route collection needs
 `GENERALS_OWNED_PATH_ROUTE=ON`; normal finalization constructs nodes directly.
 
 Run `python3 scripts/qa/test_parallel_path_batch.py` (or add `--tsan`) to compile
-the production two-request dispatcher, independent cell/record contexts, ordinary
-search, queue loop and ordered consumption with controlled world services. Checks
+the production two-request dispatcher, independent cell/record contexts, ordinary,
+safe and closest searches, queue loop and ordered consumption with controlled world services. Checks
 actual overlap, route/budget equivalence, dependency invalidation, predictor state,
 single-use queue positions, bounded overflow, lifecycle, FP environment and joined
 exceptions. `GENERALS_PARALLEL_PATH_BATCH` defaults OFF; the experiment enables
-it for eligible ordinary requests only. This adds real parallel reuse, with
-unmeasured device performance and remaining special-search integration.
+eligible ordinary, safe, approach/closest and conditional closest-fallback work.
+The fixture enables optional `GENERALS_PATH_TIMING` by default and tests timing
+ON/OFF route/target/budget equivalence, private post-join metrics, rejection/unused
+work and timer accounting. This adds real parallel reuse; device performance
+remains unmeasured and special requests retain caller execution.
 
 Run `python3 scripts/qa/test_openal_stream.py` for production streaming regressions
 covering persistent no-context errors, pause/resume, failed queries, EOF and refill.

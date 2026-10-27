@@ -91,6 +91,15 @@ if(GENERALS_PARALLEL_PATH_BATCH)
     add_compile_definitions(GENERALS_PARALLEL_PATH_BATCH=1)
 endif()
 
+# GeneralsX @build Codex 28/10/2026 Optional phase-boundary timing for the experimental search batch.
+option(GENERALS_PATH_TIMING "Summarize experimental pathfinding phase wall times at shutdown" OFF)
+if(GENERALS_PATH_TIMING)
+    if(NOT GENERALS_PARALLEL_PATH_BATCH)
+        message(FATAL_ERROR "GENERALS_PATH_TIMING requires GENERALS_PARALLEL_PATH_BATCH")
+    endif()
+    add_compile_definitions(GENERALS_PATH_TIMING=1)
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Gate the verified-quad conversion for experimental device testing.
 option(GENERALS_QUAD_LISTS "Convert verified screen/water quads to triangle lists" OFF)
 if(GENERALS_QUAD_LISTS)

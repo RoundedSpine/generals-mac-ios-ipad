@@ -69,6 +69,15 @@ Test in windowed mode at 1440p resolution.
 
 ## Logging Diagnostics Recipe
 
+The experimental iOS workflow enables the compile-time `GENERALS_PATH_TIMING`
+option (default OFF elsewhere; requires `GENERALS_PARALLEL_PATH_BATCH`). This is
+not a command-line flag. On normal game exit it writes `[PATH_TIMING]` session
+summaries to `generals-stderr.log` for queue, preparation, parallel tasks,
+validation, hierarchy and finalization. Times are overlapping wall-clock totals,
+not CPU times or FPS measurements. No debug launch flag is needed. Crashes or
+force-quitting may prevent the shutdown summary. See
+[the phase definitions and test instructions](../WORKDIR/audit/IOS_PATH_TIMING_2026-10-28.md).
+
 Use this when investigating runtime behavior (example: skirmish startup flow):
 
 ```bash

@@ -10,9 +10,9 @@ from test_path_movement_inputs import function, block, HEADER, SOURCE
 from test_search_record_pool import engine_fixture
 
 
-def fixture():
+def fixture(timing=True):
     # Use production cells, lists, record pool and TLS ownership, rather than sharing fake cell scratch.
-    source = '#define GENERALS_ZH_PARALLEL_PATH_BATCH 1\nstruct PathfindParallelReads;\n' + engine_fixture()
+    source = ('#define GENERALS_ZH_PATH_TIMING 1\n' if timing else '') + '#include "pathsearchtiming.h"\n#define GENERALS_ZH_PARALLEL_PATH_BATCH 1\nstruct PathfindParallelReads;\n' + engine_fixture()
     source += r'''
 #include "exclusivesearchworker.h"
 #include "occupancyvalidationworker.h"
@@ -93,6 +93,9 @@ struct Pathfinder {
  struct ClosestSearchOutcome {PathfindCell*lastCell;PathfindCell*closestCell;Int cellsExamined;Bool reachedGoal;};
  PathfindExclusiveWorker* m_exclusiveWorker=nullptr;bool m_exclusiveWorkerUnavailable=false;
  PathfindParallelBatch* m_parallelBatch=nullptr;unsigned long long m_parallelWorldEpoch=0;
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming m_pathTiming;
+#endif
  std::thread::id owner=std::this_thread::get_id();bool m_isMapReady=true;
  IRegion2D m_extent,m_logicalExtent;
  PathfindCell storage[12][12];PathfindCell* m_map[12];
@@ -333,6 +336,106 @@ def large_closest_case():
 
 
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @feature Codex 28/10/2026 Exercise real timed dispatch/consumption, including work discarded or recomputed.
+    def test_phase_timing_scopes_thresholds_and_exception_cleanup(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <cassert>
+#include <stdexcept>
+#include <string>
+struct Clock {
+ using duration=std::chrono::nanoseconds;
+ using time_point=std::chrono::time_point<Clock>;
+ static long long ticks;static int reads;
+ static time_point now(){++reads;return time_point(duration(ticks));}
+};
+long long Clock::ticks=0;int Clock::reads=0;
+int main(){using Timing=BasicPathSearchTiming<Clock>;Timing timing;
+ {Timing::Scope ignored(nullptr);ignored.stop();}assert(Clock::reads==0);
+ auto&metric=timing[Timing::Preparation];
+ {Timing::Scope scope(&metric);Clock::ticks=1000000;scope.stop();Clock::ticks=9000000;scope.stop();}
+ assert(Clock::reads==2&&metric.calls==1&&metric.totalNanoseconds==1000000);
+ assert(metric.thresholds[0]==1&&metric.thresholds[1]==0);
+ try{Timing::Scope scope(&metric);Clock::ticks+=5000000;throw std::runtime_error("test");}catch(const std::runtime_error&){}
+ assert(metric.calls==2&&metric.totalNanoseconds==6000000&&metric.maxNanoseconds==5000000);
+ Timing::Metric task;task.record(500000000);metric.merge(task);
+ assert(metric.calls==3&&metric.totalNanoseconds==506000000&&metric.maxNanoseconds==500000000);
+ const std::array<std::uint64_t,6>expected{{3,2,1,1,1,1}};assert(metric.thresholds==expected);
+ FILE*output=std::tmpfile();assert(output);timing.report(output);std::rewind(output);
+ std::string report;char buffer[1024];while(std::fgets(buffer,sizeof buffer,output))report+=buffer;std::fclose(output);
+ assert(report.find("totals=overlapping")!=std::string::npos);
+ assert(report.find("phase=prepare calls=3 total_ms=506.000 max_ms=500.000")!=std::string::npos);
+ assert(report.find("phase=worker_kernel calls=0")!=std::string::npos);
+}
+''')
+
+    def test_timing_enabled_and_disabled_preserve_routes_targets_and_budgets(self):
+        main=r'''
+int main(){for(bool fixed:{false,true})for(int kind=0;kind<4;++kind)for(int seed=0;seed<4;++seed){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;
+ w.a.ai.safe=w.b.ai.safe=kind==1;w.a.ai.closest=w.b.ai.closest=kind==2;
+ if(kind==3)p.quickAllowed=false;
+ for(int x=3;x<7;++x)for(int y=4;y<7;++y)if((x*31+y*17+seed*13)%11==0)p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();
+ for(Object*o:{&w.a,&w.b}){p.m_queuePRHead=o->id-1;Path*path;
+  if(kind==3){assert(!p.findPathWithInputs(o,o->ai.locomotor,&o->ai.from,&o->ai.to));
+   p.confirmParallelFallback(o,o->ai.locomotor,o->ai.from,o->ai.to,false);
+   path=p.findClosestPath(o,o->ai.locomotor,&o->ai.from,&o->ai.to,false,0,false);
+  }else path=w.consume(p,*o);
+  std::printf("%d:%d:%d:%d:%d ",fixed,kind,seed,int(o->id),path!=nullptr);
+  if(path)for(auto c:path->route)std::printf("%d,%d;",c.x,c.y);
+  std::printf(" T %.3f %.3f B %d\n",o->ai.to.x,o->ai.to.y,mainPathfindSearchContext().m_cumulativeCellsAllocated);
+ }
+ p.clearParallelBatch();auto&b=*p.m_parallelBatch;
+ std::printf("P %llu %llu %llu F %llu %llu %llu\n",b.accepted,b.rejected,b.unused,b.fallbackAccepted,b.fallbackRejected,b.fallbackUnused);
+}}
+'''
+        self.assertEqual(run_cpp(fixture(True)+main).stdout,
+                         run_cpp(fixture(False)+main).stdout)
+
+    def test_phase_timing_merges_after_join_and_counts_rejected_and_unused_work(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();using T=PathSearchTiming;
+ auto&t=p.m_pathTiming;assert(t[T::Pair].calls==1&&t[T::WorkerKernel].calls==1&&t[T::CallerKernel].calls==1);
+ assert(t[T::SerialKernel].calls==0&&t[T::Finalization].calls==0&&t[T::CallerPreparation].calls==0);
+ auto workerNs=t[T::WorkerKernel].totalNanoseconds;
+ p.prepareParallelBatch();assert(t[T::Pair].calls==1&&t[T::WorkerKernel].totalNanoseconds==workerNs);
+ ++p.m_parallelWorldEpoch;assert(w.consume(p,w.a));
+ assert(p.m_parallelBatch->rejected==1&&t[T::Validation].calls==1&&t[T::SerialKernel].calls==1);
+ assert(t[T::Finalization].calls==1&&t[T::CallerPreparation].calls==1);
+ p.clearParallelBatch();assert(p.m_parallelBatch->unused==1);
+ assert(t[T::WorkerKernel].calls==1&&t[T::CallerKernel].calls==1);
+}
+''')
+
+    def test_early_fallback_timing_uses_private_kernel_metrics(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.fallbackRendezvous=true;
+ p.prepareParallelBatch();using T=PathSearchTiming;auto&t=p.m_pathTiming;
+ assert(t[T::Pair].calls==1&&t[T::CallerKernel].calls==1&&t[T::WorkerKernel].calls==1);
+ assert(t[T::SerialKernel].calls==0);
+ for(auto&job:p.m_parallelBatch->jobs){assert(job.kernelTime.calls==0&&job.fallback->kernelTime.calls==1);}
+ p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+ assert(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));
+ assert(t[T::Validation].calls==1&&t[T::Finalization].calls==1&&t[T::Hierarchy].calls==1);
+ assert(t[T::CallerPreparation].calls==1&&t[T::SerialKernel].calls==0);
+ p.clearParallelBatch();assert(p.m_parallelBatch->fallbackAccepted==1&&p.m_parallelBatch->fallbackUnused==1);
+}
+''')
+
+    def test_queue_timing_empty_calls_and_early_preparation_exit(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;p.m_queuePRTail=0;p.processPathfindQueue();using T=PathSearchTiming;
+ auto&t=p.m_pathTiming;assert(t[T::Queue].calls==0);
+ w.queue(p);p.m_queuePRTail=2;p.processPathfindQueue();
+ assert(t[T::Queue].calls==1&&t[T::Pair].calls==1&&t[T::Finalization].calls==2);
+ p.processPathfindQueue();assert(t[T::Queue].calls==1);
+ const auto before=t[T::CallerPreparation].calls;Coord3D zero{};
+ assert(!p.internalFindPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&zero));
+ assert(t[T::CallerPreparation].calls==before+1&&t[T::Finalization].calls==2);
+}
+''')
+
     def test_early_fallback_routes_targets_and_budgets_match_serial(self):
         run_cpp(fixture()+r'''
 int main(){for(bool fixed:{false,true})for(int reason=0;reason<3;++reason)for(int mask=1;mask<4;++mask)for(int seed=0;seed<8;++seed){

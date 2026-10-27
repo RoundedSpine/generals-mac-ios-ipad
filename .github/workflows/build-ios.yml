@@ -129,6 +129,7 @@ jobs:
             -DGENERALS_OWNED_PATH_ROUTE=OFF \
             -DGENERALS_OCCUPANCY_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_PARALLEL_PATH_BATCH=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_PATH_TIMING=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_EXCLUSIVE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_QUAD_LISTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_STRIP_DIAGNOSTICS=OFF \
