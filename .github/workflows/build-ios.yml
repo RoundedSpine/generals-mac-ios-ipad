@@ -17,8 +17,8 @@ concurrency:
 
 jobs:
   build-ipa:
-    # GeneralsX @build Codex 27/10/2026 Use the Intel host pool after ARM64 provisioning failures; the iOS preset still targets arm64.
-    runs-on: macos-15-intel
+    # GeneralsX @build Codex 28/10/2026 Restore the macOS 15 ARM64 host pool at the user's request.
+    runs-on: macos-15
     timeout-minutes: 180
     defaults:
       run:

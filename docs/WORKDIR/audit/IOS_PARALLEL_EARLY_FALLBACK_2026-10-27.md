@@ -1,5 +1,35 @@
 # Closest fallback after early ordinary rejection — 27 October 2026
 
+## Device evidence — 28 October 2026
+
+The supplied `generals-stderr.log` identifies revision `~f2088ba`, the verified
+Intel-hosted IPA. It records 968 pairs and 1,909 primary completions: 1,788
+accepted (93.7%), 119 rejected and two unused. There are 27 fallback-only tasks;
+1,909 + 27 == 2 * 968, and 1,788 + 119 + 2 == 1,909.
+
+Conditional closest fallback records 27 searches, 16 accepted, 11 rejected and
+none unused. All 27 are early fallbacks (`early_searches=27`,
+`early_accepted=16`). This is the first supplied device evidence that the early
+fallback executes and is reused after caller confirmation and result validation.
+Accepted completions may include no-path outcomes; the log does not establish
+16 successful routes or which phase ran on the worker rather than the caller.
+The 11 rejected completions take the caller path; aggregate counters do not
+identify the exact failed validation checks.
+
+Separately queued closest searches record 26 completions/four accepted. Safe
+searches remain zero. The log reaches the score screen and exits with code zero.
+No primitive-restart warning or fatal report appears. Three FFmpeg WAV
+`ignoring wrong sample_count 1152` warnings are present. Both CSF label sets
+finish parsing, and the DXVK cache directory is marked reused; this is not a
+measured pipeline-cache hit rate. Movement quality, lifecycle stress, replay
+equivalence, device memory use and frame times remain unverified by this log.
+
+After reviewing this log, the user requested restoring the workflow host label
+to `macos-15` (ARM64). This changes no game code, search limits, tests or iOS
+target settings. The successful Intel artifact remains the verified build until
+the new ARM64 workflow completes; prior ARM64 provisioning failures are recorded
+below.
+
 ## Scope and behavior
 
 Continue the Reimagined-inspired conditional closest-search implementation without
