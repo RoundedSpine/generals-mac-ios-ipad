@@ -193,6 +193,17 @@ BINARIES=("${APP}/${APP_NAME}" "${APP}/Frameworks/"*.dylib "${APP}/Frameworks/Mo
 for binary in "${BINARIES[@]}"; do
     [[ -f "${binary}" ]] || continue
     lipo "${binary}" -verify_arch arm64
+    # GeneralsX @bugfix Codex 27/10/2026 macOS and iOS Simulator also use arm64; verify the device platform as well.
+    platforms="$(otool -arch arm64 -l "${binary}" | awk '
+        $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build_version = 1; next }
+        build_version && $1 == "platform" { print $2; build_version = 0 }
+        $1 == "cmd" && $2 == "LC_VERSION_MIN_IPHONEOS" { print "2" }
+        $1 == "cmd" && $2 == "LC_VERSION_MIN_MACOSX" { print "1" }
+    ')"
+    if [[ -z "${platforms}" ]] || [[ -n "$(printf '%s\n' "${platforms}" | awk '$1 != "2" && $1 != "IOS" { print }')" ]]; then
+        echo "ERROR: expected iOS device platform in ${binary}; found '${platforms:-unknown}'" >&2
+        exit 1
+    fi
     if [[ "${binary}" == *.dylib ]]; then
         install_name_tool -id "@rpath/$(basename "${binary}")" "${binary}"
     fi
@@ -214,7 +225,14 @@ for binary in "${BINARIES[@]}"; do
 done
 
 # Point the executable's rpath at the embedded frameworks
-install_name_tool -add_rpath "@executable_path/Frameworks" "${APP}/${APP_NAME}" 2>/dev/null || true
+# GeneralsX @bugfix Codex 27/10/2026 Skip an existing rpath explicitly; do not hide real install_name_tool failures.
+rpaths="$(otool -arch arm64 -l "${APP}/${APP_NAME}" | awk '
+    $1 == "cmd" && $2 == "LC_RPATH" { rpath = 1; next }
+    rpath && $1 == "path" { print $2; rpath = 0 }
+')"
+if ! printf '%s\n' "${rpaths}" | grep -Fxq '@executable_path/Frameworks'; then
+    install_name_tool -add_rpath "@executable_path/Frameworks" "${APP}/${APP_NAME}"
+fi
 
 # GeneralsX @build Codex 24/10/2026 Produce a credential-free IPA for external sideload signing.
 if [[ "${UNSIGNED}" == "1" ]]; then

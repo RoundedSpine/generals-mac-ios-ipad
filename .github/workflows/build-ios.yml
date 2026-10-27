@@ -36,7 +36,7 @@ jobs:
           import subprocess
           import sys
           tests = [
-              "test_ios_packaging.py", "test_startup_primitives.py",
+              "test_ios_packaging.py", "test_startup_primitives.py", "test_csf_reserved_header.py", "test_openal_stream.py",
               "test_unix_worker.py", "test_ios_native_callbacks.py",
               "test_pathfind_heap.py", "test_hierarchical_edges.py",
               "test_strip_diagnostics.py", "test_quad_lists.py",
@@ -112,13 +112,15 @@ jobs:
         run: |
           set -euo pipefail
           cmake --preset ios-vulkan \
-            -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && github.run_id || '' }} \
+            -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && 'quad-lists-v1' || '' }} \
             -DGENERALS_SEARCH_CONTEXT=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_OCCUPANCY_SHADOW_VALIDATION=OFF \
+            -DGENERALS_OWNED_PATH_ROUTE=OFF \
             -DGENERALS_OCCUPANCY_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_PARALLEL_PATH_BATCH=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_EXCLUSIVE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_QUAD_LISTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_STRIP_DIAGNOSTICS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_STRIP_DIAGNOSTICS=OFF \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
             -DVulkan_INCLUDE_DIR="$GX_MVK_ROOT/include" \

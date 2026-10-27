@@ -98,7 +98,8 @@ enum { INFINITE_LOOP_COUNT = 1000000 };
 
 static inline bool sourceIsStopped(ALuint source)
 {
-	ALenum state;
+	// GeneralsX @bugfix Codex 27/10/2026 Failed queries leave the output untouched; retain playback records for retry.
+	ALint state = AL_INITIAL;
 	alGetSourcei(source, AL_SOURCE_STATE, &state);
 	
 	return (state == AL_STOPPED);

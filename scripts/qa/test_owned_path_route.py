@@ -12,10 +12,10 @@ def function(marker):
     return SOURCE[start:SOURCE.index('\n}', start) + 2]
 
 
-def fixture(enabled, retail=1):
+def fixture(enabled, retail=1, owned=True):
     collector = function('void Pathfinder::prependRouteCells(')
     collector = collector.replace('{\n', '{\n CollectionScope collection;\n', 1)
-    return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + f'#define RETAIL_COMPATIBLE_PATHFINDING {retail}\n' + r'''
+    return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + ('#define GENERALS_OWNED_PATH_ROUTE 1\n' if owned and enabled else '') + f'#define RETAIL_COMPATIBLE_PATHFINDING {retail}\n' + r'''
 #include "ownedpathroute.h"
 #include <cassert>
 #include <sstream>
@@ -68,7 +68,7 @@ std::string exercise(int scenario,bool fixed){
  if(scenario==7)cells[2].type=PathfindCell::CELL_CLIFF;
  if(scenario==8)cells[0].info=false;
  allocations=0;finder.prependCells(&path,&from,goal,true);
-#ifdef GENERALS_ZH_SEARCH_CONTEXT
+#if defined(GENERALS_ZH_SEARCH_CONTEXT) && defined(GENERALS_OWNED_PATH_ROUTE)
  assert(!allocationsDuringWalk);
 #else
  assert(allocationsDuringWalk);
@@ -105,6 +105,11 @@ class OwnedPathRouteTest(unittest.TestCase):
 
     def test_without_retail_support(self):
         self.compare(0,True,range(8))
+
+    def test_default_context_finalizes_directly_with_identical_route(self):
+        def routes(enabled):
+            return run_cpp(fixture(enabled,owned=False)+'\n#include <iostream>\nint main(){for(int i=0;i<9;++i)std::cout<<exercise(i,false)<<"\\n";}').stdout
+        self.assertEqual(routes(False),routes(True))
 
     def test_owned_values_survive_source_changes_and_apply_is_deferred(self):
         run_cpp(fixture(True) + r'''

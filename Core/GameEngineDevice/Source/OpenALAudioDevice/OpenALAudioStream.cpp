@@ -1,6 +1,7 @@
 #include "OpenALAudioDevice/OpenALAudioStream.h"
 #include "OpenALAudioDevice/OpenALAudioManager.h"
 #include <AL/alext.h>
+#include <AL/alc.h>
 
 OpenALAudioStream::OpenALAudioStream()
 { 
@@ -37,17 +38,19 @@ OpenALAudioStream::~OpenALAudioStream()
 
 bool OpenALAudioStream::bufferData(uint8_t *data, size_t data_size, ALenum format, int samplerate)
 {
+    // GeneralsX @bugfix Codex 27/10/2026 A null context returns an error indefinitely; never spin clearing it.
+    if (!m_source || !alcGetCurrentContext()) return false;
+    (void)alGetError(); // OpenAL holds one sticky error, cleared by one read.
     DEBUG_LOG(("Buffering %zu bytes of data (samplerate: %i, format: %i)\n", data_size, samplerate, format));
-    ALint num_queued;
+    ALint num_queued = 0;
     alGetSourcei(m_source, AL_BUFFERS_QUEUED, &num_queued);
-    if (num_queued >= AL_STREAM_BUFFER_COUNT) {
+    if (alGetError() != AL_NO_ERROR || num_queued >= AL_STREAM_BUFFER_COUNT) {
         DEBUG_LOG(("Having too many buffers already queued: %i", num_queued));
         return false;
     }
 
     ALuint &current_buffer = m_buffers[m_current_buffer_idx];
     // GeneralsX @bugfix BenderAI 22/04/2026 Detect and reject invalid OpenAL buffer/queue operations.
-    while (alGetError() != AL_NO_ERROR) {}
     alBufferData(current_buffer, format, data, data_size, samplerate);
     ALenum err = alGetError();
     if (err != AL_NO_ERROR) {
@@ -74,10 +77,13 @@ bool OpenALAudioStream::bufferData(uint8_t *data, size_t data_size, ALenum forma
 
 void OpenALAudioStream::update()
 {
-    ALint sourceState;
+    // GeneralsX @bugfix Codex 27/10/2026 Preserve explicit pause and avoid reading failed-query output on context loss.
+    if (!m_source || !alcGetCurrentContext()) return;
+    ALint sourceState = AL_STOPPED;
     alGetSourcei(m_source, AL_SOURCE_STATE, &sourceState);
+    if (sourceState == AL_PAUSED) return; // Only the caller's play()/resume operation may resume a paused stream.
 
-    ALint num_queued;
+    ALint num_queued = 0;
     alGetSourcei(m_source, AL_BUFFERS_QUEUED, &num_queued);
 
     // GeneralsX @bugfix 14/06/2026 EOF probe — runs BEFORE the restart-on-stopped guard below.
@@ -199,7 +205,7 @@ void OpenALAudioStream::reset()
     // alSourcei(AL_BUFFER, 0) would fail with AL_INVALID_OPERATION if any
     // buffers were still pending.
     alSourceStop(m_source);
-    ALint num_queued;
+    ALint num_queued = 0;
     alGetSourcei(m_source, AL_BUFFERS_QUEUED, &num_queued);
     while (num_queued > 0) {
         ALuint buf;
@@ -213,7 +219,8 @@ void OpenALAudioStream::reset()
 
 bool OpenALAudioStream::isPlaying()
 {
-    ALint state;
+    if (!m_source || !alcGetCurrentContext()) return false;
+    ALint state = AL_STOPPED;
     alGetSourcei(m_source, AL_SOURCE_STATE, &state);
     return state == AL_PLAYING;
 }

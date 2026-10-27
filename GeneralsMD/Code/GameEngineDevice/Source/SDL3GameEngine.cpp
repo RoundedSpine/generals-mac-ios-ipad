@@ -207,6 +207,18 @@ void sendSyntheticMouse(SDL3Mouse *mouse, SDL_Window *window, Uint32 type,
 	mouse->addSDLEvent(&ev);
 }
 
+// GeneralsX @bugfix Codex 27/10/2026 Cancel a gesture on lifecycle/reset without converting a pending finger into a click.
+void cancelTouchGesture(SDL3Mouse *mouse, SDL_Window *window)
+{
+	if (mouse && window) {
+		if (s_touch.phase == TouchState::DRAGGING)
+			sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP, s_touch.lastX, s_touch.lastY, SDL_BUTTON_LEFT);
+		else if (s_touch.phase == TouchState::PAN)
+			sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP, s_touch.panX, s_touch.panY, SDL_BUTTON_RIGHT);
+	}
+	s_touch = TouchState{};
+}
+
 void beginPan(SDL3Mouse *mouse, SDL_Window *window, int winW, int winH)
 {
 	s_touch.panX = (s_touch.f1x + s_touch.f2x) * 0.5f * (float)winW;
@@ -454,6 +466,9 @@ SDL3GameEngine::SDL3GameEngine()
  */
 SDL3GameEngine::~SDL3GameEngine()
 {
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	if (m_IsInitialized) SDL_RemoveEventWatch(iosLifecycleWatcher, nullptr);
+#endif
 	if (m_SDLWindow && m_IsTextInputActive) {
 		SDL_StopTextInput(m_SDLWindow);
 		m_IsTextInputActive = false;
@@ -520,6 +535,9 @@ void SDL3GameEngine::init(void)
  */
 void SDL3GameEngine::reset(void)
 {
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+	cancelTouchGesture(dynamic_cast<SDL3Mouse*>(TheMouse), m_SDLWindow);
+#endif
 	fprintf(stderr, "DEBUG: SDL3GameEngine::reset()\n");
 	if (m_SDLWindow && m_IsTextInputActive) {
 		SDL_StopTextInput(m_SDLWindow);
@@ -633,6 +651,9 @@ void SDL3GameEngine::processSDL3Event(SDL_Event event)
 			break;
 
 		case SDL_EVENT_WINDOW_FOCUS_LOST:
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+			cancelTouchGesture(dynamic_cast<SDL3Mouse*>(TheMouse), m_SDLWindow);
+#endif
 			m_IsActive = false;
 			if (m_IsTextInputActive) {
 				SDL_StopTextInput(m_SDLWindow);
@@ -647,7 +668,9 @@ void SDL3GameEngine::processSDL3Event(SDL_Event event)
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 		// App suspension/resume: mirror the desktop focus handling so audio
 		// and mouse state pause cleanly (the render gate lives in update()).
+		case SDL_EVENT_WILL_ENTER_BACKGROUND:
 		case SDL_EVENT_DID_ENTER_BACKGROUND:
+			cancelTouchGesture(dynamic_cast<SDL3Mouse*>(TheMouse), m_SDLWindow);
 			m_IsActive = false;
 			if (TheMouse) {
 				TheMouse->loseFocus();
@@ -772,6 +795,7 @@ Bool SDL3GameEngine::nativeFrameReady()
 			else TheMouse->loseFocus();
 		}
 	}
+	if (!active) cancelTouchGesture(dynamic_cast<SDL3Mouse*>(TheMouse), m_SDLWindow);
 	return active;
 #else
 	return TRUE;

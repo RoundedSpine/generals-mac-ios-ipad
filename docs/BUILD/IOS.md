@@ -189,3 +189,17 @@ request for a later attempt and report an incomplete result. An externally
 overridden cache location is not deleted or reported as fully cleared.
 
 This resets DXVK's persistent state cache, not every Metal/driver-managed cache.
+
+## Experimental build review defaults
+
+The mod-testing workflow now reuses the `dxvk-test-quad-lists-v1` cache namespace
+between IPAs. The session log identifies the executable separately with
+`[IOS_BUILD] revision=...`. Graphics strip probes and historical occupancy-shadow
+replay default OFF; live gameplay-result validation and parallel ordinary pairs
+remain enabled on that branch. Unbatched searches run on the caller, and routes
+are materialized directly on main. The old collector and exclusive baseline remain
+opt-in experiments. See the [full build review](../WORKDIR/audit/IOS_FULL_BUILD_REVIEW_2026-10-27.md).
+
+Bundled-data startup no longer removes assets from Documents. The Files-based
+installation and combined collector remain supported. The CSF parser handles the
+reserved header word used by some mods and rejects invalid lengths/short reads.

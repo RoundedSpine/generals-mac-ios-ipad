@@ -113,7 +113,7 @@ struct CSFHeader
 	Int version;
 	Int num_labels;
 	Int num_strings;
-	Int skip;
+	Int reserved; // Reserved CSF header word, not an offset.
 	Int langid;
 
 };
@@ -925,7 +925,10 @@ Bool GameTextManager::getCSFInfo ( const Char *filename, Int& textCount, Languag
 	{
 		if ( file->read( &header, sizeof ( header )) == sizeof ( header ) )
 		{
-			if ( header.id == CSF_ID )
+			// GeneralsX @bugfix Codex 27/10/2026 Bound the allocation count by actual minimum label bytes before allocating the table.
+			const Int fileSize = file->size();
+			if ( header.id == CSF_ID && header.num_labels >= 0 && header.num_strings >= 0 &&
+				 fileSize >= sizeof(header) && header.num_labels <= (fileSize - sizeof(header)) / (3 * sizeof(Int)) )
 			{
 				textCount = header.num_labels;
 
@@ -959,6 +962,7 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 	Int id;
 	Int len;
 	Int listCount = 0;
+	Int bytesRead = 0;
 	Bool ok = FALSE;
 	CSFHeader header;
 
@@ -978,26 +982,29 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 	if (  file->read ( &header, sizeof ( CSFHeader)) != sizeof ( CSFHeader) )
 	{
 		fprintf(stderr, "[CSF] parseCSF() - read header FAILED\n");
+		file->close();
 		return FALSE;
 	}
 
 	// GeneralsX @bugfix BenderAI 17/02/2026 - Log header for debugging
-	fprintf(stderr, "[CSF] parseCSF() - Header: id=%#x version=%d num_labels=%d num_strings=%d skip=%d langid=%d\n",
-		header.id, header.version, header.num_labels, header.num_strings, header.skip, header.langid);
+	fprintf(stderr, "[CSF] parseCSF() - Header: id=%#x version=%d num_labels=%d num_strings=%d reserved=%#x langid=%d\n",
+		header.id, header.version, header.num_labels, header.num_strings, header.reserved, header.langid);
 
-	// GeneralsX @bugfix BenderAI 17/02/2026 - Skip extra bytes after header
-	// The 'skip' field indicates how many bytes to advance before reading first label
-	if (header.skip > 0) {
-		fprintf(stderr, "[CSF] parseCSF() - Skipping %d bytes as indicated by header.skip\n", header.skip);
-		file->seek(header.skip, File::CURRENT);
-	}
+	// GeneralsX @bugfix Codex 27/10/2026 The reserved word may contain a compiler marker.
+	// Labels immediately follow the fixed header even when that word is nonzero.
+
+	// GeneralsX @bugfix Codex 27/10/2026 Reject malformed lengths and short reads before touching fixed-size text buffers.
+	if (textCount < 0 || header.num_labels != textCount || header.num_strings < 0) goto quit;
 
 	fprintf(stderr, "[CSF] parseCSF() - Starting main loop (textCount=%d)...\n", textCount);
 
-	while( file->read ( &id, sizeof (id)) == sizeof ( id) )
+	while( (bytesRead = file->read ( &id, sizeof (id))) == sizeof ( id) )
 	{
 		Int num;
 		Int num_strings;
+
+		// GeneralsX @bugfix Codex 27/10/2026 Reject extra labels before indexing the allocated table.
+		if (listCount >= textCount) goto quit;
 
 		if ( id != CSF_LABEL )
 		{
@@ -1005,13 +1012,12 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 			goto quit;
 		}
 
-		file->read ( &num_strings, sizeof ( Int ));
-
-		file->read ( &len, sizeof ( Int ) );
+		if (file->read(&num_strings, sizeof(Int)) != sizeof(Int) || num_strings < 0) goto quit;
+		if (file->read(&len, sizeof(Int)) != sizeof(Int) || len < 0 || len >= sizeof(m_buffer)) goto quit;
 
 		if ( len )
 		{
-			file->read ( m_buffer, len );
+			if (file->read(m_buffer, len) != len) goto quit;
 		}
 
 		m_buffer[len] = 0;
@@ -1028,7 +1034,7 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 
 		while ( num < num_strings )
 		{
-		 	file->read ( &id, sizeof ( Int ) );
+			if (file->read(&id, sizeof(Int)) != sizeof(Int)) goto quit;
 
 			if ( id != CSF_STRING && id != CSF_STRINGWITHWAVE )
 			{
@@ -1037,17 +1043,17 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 				goto quit;
 			}
 
-		 	file->read ( &len, sizeof ( Int ) );
+			if (file->read(&len, sizeof(Int)) != sizeof(Int) || len < 0 || len >= sizeof(m_tbuffer)/sizeof(m_tbuffer[0])) goto quit;
 
 			if ( len )
 			{
 				// GeneralsX @bugfix BenderAI 17/02/2026 Linux wchar_t compatibility
 				// CSF files store 16-bit wide chars (UCS-2), but Linux wchar_t is 32-bit (UCS-4)
 #ifdef _WIN32
-				file->read ( m_tbuffer, len*sizeof(WideChar) );
+				if (file->read(m_tbuffer, len*sizeof(WideChar)) != len*sizeof(WideChar)) goto quit;
 #else
 				uint16_t convert_buffer[MAX_UITEXT_LENGTH*2];
-				file->read ( convert_buffer, len*sizeof(uint16_t) );
+				if (len > MAX_UITEXT_LENGTH*2 || file->read(convert_buffer, len*sizeof(uint16_t)) != len*sizeof(uint16_t)) goto quit;
 				for (int i = 0; i < len; i++)
 				{
 					m_tbuffer[i] = convert_buffer[i];
@@ -1084,10 +1090,10 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 
 			if ( id == CSF_STRINGWITHWAVE )
 			{
-			 	file->read ( &len, sizeof ( Int ) );
+				if (file->read(&len, sizeof(Int)) != sizeof(Int) || len < 0 || len >= sizeof(m_buffer)) goto quit;
 				if ( len )
 				{
-					file->read ( m_buffer, len );
+					if (file->read(m_buffer, len) != len) goto quit;
 				}
 				m_buffer[len] = 0;
 
@@ -1111,7 +1117,8 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 	}
 
 	fprintf(stderr, "[CSF] parseCSF() - Main loop complete! Processed %d/%d labels\n", listCount, textCount);
-	ok = TRUE;
+	// GeneralsX @bugfix Codex 27/10/2026 An empty or incomplete table must not report success.
+	ok = (listCount == textCount && bytesRead == 0);
 
 quit:
 

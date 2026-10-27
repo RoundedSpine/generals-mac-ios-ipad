@@ -369,6 +369,15 @@ int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();
 }
 """)
 
+    def test_unbatched_fallback_uses_caller_without_a_worker_handoff(self):
+        run_cpp(fixture() + r'''
+int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();
+ auto dispatched=p.m_exclusiveWorker->searches;auto workerSteps=p.workerLoops.load();
+ p.clearParallelBatch();assert(w.consume(p,w.a));
+ assert(p.m_exclusiveWorker->searches==dispatched&&p.workerLoops==workerSteps);
+}
+''')
+
     def test_permanent_snapshot_accepts_production_signed_object_ids(self):
         source='#define GENERALS_ZH_PARALLEL_PATH_BATCH 1\nstruct PathfindParallelReads;\n'+engine_fixture()
         source=source.replace('using ObjectID=unsigned;', 'enum ObjectID : int {INVALID_ID=0};')

@@ -23,7 +23,7 @@ if name == 'xcodebuild':
         sys.exit(17)
     root = pathlib.Path(args[args.index('-derivedDataPath') + 1])
     app = root / 'Build/Products/Release-iphoneos/GeneralsXZH.app'
-    (app / '_CodeSignature').mkdir(parents=True)
+    (app / '_CodeSignature').mkdir(parents=True, exist_ok=True)
     (app / '_CodeSignature/CodeResources').write_text('signature')
     (app / 'embedded.mobileprovision').write_text('profile')
     (app / 'Info.plist').write_text('<plist/>')
@@ -35,6 +35,11 @@ elif name == 'lipo':
         print('usage: lipo <input_file> -verify_arch <arch_type> ...', file=sys.stderr)
         sys.exit(1)
 elif name == 'otool':
+    if '-l' in args:
+        print('cmd LC_BUILD_VERSION\nplatform ' + os.environ.get('IOS_PLATFORM', '2'))
+        if os.environ.get('EXISTING_RPATH'):
+            print('cmd LC_RPATH\npath @executable_path/Frameworks (offset 12)')
+        sys.exit(0)
     print(args[-1] + ':')
     dep = '/usr/lib/libSystem.B.dylib'
     if pathlib.Path(args[-1]).name == 'GeneralsXZH':
@@ -42,6 +47,8 @@ elif name == 'otool':
     print('\t' + dep + ' (compatibility version 1.0.0, current version 1.0.0)')
 elif name == 'file':
     print('Mach-O 64-bit arm64')
+elif name == 'install_name_tool' and '-add_rpath' in args and os.environ.get('FAIL_RPATH'):
+    sys.exit(19)
 elif name == 'codesign' and '--entitlements' in args:
     print('<plist><dict/></plist>')
 elif name == 'ditto':
@@ -129,6 +136,24 @@ class PackagingTest(unittest.TestCase):
                                 env=self.env, text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('usage: lipo', result.stderr)
+
+    def test_arm64_host_or_simulator_library_is_rejected(self):
+        for platform in ('1', '7', 'MACOS', 'IOSSIMULATOR'):
+            self.env['IOS_PLATFORM'] = platform
+            result = self.run_package('--dev', '--unsigned')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('expected iOS device platform', result.stderr)
+
+    def test_real_rpath_failure_stops_packaging(self):
+        self.env['FAIL_RPATH'] = '1'
+        result = self.run_package('--dev', '--unsigned')
+        self.assertEqual(result.returncode, 19)
+
+    def test_existing_framework_rpath_is_not_added_again(self):
+        self.env['FAIL_RPATH'] = '1'
+        self.env['EXISTING_RPATH'] = '1'
+        result = self.run_package('--dev', '--unsigned')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_unsigned_install_is_rejected(self):
         result = self.run_package('--unsigned', '--install')

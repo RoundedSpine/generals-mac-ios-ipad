@@ -207,6 +207,19 @@ int main() {
  mouse.events.clear();finger.type=SDL_EVENT_FINGER_DOWN;handleTouchEvent(&mouse,&window,finger);
  finger.type=SDL_EVENT_FINGER_CANCELED;handleTouchEvent(&mouse,&window,finger);
  assert(mouse.events.size()==1 && s_touch.phase==TouchState::IDLE);
+ // Focus/background cancellation never turns a pending touch into a click on resume.
+ mouse.events.clear();finger.type=SDL_EVENT_FINGER_DOWN;handleTouchEvent(&mouse,&window,finger);
+ cancelTouchGesture(&mouse,&window);ticks+=10000;updateTouchLongPress(&mouse,&window);
+ finger.type=SDL_EVENT_FINGER_UP;handleTouchEvent(&mouse,&window,finger);
+ assert(mouse.events.size()==1 && s_touch.phase==TouchState::IDLE);
+ // An interrupted drag and camera pan release only their held button, once.
+ for(auto phase:{TouchState::DRAGGING,TouchState::PAN}){
+  mouse.events.clear();s_touch.phase=phase;cancelTouchGesture(&mouse,&window);
+  assert(mouse.events.size()==1 && mouse.events[0].type==SDL_EVENT_MOUSE_BUTTON_UP);
+  assert(mouse.events[0].button.button==(phase==TouchState::PAN?SDL_BUTTON_RIGHT:SDL_BUTTON_LEFT));
+  cancelTouchGesture(&mouse,&window);assert(mouse.events.size()==1 && s_touch.phase==TouchState::IDLE);
+ }
+
 }
 '''.replace('BODY', body))
         self.assertEqual(result.returncode, 0)

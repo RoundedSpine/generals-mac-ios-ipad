@@ -48,13 +48,30 @@ if(GENERALS_SEARCH_CONTEXT)
     add_compile_definitions(GENERALS_SEARCH_CONTEXT=1)
 endif()
 
-# GeneralsX @build Codex 27/10/2026 Enable one copied-query validation worker, never live-world search offload.
-option(GENERALS_OCCUPANCY_WORKER "Validate copied occupancy queries on one bounded shadow worker" OFF)
+# GeneralsX @build Codex 27/10/2026 Explicit occupancy queries shared by gameplay and optional diagnostics.
+option(GENERALS_OCCUPANCY_WORKER "Use explicit occupancy queries with optional copied-query diagnostics" OFF)
 if(GENERALS_OCCUPANCY_WORKER)
     if(NOT GENERALS_SEARCH_CONTEXT)
         message(FATAL_ERROR "GENERALS_OCCUPANCY_WORKER requires GENERALS_SEARCH_CONTEXT")
     endif()
     add_compile_definitions(GENERALS_OCCUPANCY_WORKER=1)
+endif()
+
+# GeneralsX @build Codex 27/10/2026 Historical replay diagnostics are independent of gameplay query validation.
+option(GENERALS_OCCUPANCY_SHADOW_VALIDATION "Replay sampled occupancy transcripts for diagnostics" OFF)
+if(GENERALS_OCCUPANCY_SHADOW_VALIDATION)
+    if(NOT GENERALS_OCCUPANCY_WORKER)
+        message(FATAL_ERROR "GENERALS_OCCUPANCY_SHADOW_VALIDATION requires GENERALS_OCCUPANCY_WORKER")
+    endif()
+    add_compile_definitions(GENERALS_OCCUPANCY_SHADOW_VALIDATION=1)
+endif()
+# GeneralsX @build Codex 27/10/2026 Retain the owned-route prototype without copying every main-thread route.
+option(GENERALS_OWNED_PATH_ROUTE "Collect unoptimized routes before main-thread materialization" OFF)
+if(GENERALS_OWNED_PATH_ROUTE)
+    if(NOT GENERALS_SEARCH_CONTEXT)
+        message(FATAL_ERROR "GENERALS_OWNED_PATH_ROUTE requires GENERALS_SEARCH_CONTEXT")
+    endif()
+    add_compile_definitions(GENERALS_OWNED_PATH_ROUTE=1)
 endif()
 
 # GeneralsX @build Codex 27/10/2026 Real ordinary-search loop handoff with frozen simulation and caller-side finalization.

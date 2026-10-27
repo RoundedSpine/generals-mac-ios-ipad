@@ -35,6 +35,9 @@ Scripts for Linux native and Docker-based builds:
 - `collect-ios-game-data.ps1` - Collect installed Zero Hour assets and fonts on Windows for transfer to the iOS app
 - `stage-fonts.sh` - Stage Liberation fonts using the game's expected names
 
+Use the combined collector for a complete installation; the two standalone
+collectors are for separate transfers and do not independently replace both games.
+
 See [unsigned IPA builds](../docs/BUILD/IOS.md) for the manual GitHub Actions workflow.
 Validate packaging control flow with `python3 scripts/qa/test_ios_packaging.py`
 (Apple tools are simulated; a real device build still requires macOS/Xcode).
@@ -355,6 +358,11 @@ restoration, reuse and read-only name-key lookup. The experiment enables
 `GENERALS_EXCLUSIVE_PATH_WORKER`; it defaults OFF elsewhere. This is exclusive
 ordinary-search execution, not parallel prefetch or a measured throughput gain.
 
+In the parallel experimental build, single-request fallbacks stay on the caller.
+Historical shadow replay now needs `GENERALS_OCCUPANCY_SHADOW_VALIDATION=ON`,
+independently of the live occupancy adapter. Temporary route collection needs
+`GENERALS_OWNED_PATH_ROUTE=ON`; normal finalization constructs nodes directly.
+
 Run `python3 scripts/qa/test_parallel_path_batch.py` (or add `--tsan`) to compile
 the production two-request dispatcher, independent cell/record contexts, ordinary
 search, queue loop and ordered consumption with controlled world services. Checks
@@ -363,3 +371,9 @@ single-use queue positions, bounded overflow, lifecycle, FP environment and join
 exceptions. `GENERALS_PARALLEL_PATH_BATCH` defaults OFF; the experiment enables
 it for eligible ordinary requests only. This adds real parallel reuse, with
 unmeasured device performance and remaining special-search integration.
+
+Run `python3 scripts/qa/test_openal_stream.py` for production streaming regressions
+covering persistent no-context errors, pause/resume, failed queries, EOF and refill.
+Run `python3 scripts/qa/test_csf_reserved_header.py` for reserved CSF words, allocation
+count bounds, malformed lengths, truncation and table bounds. Packaging tests also
+reject arm64 host/Simulator inputs and propagate real framework-rpath failures.

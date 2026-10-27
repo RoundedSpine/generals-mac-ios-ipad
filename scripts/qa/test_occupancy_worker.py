@@ -21,8 +21,8 @@ def legacy(marker):
     return (code[:a] + code[b + len('#else'):code.rindex('#endif')] + '\n}').replace('Pathfinder::', 'Baseline::')
 
 
-def fixture(generals=0, infantry=1):
-    return (f'#define RTS_GENERALS {generals}\n' if generals is not None else '') + '#define RETAIL_COMPATIBLE_PATHFINDING 1\n' + ('#define INFANTRY_MOVES_THROUGH_INFANTRY 1\n' if infantry else '') + r'''
+def fixture(generals=0, infantry=1, shadow=True):
+    return ('#define GENERALS_OCCUPANCY_SHADOW_VALIDATION 1\n' if shadow else '') + (f'#define RTS_GENERALS {generals}\n' if generals is not None else '') + '#define RETAIL_COMPATIBLE_PATHFINDING 1\n' + ('#define INFANTRY_MOVES_THROUGH_INFANTRY 1\n' if infantry else '') + r'''
 #define GENERALS_ZH_OCCUPANCY_WORKER 1
 #include "occupancyvalidationworker.h"
 #include <cassert>
@@ -169,6 +169,15 @@ int main(){PathOccupancy::Transcript transcript;
  auto corrupt=transcript;corrupt.events[0].op=PathOccupancy::Op::Cell;
  bool rejected=false;try{rejected=!PathOccupancy::validate(corrupt);}catch(const std::exception&){rejected=true;}assert(rejected);
  transcript.expected.allowed=!transcript.expected.allowed;assert(!PathOccupancy::validate(transcript));
+}
+''')
+
+    def test_live_queries_need_no_shadow_thread(self):
+        run_cpp(fixture(shadow=False) + r'''
+int main(){Pathfinder p;Object mover;mover.id=1;p.m_occupancySamplesRemaining=4;
+ TCheckMovementInfo info{{1,1},1,0,true,false,1};
+ for(int i=0;i<10000;++i)assert(p.checkForMovement(&mover,info));
+ assert(!p.m_occupancyValidation&&p.m_occupancySamplesRemaining==4);
 }
 ''')
 

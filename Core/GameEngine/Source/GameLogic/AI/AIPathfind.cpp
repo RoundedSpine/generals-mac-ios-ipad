@@ -4299,8 +4299,9 @@ struct PathfindOccupancyValidation {
 struct PathfindExclusiveWorker {
 	ExclusiveSearchWorker worker;
 	unsigned long long searches = 0;
+ const char* mode = "exclusive";
 	~PathfindExclusiveWorker() {
-		fprintf(stderr, "[PATH_SEARCH_WORKER] stopped searches=%llu mode=exclusive\n", searches);
+		fprintf(stderr, "[PATH_SEARCH_WORKER] stopped searches=%llu mode=%s\n", searches, mode);
 	}
 };
 #endif
@@ -5559,6 +5560,11 @@ PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, cons
 	if (ExclusiveSearchWorker::onWorker()) return PathOccupancy::evaluate(input, live);
 #endif
 
+#ifndef GENERALS_OCCUPANCY_SHADOW_VALIDATION
+ // GeneralsX @performance Codex 27/10/2026 Gameplay validation uses live queries; historical replay is optional diagnostics.
+ return PathOccupancy::evaluate(input, live);
+#else
+
 	if (!m_occupancySamplesRemaining || m_occupancyValidationUnavailable || PathOccupancy::validationPaused().load())
 		return PathOccupancy::evaluate(input, live);
 	--m_occupancySamplesRemaining;
@@ -5579,6 +5585,7 @@ PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, cons
 	transcript.expected = result;
 	m_occupancyValidation->worker.submit(transcript);
 	return result;
+#endif
 }
 #endif
 
@@ -7149,7 +7156,8 @@ void Pathfinder::prepareParallelBatch()
   if (!m_parallelBatch) m_parallelBatch=new PathfindParallelBatch;
   if (!m_exclusiveWorker) {
    m_exclusiveWorker=new PathfindExclusiveWorker;
-   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=exclusive scope=ordinary_fine main_waits=true\n");
+   m_exclusiveWorker->mode="parallel";
+   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_fine worker=1 caller=1\n");
   }
   auto& batch=*m_parallelBatch;
   for (Int i=0;i<2;++i) {
@@ -7633,7 +7641,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	// GeneralsX @refactor Codex 27/10/2026 Keep completion processing inside the caller's context/admission phase.
 	OrdinarySearchOutcome outcome{parentCell, 0, false};
 	Bool dispatched = false;
-#if defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER) && !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
+#if defined(GENERALS_ZH_EXCLUSIVE_PATH_WORKER) && !defined(GENERALS_ZH_PARALLEL_PATH_BATCH) && !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
 	// GeneralsX @feature Codex 27/10/2026 Freeze the simulation by waiting here; only the loop owns scratch off-thread.
 	if (!m_exclusiveWorkerUnavailable && contextBinding.canTransfer() && TheGlobalData->m_debugAI == 0 &&
 		!PathOccupancy::validationPaused().load() &&
@@ -10114,10 +10122,10 @@ void Pathfinder::prependRouteCells( RouteSink *path, const Coord3D *fromPos,
 
 }
 
-// GeneralsX @refactor Codex 27/10/2026 Materialize engine nodes only after the route values have been collected.
+// GeneralsX @performance Codex 27/10/2026 Finalization already owns its context on main; route copying is optional.
 void Pathfinder::prependCells(Path* path, const Coord3D* fromPos, PathfindCell* goalCell, Bool center)
 {
-#ifdef GENERALS_ZH_SEARCH_CONTEXT
+#if defined(GENERALS_ZH_SEARCH_CONTEXT) && defined(GENERALS_OWNED_PATH_ROUTE)
  using Route = OwnedPathRoute<Coord3D, PathfindLayerEnum, PATHFIND_RECORD_CAPACITY + 1>;
  auto result = Route::fromPath(*path);
  prependRouteCells(&result, fromPos, goalCell, center);
