@@ -92,6 +92,17 @@ five timing ASan/UBSan cases pass with the production accessor. Actionlint/diff
 checks pass. Replacement SDK verification remains pending. This correction does
 not change search or timing policy.
 
+## Successful ARM64 SDK build
+
+Code dba00382b passed the Mac QA and complete race-check stages, actual iOS SDK
+compilation, ARM64/device-platform and rpath packaging checks and unsigned artifact
+upload in
+[run 40598607727](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40598607727).
+Artifact: GeneralsXZH-iOS-unsigned, including the existing entitlement sidecar and
+no retail game assets. The host remains macos-15 ARM64. The native build confirms
+the three invalid bookkeeping-member accesses are resolved. Device measurements,
+native timing overhead and performance comparisons remain pending.
+
 ## Device test and interpretation
 
 Play a normal game with group moves, tight spaces and bridges, then exit normally
