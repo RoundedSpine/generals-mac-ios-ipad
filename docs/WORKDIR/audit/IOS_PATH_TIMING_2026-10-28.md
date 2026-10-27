@@ -103,6 +103,67 @@ no retail game assets. The host remains macos-15 ARM64. The native build confirm
 the three invalid bookkeeping-member accesses are resolved. Device measurements,
 native timing overhead and performance comparisons remain pending.
 
+## First device timing evidence — 28 October 2026
+
+The supplied generals-stderr.log identifies revision ~dba0038, reaches the score
+screen and exits zero. It contains all ten timing rows. No fatal or primitive-
+restart report appears; one FFmpeg WAV sample_count warning remains. The cache
+directory is marked reused, not a measured pipeline-hit rate.
+
+| Phase | Calls | Total ms | Mean ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: |
+| queue | 7,040 | 1,895.303 | 0.269 | 76.476 |
+| prepare | 10,395 | 31.004 | 0.003 | 3.614 |
+| caller_prepare | 8,088 | 31.988 | 0.004 | 0.370 |
+| pair | 713 | 209.944 | 0.294 | 58.739 |
+| worker_kernel | 713 | 148.101 | 0.208 | 51.882 |
+| caller_kernel | 713 | 145.008 | 0.203 | 58.719 |
+| serial_kernel | 6,621 | 498.812 | 0.075 | 15.360 |
+| validate | 1,430 | 9.195 | 0.006 | 0.353 |
+| hierarchy | 8,072 | 218.794 | 0.027 | 2.115 |
+| finalize | 7,954 | 150.791 | 0.019 | 9.481 |
+
+Queue thresholds: 210 calls at or above 1 ms, 57 at or above 5 ms, 15 at or above
+20 ms, two at or above 50 ms, and none at or above 100/500 ms. The two measured
+pair calls above 50 ms and the queue maximum can be relevant to brief hitches;
+aggregates do not correlate them to the same requests or a reported input event.
+No measured pending-queue call in this session reproduces a half-second stall.
+These probes do not cover the whole frame, rendering/audio/input or every direct
+search API; this does not rule out an unmeasured pause elsewhere.
+
+Batch accounting balances: 713 * 2 == 1,397 primary + 29 fallback-only tasks.
+Primary completions: 1,315 accepted (94.13%), 82 rejected, none unused. Conditional
+closest: 29 early completions, 18 accepted, 11 rejected, none unused. No safe or
+separately queued closest speculative kernels are recorded in this session; these
+counters do not exclude serial use of those APIs. Accepted completions can include
+no-path results and both task roles participate in the counts.
+
+The 1,333 total accepted speculative completions plus 6,621 serial kernels equal
+the 7,954 finalization calls. For these measured completion phases, reuse accounts
+for 16.76% and serial execution for 83.24%; neither number is a fraction of all
+unit commands, all engine path queries or total CPU time. The 93 recorded result
+rejections cannot explain most of the serial work. Current counters do not say
+whether short queues, unsupported requests, failed capture or another guard
+prevented pairing. prepare calls include queue entries that perform no search and
+the second entry of an existing pair, so they are not counts of failed batches.
+
+Validation and authoritative preparation are inexpensive in this sample. Serial
+kernels have the largest total among the separately named search phases, while
+rare parallel task/barrier calls have larger maxima. Do not rank worker versus
+serial execution from their averages: they execute different searches, and these
+are wall times that include preemption. Subphase totals overlap and leave other
+queue work unclassified. There is no serial baseline, frame trace, expansion count
+for each outlier or device memory measurement, so no speedup or precise hitch
+cause is established.
+
+Recommended next audit: count why requests cannot be paired and capture bounded
+context for the slowest queue/pair calls (search kind and work completed). This
+would distinguish coverage limits from expensive searches or scheduling delays
+before adding workers or widening eligibility. More workers cannot help requests
+that never enter the batch. Compact records remain a possible memory/lookup
+improvement, but this log does not identify them as the cause of the outliers.
+This review changes no runtime code and requires no new IPA or repeated tests.
+
 ## Device test and interpretation
 
 Play a normal game with group moves, tight spaces and bridges, then exit normally
