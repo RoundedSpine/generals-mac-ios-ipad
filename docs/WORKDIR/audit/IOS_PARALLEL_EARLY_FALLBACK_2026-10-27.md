@@ -104,6 +104,23 @@ trigger a fresh attempt with the same engine/workflow and cancel the queued
 attempt through the existing per-branch concurrency rule; SDK validation is still
 pending, with no build failure established by the queue delay.
 
+The retry [40533086198](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40533086198)
+failed at runner provisioning without starting any steps. GitHub annotations
+report `Internal server error`, `The job was not acquired by Runner of type hosted
+even after multiple attempts`, and repeated ARM64 capacity warnings; the user's
+screenshot confirms them. The
+[official image catalog](https://github.com/actions/runner-images#available-images)
+maps `macos-15` to ARM64 and `macos-15-intel` to x64. Change the workflow to the
+explicit Intel pool and retain the same iOS preset, ARM64 vcpkg triplet and Meson
+cross file. The documented host images share default Xcode 16.4, and the cache
+key already includes `runner.arch`. The final IPA's ARM64/device-platform checks
+remain unchanged. Intel allocation, SDK compilation and packaging remain pending;
+this is a pool change, not a claim of guaranteed availability or a gameplay fix.
+Local actionlint 1.7.7 predates the documented Intel label; validate the workflow
+with only its exact `label "macos-15-intel" is unknown` catalog warning filtered.
+All other actionlint checks and `git diff --check` pass. The official image catalog
+above, not the older local label list, establishes that this hosted label exists.
+
 The latest supplied log identifies the prior `b97fa0c` binary, reaches the score
 screen and exits 0. It records 280 pairs/560 primary completions: 546 accepted
 (97.5%), 14 rejected, none unused, and 280 worker tasks. Parallel safe, closest and
