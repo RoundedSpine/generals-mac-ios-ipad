@@ -97,13 +97,23 @@ the full run passed 43 cases, while the 256-case comparison exceeded the origina
 only that workload a 45-second guard. The matrix and production code were not
 reduced to satisfy the guard; other tests retain their 10-second default.
 Actionlint and diff checks pass. Actual iOS SDK compilation/packaging and device
-validation remain pending.
+validation were pending at the local checkpoint; the SDK result is recorded below.
 
 The first SDK workflow attempt, [run 40518666347](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40518666347),
 passed all 162 Mac QA tests but failed the subsequent race-check step before
 compilation. Its public annotation exposed only exit 1. Added captured runtime
-assertion/sanitizer output to the fixture helper and race-suite CI annotations;
-retain all checks and await a concrete diagnosis from the next run.
+assertion/sanitizer output to the fixture helper and race-suite CI annotations.
+The retry passed all checks without an engine change; the original failure did
+not reproduce and its cause remains unconfirmed.
+
+Code `b97fa0c8d` passed all 162 Mac QA tests, the complete workflow race-check
+stage (including all 44 batch tests), actual iOS SDK compilation, device-platform/
+rpath packaging checks and unsigned artifact upload in
+[run 40520080544](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40520080544).
+Artifact: `GeneralsXZH-iOS-unsigned`, with entitlement sidecar and no retail game
+assets. Device fallback-use, movement, lifecycle, memory and performance checks
+remain pending. No measured speedup, full-world race freedom or replay equivalence
+is claimed.
 The fixture uses production cells, lists, contexts, kernels, dispatcher and
 validation with controlled world/hierarchy/Path services; it does not prove
 full-world race freedom, replay equivalence, device movement, memory or speed.

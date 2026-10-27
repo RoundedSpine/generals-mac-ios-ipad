@@ -89,7 +89,8 @@ conditional closest computation after eligible ordinary fine-loop failures.
 It retains a separate bounded fallback arena per request so both phases preserve
 their original main-thread cleanup; it does not adopt a scalar cleanup substitute.
 Early ordinary preparation rejection and path-materialization failure still use
-caller fallback. That newer code requires its own SDK and device validation.
+caller fallback. That newer code passed its own SDK workflow in run 40520080544;
+its device validation remains pending.
 Hierarchical search and Path optimization remain on main. Larger worker pools,
 eight-request scheduling and dense map-sized node storage are not adopted here.
 The previous escape-capable device log had zero parallel escape searches, so
