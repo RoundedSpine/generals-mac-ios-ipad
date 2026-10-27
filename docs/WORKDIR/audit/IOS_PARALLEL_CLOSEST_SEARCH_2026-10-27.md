@@ -64,7 +64,11 @@ computations in pairs and reused completions, including valid no-path results.
   validation with controlled world, hierarchy and Path services. They do not prove
   full-engine bridge behavior, replay equivalence or a device performance gain.
 
-The actual iOS SDK/package build and device testing are pending.
+Code `08d17c2e0` passed all 153 Mac QA tests, the workflow race checks, actual iOS
+SDK compilation, platform/rpath packaging checks and unsigned IPA upload in
+[run 40502028264](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40502028264).
+Artifact: `GeneralsXZH-iOS-unsigned`. Device closest-search, lifecycle, memory and
+performance validation remain pending.
 
 ## Remaining Reimagined work
 
@@ -82,3 +86,9 @@ uncapped; `gfx_vulkan.cpp` caches static GPU buffers by version and uses dirty/
 content checks for texture upload. These are review candidates, not integrated
 changes. Frame pacing must retain our native iOS callback loop, and renderer work
 must first account for equivalent DXVK behavior and MoltenVK/iOS requirements.
+The compared interpolation consumers are Drawable physics transforms (pitch,
+roll, yaw and vertical offset) and particles; the reference also resets timing
+after a load screen. This supports a visual-smoothness candidate at higher render
+rates, not a claim of faster simulation or a fix for the old input-delivery delay.
+Its enhanced water, shadows, lighting and post-processing belong to a larger native
+renderer port and have unmeasured iOS GPU cost. None is added by this stage.
