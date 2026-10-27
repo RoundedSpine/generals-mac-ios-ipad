@@ -121,6 +121,16 @@ with only its exact `label "macos-15-intel" is unknown` catalog warning filtered
 All other actionlint checks and `git diff --check` pass. The official image catalog
 above, not the older local label list, establishes that this hosted label exists.
 
+The Intel attempt [40536167259](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40536167259)
+started successfully and passed all 172 normal Mac QA tests. Its batch race suite
+passed 53 cases; `test_closest_large_search_preserves_the_2000_expansion_pruning_rule`
+exceeded its ten-second subprocess guard under Intel macOS TSan. The public
+annotation reports TimeoutExpired with no race/assertion report. Increase only
+that four-case 128x128 serial workload's guard to 45 seconds, preserving the full
+trace/hash and every search limit. Other small tests retain their default guard;
+this changes neither engine execution nor the test's expected output. A new SDK
+attempt is required after this test-harness adjustment.
+
 The latest supplied log identifies the prior `b97fa0c` binary, reaches the score
 screen and exits 0. It records 280 pairs/560 primary completions: 546 accepted
 (97.5%), 14 rejected, none unused, and 280 worker tasks. Parallel safe, closest and

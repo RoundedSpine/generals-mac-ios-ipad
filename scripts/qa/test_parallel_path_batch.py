@@ -520,7 +520,8 @@ int main(){AIUpdateInterface ai;Coord3D to;Path*path=nullptr;ai.finish(path,&to)
                          '25fd66093d3fca7854d655b62cc1aa1e2004453025b5f02e50acf3c394a4d2bb')
 
     def test_closest_large_search_preserves_the_2000_expansion_pruning_rule(self):
-        result=run_cpp(large_closest_fixture()+large_closest_case()).stdout
+        # GeneralsX @build Codex 27/10/2026 Four full 128x128 serial traces need more than 10 seconds under Intel macOS TSan.
+        result=run_cpp(large_closest_fixture()+large_closest_case(),timeout=45).stdout
         # The previous monolithic loop produces the same trace, including actual >2,000 pruning checks.
         self.assertEqual(hashlib.sha256(result.encode()).hexdigest(),
                          '38aa4435e7bc5bbb8891a575a29677996d18cb3aa8d29b9e970de7347e28e5d2')
