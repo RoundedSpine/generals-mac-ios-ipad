@@ -18,5 +18,9 @@ def run_cpp(source, extra_flags=(), timeout=10):
                                  '-D_UNIX', *extra_flags, '-I', str(LIB), str(code), '-o', str(binary)], text=True, capture_output=True)
         if result.returncode:
             raise AssertionError(result.stderr)
-        return subprocess.run([str(binary)], text=True, capture_output=True, check=True, timeout=timeout)
+        try:
+            return subprocess.run([str(binary)], text=True, capture_output=True, check=True, timeout=timeout)
+        except subprocess.CalledProcessError as error:
+            # GeneralsX @build Codex 27/10/2026 Surface runtime assertions and sanitizer reports instead of only an exit status.
+            raise AssertionError(error.stdout + error.stderr) from error
 

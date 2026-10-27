@@ -98,6 +98,12 @@ only that workload a 45-second guard. The matrix and production code were not
 reduced to satisfy the guard; other tests retain their 10-second default.
 Actionlint and diff checks pass. Actual iOS SDK compilation/packaging and device
 validation remain pending.
+
+The first SDK workflow attempt, [run 40518666347](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40518666347),
+passed all 162 Mac QA tests but failed the subsequent race-check step before
+compilation. Its public annotation exposed only exit 1. Added captured runtime
+assertion/sanitizer output to the fixture helper and race-suite CI annotations;
+retain all checks and await a concrete diagnosis from the next run.
 The fixture uses production cells, lists, contexts, kernels, dispatcher and
 validation with controlled world/hierarchy/Path services; it does not prove
 full-world race freedom, replay equivalence, device movement, memory or speed.

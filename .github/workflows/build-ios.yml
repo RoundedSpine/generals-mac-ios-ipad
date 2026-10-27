@@ -60,10 +60,20 @@ jobs:
         env:
           CXX: clang++
         run: |
-          python3 scripts/qa/test_occupancy_worker.py --tsan
-          python3 scripts/qa/test_search_context_binding.py --tsan
-          python3 scripts/qa/test_exclusive_search_worker.py --tsan
-          python3 scripts/qa/test_parallel_path_batch.py --tsan
+          # GeneralsX @build Codex 27/10/2026 Make captured race-check failures reviewable in job annotations.
+          python3 - <<'PYTEST'
+          import subprocess
+          import sys
+          for test in ["test_occupancy_worker.py", "test_search_context_binding.py",
+                       "test_exclusive_search_worker.py", "test_parallel_path_batch.py"]:
+              result = subprocess.run([sys.executable, "scripts/qa/" + test, "--tsan"], text=True, capture_output=True)
+              output = result.stdout + result.stderr
+              print(output, flush=True)
+              if result.returncode:
+                  detail = output[-12000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print("::error title=" + test + " ThreadSanitizer::" + detail, flush=True)
+                  sys.exit(result.returncode)
+          PYTEST
 
       - name: Initialize the pinned iOS DXVK fork
         run: git submodule update --init --recursive references/fbraz3-dxvk
