@@ -324,3 +324,7 @@ Run `python3 scripts/qa/test_community_patch.py` for compiled BIG staging, upstr
 priority, pin/profile checks, overlay mounting and retail-root exclusion. See
 [Community Patch iOS](../docs/BUILD/IOS_COMMUNITY_PATCH.md) for Windows conversion
 and macOS packaging.
+
+Run `python3 scripts/qa/test_csf_reserved_header.py` to compile the production text
+parser against retail and nonzero reserved CSF headers, missing labels and extra
+labels. This covers the Community Patch compiler marker without replacing assets.

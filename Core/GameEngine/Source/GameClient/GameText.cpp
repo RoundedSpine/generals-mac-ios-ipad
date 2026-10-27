@@ -113,7 +113,7 @@ struct CSFHeader
 	Int version;
 	Int num_labels;
 	Int num_strings;
-	Int skip;
+	Int reserved; // Reserved CSF header word, not an offset.
 	Int langid;
 
 };
@@ -982,15 +982,11 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 	}
 
 	// GeneralsX @bugfix BenderAI 17/02/2026 - Log header for debugging
-	fprintf(stderr, "[CSF] parseCSF() - Header: id=%#x version=%d num_labels=%d num_strings=%d skip=%d langid=%d\n",
-		header.id, header.version, header.num_labels, header.num_strings, header.skip, header.langid);
+	fprintf(stderr, "[CSF] parseCSF() - Header: id=%#x version=%d num_labels=%d num_strings=%d reserved=%#x langid=%d\n",
+		header.id, header.version, header.num_labels, header.num_strings, header.reserved, header.langid);
 
-	// GeneralsX @bugfix BenderAI 17/02/2026 - Skip extra bytes after header
-	// The 'skip' field indicates how many bytes to advance before reading first label
-	if (header.skip > 0) {
-		fprintf(stderr, "[CSF] parseCSF() - Skipping %d bytes as indicated by header.skip\n", header.skip);
-		file->seek(header.skip, File::CURRENT);
-	}
+	// GeneralsX @bugfix Codex 27/10/2026 The reserved word may contain a compiler marker.
+	// Labels immediately follow the fixed header even when that word is nonzero.
 
 	fprintf(stderr, "[CSF] parseCSF() - Starting main loop (textCount=%d)...\n", textCount);
 
@@ -998,6 +994,9 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 	{
 		Int num;
 		Int num_strings;
+
+		// GeneralsX @bugfix Codex 27/10/2026 Reject extra labels before indexing the allocated table.
+		if (listCount >= textCount) goto quit;
 
 		if ( id != CSF_LABEL )
 		{
@@ -1111,7 +1110,8 @@ Bool GameTextManager::parseCSF( const Char *filename, StringInfo *stringInfo, In
 	}
 
 	fprintf(stderr, "[CSF] parseCSF() - Main loop complete! Processed %d/%d labels\n", listCount, textCount);
-	ok = TRUE;
+	// GeneralsX @bugfix Codex 27/10/2026 An empty or incomplete table must not report success.
+	ok = (listCount == textCount);
 
 quit:
 
