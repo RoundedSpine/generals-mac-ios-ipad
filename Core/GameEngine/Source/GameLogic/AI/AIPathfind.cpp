@@ -4330,7 +4330,9 @@ struct PathfindParallelJob {
  Object *obj = nullptr;
  const LocomotorSet *locomotor = nullptr;
  ObjectID id = INVALID_ID, ignored = INVALID_ID;
- Coord3D from{},to{};
+ Coord3D from{},to{},repulsor2{};
+ Real repulsorRadius=0;
+ Bool safe=false;
  PathfindMovementSettings settings{};
  PathfindCell *start = nullptr, *goal = nullptr;
  ICoord2D startIndex{};
@@ -4350,11 +4352,12 @@ struct PathfindParallelJob {
 struct PathfindParallelBatch {
  PathfindParallelJob jobs[2];
  PathfindParallelJob* preparing = nullptr;
- unsigned long long batches=0, accepted=0, rejected=0, unused=0;
+ unsigned long long batches=0, accepted=0, rejected=0, unused=0, safeSearches=0, safeAccepted=0;
  Bool active=false;
  ~PathfindParallelBatch() {
   fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2\n",
    batches,accepted,rejected,unused);
+  fprintf(stderr,"[PATH_PARALLEL_SAFE] stopped searches=%llu accepted=%llu\n",safeSearches,safeAccepted);
  }
 };
 
@@ -4374,6 +4377,46 @@ Real Pathfinder::searchGroundHeight(Real x, Real y) {
  }
  return height;
 }
+// GeneralsX @feature Codex 27/10/2026 Both search kinds consume once at their original queue position and validate the same live dependencies.
+PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
+ const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
+ PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings)
+{
+ if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
+ for (auto& job:m_parallelBatch->jobs) {
+  if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
+  job.used=true;
+  auto& current=activePathfindSearchContext();
+   const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
+   const auto& before=job.settings;
+   Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,from) && samePoint(job.to,to) &&
+    job.safe==(repulsor2!=nullptr) && (!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius)) &&
+    job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
+    !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
+    job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
+    job.start==start && job.goal==goal && job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y &&
+    before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
+    before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
+    before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
+    before.human==settings.human && !job.reads.overflow;
+#if RETAIL_COMPATIBLE_PATHFINDING
+   valid=valid && job.fixed==s_useFixedPathfinding && !s_forceCleanCells;
+#endif
+   if (valid) valid=job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}) &&
+    job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);});
+   if (valid) for (const auto& query:job.reads.queries) {
+    LiveOccupancyReader live={this,obj};
+    if (!(PathOccupancy::evaluate(query.input,live)==query.result)) {valid=false;break;}
+   }
+   if (valid) for (const auto& height:job.reads.heights) {
+    if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
+   }
+   if (!valid) {++m_parallelBatch->rejected;break;}
+  return &job;
+ }
+ return nullptr;
+}
+
 void Pathfinder::clearParallelBatch() {
  if (!m_parallelBatch) return;
  for (auto& job:m_parallelBatch->jobs) {
@@ -7146,31 +7189,40 @@ void Pathfinder::prepareParallelBatch()
  const ObjectID ids[2]={m_queuedPathfindRequests[m_queuePRHead],m_queuedPathfindRequests[next]};
  if (ids[0]==ids[1]) return;
  Object* objects[2]={TheGameLogic->findObjectByID(ids[0]),TheGameLogic->findObjectByID(ids[1])};
- Coord3D from[2],to[2];ObjectID ignored[2];
+ Coord3D from[2],to[2],repulsor2[2]{};ObjectID ignored[2];
+ Bool safe[2]={false,false};Real repulsorRadius[2]={0,0};
  for (Int i=0;i<2;++i) {
-  if (!objects[i] || !objects[i]->getAIUpdateInterface() ||
-      !objects[i]->getAIUpdateInterface()->predictOrdinaryPath(from[i],to[i],ignored[i]) ||
-      objects[i]->isKindOf(KINDOF_DOZER) ||
+  if (!objects[i] || !objects[i]->getAIUpdateInterface() || objects[i]->isKindOf(KINDOF_DOZER) ||
       (objects[i]->getCrusherLevel()>0 && TheNameKeyGenerator->findExistingNameKey("SquishCollide")==NAMEKEY_INVALID)) return;
+  auto* ai=objects[i]->getAIUpdateInterface();
+  if (!ai->predictOrdinaryPath(from[i],to[i],ignored[i])) {
+   if (!ai->predictSafePath(from[i],to[i],repulsor2[i],repulsorRadius[i])) return;
+   safe[i]=true;
+   // doPathfind's safe branch inherits the current context's ignored obstacle and tunneling state.
+   ignored[i]=mainPathfindSearchContext().m_ignoreObstacleID;
+  }
  }
  try {
   if (!m_parallelBatch) m_parallelBatch=new PathfindParallelBatch;
   if (!m_exclusiveWorker) {
    m_exclusiveWorker=new PathfindExclusiveWorker;
    m_exclusiveWorker->mode="parallel";
-   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_fine worker=1 caller=1\n");
+   fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_and_safe worker=1 caller=1\n");
   }
   auto& batch=*m_parallelBatch;
   for (Int i=0;i<2;++i) {
    auto& job=batch.jobs[i];job.reset();job.obj=objects[i];job.id=ids[i];
    job.locomotor=&objects[i]->getAIUpdateInterface()->getLocomotorSet();
    job.from=from[i];job.to=to[i];job.ignored=ignored[i];job.queueIndex=i?next:m_queuePRHead;
+   job.safe=safe[i];job.repulsor2=repulsor2[i];job.repulsorRadius=repulsorRadius[i];
    job.epoch=m_parallelWorldEpoch;job.lifecycle=PathOccupancy::validationLifecycleEpoch().load();
    job.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
    job.context.m_ignoreObstacleID=ignored[i];job.context.m_parallelReads=&job.reads;
+   if (job.safe) job.context.m_isTunneling=mainPathfindSearchContext().m_isTunneling;
    batch.preparing=&job;
    {SearchContextBinding<PathfindSearchContext> binding(job.context);
-    internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
+    if (job.safe) findSafePath(job.obj,*job.locomotor,&job.from,&job.to,&job.repulsor2,job.repulsorRadius);
+    else internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
    batch.preparing=nullptr;
   }
   batch.active=true;
@@ -7180,12 +7232,13 @@ void Pathfinder::prepareParallelBatch()
     SearchContextBinding<PathfindSearchContext> binding(job.context);
     PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
     const PathfindMovementInput movement={job.obj,*job.locomotor,&job.settings};
-    job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
-     job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
+    if (job.safe) job.outcome=runSafeSearchLoop(job.start,movement,job.settings.human,job.settings.centerInCell,job.settings.radius,job.startIndex,job.to,job.repulsor2,job.repulsorRadius);
+    else job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
+      job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
    };
    // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
    m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
-   for (auto& job:batch.jobs) job.ready=true;
+   for (auto& job:batch.jobs) {job.ready=true;if(job.safe) ++batch.safeSearches;}
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
   }
@@ -7591,49 +7644,22 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	return nullptr;
  };
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
- if (obj && contextBinding.canTransfer() && m_parallelBatch && m_parallelBatch->active) {
-  for (auto& job:m_parallelBatch->jobs) {
-   if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
-   job.used=true; // One attempt; a changed request never reuses this result later.
+ if (contextBinding.canTransfer()) {
+  if (auto* job=takeParallelResult(obj,locomotorSet,*from,*rawTo,nullptr,0,parentCell,goalCell,startCellNdx,settings)) {
    auto& current=activePathfindSearchContext();
-   const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
-   const auto& before=job.settings;
-   Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,*from) && samePoint(job.to,*rawTo) &&
-    job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
-    !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
-    job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
-    job.start==parentCell && job.goal==goalCell && job.startIndex.x==startCellNdx.x && job.startIndex.y==startCellNdx.y &&
-    before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
-    before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
-    before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
-    before.human==settings.human && !job.reads.overflow;
-#if RETAIL_COMPATIBLE_PATHFINDING
-   valid=valid && job.fixed==s_useFixedPathfinding && !s_forceCleanCells;
-#endif
-   if (valid) valid=job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}) &&
-    job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);});
-   if (valid) for (const auto& query:job.reads.queries) {
-    LiveOccupancyReader live={this,obj};
-    if (!(PathOccupancy::evaluate(query.input,live)==query.result)) {valid=false;break;}
-   }
-   if (valid) for (const auto& height:job.reads.heights) {
-    if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
-   }
-   if (!valid) {++m_parallelBatch->rejected;break;}
-   // The ordinary preparation ran normally; replace only its unexecuted scratch with the validated completion.
    current.m_openList.reset();current.m_closedList.reset();current.beginSearch();
-   job.context.m_corridor=current.m_corridor;
-   job.context.m_cumulativeCellsAllocated=0;
+   job->context.m_corridor=current.m_corridor;
+   job->context.m_cumulativeCellsAllocated=0;
    Path* path;
    {
-    SearchContextBinding<PathfindSearchContext> resultBinding(job.context);
-    PathfindSearchContext::AdmissionScope resultAdmission(job.context,job.permanent);
-    path=finish(job.outcome);
+    SearchContextBinding<PathfindSearchContext> resultBinding(job->context);
+    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->permanent);
+    path=finish(job->outcome);
    }
-   current.m_cumulativeCellsAllocated+=job.context.m_cumulativeCellsAllocated;
-   current.m_isTunneling=job.context.m_isTunneling;
-   current.m_ignoreObstacleID=job.context.m_ignoreObstacleID;
-   current.m_corridor.swap(job.context.m_corridor);
+   current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
+   current.m_isTunneling=job->context.m_isTunneling;
+   current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
+   current.m_corridor.swap(job->context.m_corridor);
    ++m_parallelBatch->accepted;
    return path;
   }
@@ -9966,15 +9992,21 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 }
 
 
+// GeneralsX @refactor Codex 27/10/2026 Share the exact XY conversion; escape scoring never consumes terrain height.
+static void pathfindCellXY(Int cellX, Int cellY, Bool centerInCell, Coord3D& pos)
+{
+ if (centerInCell) {
+  pos.x = ((Real)cellX + 0.5f) * PATHFIND_CELL_SIZE_F;
+  pos.y = ((Real)cellY + 0.5f) * PATHFIND_CELL_SIZE_F;
+ } else {
+  pos.x = ((Real)cellX+0.05) * PATHFIND_CELL_SIZE_F;
+  pos.y = ((Real)cellY+0.05) * PATHFIND_CELL_SIZE_F;
+ }
+}
+
 void Pathfinder::adjustCoordToCell(Int cellX, Int cellY, Bool centerInCell, Coord3D &pos, PathfindLayerEnum layer)
 {
-	if (centerInCell) {
-		pos.x = ((Real)cellX + 0.5f) * PATHFIND_CELL_SIZE_F;
-		pos.y = ((Real)cellY + 0.5f) * PATHFIND_CELL_SIZE_F;
-	} else {
-		pos.x = ((Real)cellX+0.05) * PATHFIND_CELL_SIZE_F;
-		pos.y = ((Real)cellY+0.05) * PATHFIND_CELL_SIZE_F;
-	}
+	pathfindCellXY(cellX, cellY, centerInCell, pos);
 	pos.z = TheTerrainLogic->getLayerHeight( pos.x, pos.y, layer );
 }
 
@@ -12048,109 +12080,97 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 }
 
 /** Find a short, valid path to a location that is safe from the repulsors.  */
-Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet,
-		const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius)
+// GeneralsX @feature Codex 27/10/2026 Escape scoring/expansion is effect-free; retain original ordering and the soft 2,000-cell threshold.
+Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* parentCell,
+ const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius, const ICoord2D& startIndex,
+ const Coord3D& repulsor1, const Coord3D& repulsor2, Real repulsorRadius)
 {
-	//CRCDEBUG_LOG(("Pathfinder::findSafePath()"));
-	if (m_isMapReady == false) return nullptr; // Should always be ok.
-#if defined(RTS_DEBUG)
-//	Int startTimeMS = ::GetTickCount();
-#endif
+ const Real repulsorDistSqr=repulsorRadius*repulsorRadius;
+ const Int MAX_CELLS=MAX_SAFE_PATH_CELL_COUNT;
+ Int cellCount=0;
+ Real farthestDistanceSqr=0;
+ while (!searchState().m_openList.empty()) {
+  parentCell=searchState().m_openList.getHead();
+  parentCell->removeFromOpenList(searchState().m_openList);
+  Coord3D cellCenter;
+  pathfindCellXY(parentCell->getXIndex(),parentCell->getYIndex(),centerInCell,cellCenter);
+  Real dx=cellCenter.x-repulsor1.x;
+  Real dy=cellCenter.y-repulsor1.y;
+  Bool ok=false;
+  Real distSqr=dx*dx+dy*dy;
+  dx=cellCenter.x-repulsor2.x;
+  dy=cellCenter.y-repulsor2.y;
+  Real distSqr2=dx*dx+dy*dy;
+  if (distSqr2<distSqr) distSqr=distSqr2;
+  if (distSqr>repulsorDistSqr) ok=true;
+  if (searchState().m_openList.empty() && cellCount>0) ok=true;
+  if (distSqr>farthestDistanceSqr) {
+   farthestDistanceSqr=distSqr;
+   if (cellCount>MAX_CELLS) ok=true;
+  }
+  if (ok && checkDestination(movement.obj,parentCell->getXIndex(),parentCell->getYIndex(),
+      parentCell->getLayer(),radius,centerInCell)) return {parentCell,cellCount,true};
+  parentCell->putOnClosedList(searchState().m_closedList);
+  checkChangeLayers(parentCell);
+  cellCount+=examineNeighboringCellsWithMovement(parentCell,nullptr,movement,isHuman,centerInCell,radius,startIndex,movement.obj,NO_ATTACK);
+ }
+ return {parentCell,cellCount,false};
+}
 
-	const Int MAX_CELLS = MAX_SAFE_PATH_CELL_COUNT; // this is a rather expensive operation, so limit the search.
-
-	Bool centerInCell;
-	Int radius;
-	getRadiusAndCenter(obj, radius, centerInCell);
-	Real repulsorDistSqr = repulsorRadius*repulsorRadius;
-	Int cellCount = 0;
-	Bool isHuman = true;
-	if (obj && obj->getControllingPlayer() && (obj->getControllingPlayer()->getPlayerType()==PLAYER_COMPUTER)) {
-		isHuman = false; // computer gets to cheat.
-	}
-
+Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet,
+  const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius)
+{
+ if (m_isMapReady == false) return nullptr;
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-	beginSearchState();
+ SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
 #endif
-	DEBUG_ASSERTCRASH(searchState().m_openList.empty() && searchState().m_closedList.empty(), ("Dangling lists."));
-	// create unique "mark" values for open and closed cells for this pathfind invocation
-
-	m_zoneManager.setAllPassable();
-	// determine start cell
-	ICoord2D startCellNdx;
-	worldToCell(obj->getPosition(), &startCellNdx);
-	PathfindCell *parentCell = getClippedCell( obj->getLayer(), obj->getPosition() );
-	if (parentCell == nullptr)
-		return nullptr;
-	if (!obj->getAIUpdateInterface()) {
-		return nullptr; // shouldn't happen, but can't move it without an ai.
-	}
-	if (!parentCell->allocateSearchInfo(startCellNdx)) {
-		return nullptr;
-	}
-	parentCell->startPathfind( nullptr);
-
-	// initialize "open" list to contain start cell
+ Bool centerInCell;Int radius;
+ getRadiusAndCenter(obj,radius,centerInCell);
+ Bool isHuman=true;
+ if (obj && obj->getControllingPlayer() && obj->getControllingPlayer()->getPlayerType()==PLAYER_COMPUTER) isHuman=false;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ const auto settings=captureMovementSettings(obj,locomotorSet,radius,centerInCell,isHuman);
+ const PathfindMovementInput movement={obj,locomotorSet,&settings};
+ beginSearchState();
+ PathfindSearchContext::AdmissionScope admission(activePathfindSearchContext(),PathfindSearchContext::permanentRecordsInUse());
+#else
+ const PathfindMovementInput movement={obj,locomotorSet,nullptr};
+#endif
+ DEBUG_ASSERTCRASH(searchState().m_openList.empty() && searchState().m_closedList.empty(),("Dangling lists."));
+ m_zoneManager.setAllPassable();
+ ICoord2D startCellNdx;
+ const Coord3D startPosition=*obj->getPosition();
+ worldToCell(&startPosition,&startCellNdx);
+ PathfindCell* parentCell=getClippedCell(obj->getLayer(),&startPosition);
+ if (!parentCell || !obj->getAIUpdateInterface()) return nullptr;
+ if (!parentCell->allocateSearchInfo(startCellNdx)) return nullptr;
+ parentCell->startPathfind(nullptr);
 #if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		searchState().m_openList.reset(parentCell);
-	}
-	else
+ if (!s_useFixedPathfinding) searchState().m_openList.reset(parentCell);
+ else
 #endif
-	{
-		searchState().m_openList.reset();
-		parentCell->putOnSortedOpenList(searchState().m_openList);
-	}
-
-	// "closed" list is initially empty
-	searchState().m_closedList.reset();
-
-	//
-	// Continue search until "open" list is empty, or
-	// until goal is found.
-	//
-
-	Real farthestDistanceSqr = 0;
-
-	while( !searchState().m_openList.empty() )
-	{
-		// take head cell off of open list - it has lowest estimated total path cost
-		parentCell = searchState().m_openList.getHead();
-		parentCell->removeFromOpenList(searchState().m_openList);
-
-		Coord3D cellCenter;
-		adjustCoordToCell(parentCell->getXIndex(), parentCell->getYIndex(), centerInCell, cellCenter, parentCell->getLayer());
-
-		///@todo - Adjust cost intersecting path - closer to front is more expensive. jba.
-		Real dx = cellCenter.x-repulsorPos1->x;
-		Real dy = cellCenter.y-repulsorPos1->y;
-		Bool ok = false;
-		Real distSqr = dx*dx+dy*dy;
-		dx = cellCenter.x-repulsorPos2->x;
-		dy = cellCenter.y-repulsorPos2->y;
-		Real distSqr2 = dx*dx+dy*dy;
-		if (distSqr2<distSqr) {
-			distSqr = distSqr2;
-		}
-		if (distSqr>repulsorDistSqr) {
-			ok = true;
-		}
-		if (searchState().m_openList.empty() && cellCount>0) {
-			ok = true; // exhausted the search space, just take the last cell.
-		}
-		if (distSqr > farthestDistanceSqr) {
-			farthestDistanceSqr = distSqr;
-			if (cellCount > MAX_CELLS) {
-#ifdef INTENSE_DEBUG
-				DEBUG_LOG(("Took intermediate path, dist %f, goal dist %f", sqrt(farthestDistanceSqr), repulsorRadius));
+ {
+  searchState().m_openList.reset();parentCell->putOnSortedOpenList(searchState().m_openList);
+ }
+ searchState().m_closedList.reset();
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (m_parallelBatch && m_parallelBatch->preparing) {
+  auto& job=*m_parallelBatch->preparing;
+  job.start=parentCell;job.goal=nullptr;job.startIndex=startCellNdx;job.settings=settings;
+  job.tunneling=searchState().m_isTunneling;
+  job.permanent=PathfindSearchContext::permanentRecordsInUse();
+#if RETAIL_COMPATIBLE_PATHFINDING
+  job.fixed=s_useFixedPathfinding;
 #endif
-				ok = true; // Already a big search, just take this one.
-			}
-		}
-		if ( ok &&
-			checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(),
-				parentCell->getLayer(), radius, centerInCell)) {
-			// success - found a path to the goal
+  job.captured=job.safe && !settings.dozer && (!settings.crusher ||
+    TheNameKeyGenerator->findExistingNameKey("SquishCollide")!=NAMEKEY_INVALID);
+  return nullptr;
+ }
+#endif
+ auto finish=[&](const OrdinarySearchOutcome& outcome)->Path* {
+  parentCell=outcome.lastCell;
+  const Int cellCount=outcome.cellsExamined;
+  if (outcome.found) {
 			Bool show = TheGlobalData->m_debugAI;
 #ifdef INTENSE_DEBUG
 			Int count = 0;
@@ -12189,17 +12209,7 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 				parentCell->releaseSearchInfo();
 			}
 			return path;
-		}
-
-		// put parent cell onto closed list - its evaluation is finished
-		parentCell->putOnClosedList( searchState().m_closedList );
-
-		// Check to see if we can change layers in this cell.
-		checkChangeLayers(parentCell);
-
-		cellCount += examineNeighboringCells(parentCell, nullptr, locomotorSet, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
-
-	}
+  }
 
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("obj %s %x count %d", obj->getTemplate()->getName().str(), obj, cellCount));
@@ -12232,6 +12242,32 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 		parentCell->releaseSearchInfo();
 	}
 	return nullptr;
+ };
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ if (contextBinding.canTransfer()) {
+  if (auto* job=takeParallelResult(obj,locomotorSet,startPosition,*repulsorPos1,repulsorPos2,repulsorRadius,
+      parentCell,nullptr,startCellNdx,settings)) {
+   auto& current=activePathfindSearchContext();
+   current.m_openList.reset();current.m_closedList.reset();current.beginSearch();
+   job->context.m_corridor=current.m_corridor;
+   job->context.m_cumulativeCellsAllocated=0;
+   Path* path;
+   {
+    SearchContextBinding<PathfindSearchContext> resultBinding(job->context);
+    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->permanent);
+    path=finish(job->outcome);
+   }
+   current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
+   current.m_isTunneling=job->context.m_isTunneling;
+   current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
+   current.m_corridor.swap(job->context.m_corridor);
+   ++m_parallelBatch->accepted;++m_parallelBatch->safeAccepted;
+   return path;
+  }
+ }
+#endif
+ return finish(runSafeSearchLoop(parentCell,movement,isHuman,centerInCell,radius,startCellNdx,*repulsorPos1,*repulsorPos2,repulsorRadius));
 }
 
 //-----------------------------------------------------------------------------

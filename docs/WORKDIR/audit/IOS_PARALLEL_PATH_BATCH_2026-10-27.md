@@ -144,6 +144,10 @@ enough reuse to justify the extra work.
 
 ## Remaining scope
 
+The follow-up [escape-search stage](IOS_PARALLEL_ESCAPE_SEARCH_2026-10-27.md)
+extends this baseline to safe and mixed ordinary/safe pairs. The remainder of
+this report describes the original ordinary-only stage and its evidence.
+
 This introduces actual simultaneous ordinary searches and validated ordered reuse.
 It is still narrower than Reimagined's full prediction/worker system. Closest, safe
 and attack kernels, blocked/path patch requests, dozers and other special requests

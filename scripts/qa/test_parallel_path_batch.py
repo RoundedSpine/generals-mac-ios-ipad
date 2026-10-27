@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Compile real cell/context, two-task dispatch, ordinary search and ordered consumption with a controlled world."""
+"""Compile real cells, two-task dispatch, ordinary/escape searches and ordered consumption with a controlled world."""
 # GeneralsX @feature Codex 27/10/2026 Verify independent routes and rejection of stale speculative searches.
 import sys
 import unittest
+import hashlib
 from functools import partial
 from compiled_harness import ROOT, run_cpp
 from test_path_movement_inputs import function, block, HEADER, SOURCE
@@ -29,7 +30,7 @@ using Real=float;using LocomotorSurfaceTypeMask=int;
 struct Coord3D {Real x=0,y=0,z=0;};
 struct IRegion2D {ICoord2D lo{0,0},hi{11,11};};
 const int LAYER_WALL=2,PLAYER_COMPUTER=2,KINDOF_DOZER=1,KINDOF_VEHICLE=2,ENEMIES=3,ALLIES=4,KINDOF_INFANTRY=5,TEST_CRUSH_OR_SQUISH=0;
-const int LAYER_LAST=3,ZONE_BLOCK_SIZE=4,PATHFIND_QUEUE_LEN=512,PATHFIND_CELL_SIZE=10;
+const int LAYER_LAST=3,ZONE_BLOCK_SIZE=4,PATHFIND_QUEUE_LEN=512,PATHFIND_CELL_SIZE=10,MAX_SAFE_PATH_CELL_COUNT=2000;
 const Real PATHFIND_CELL_SIZE_F=10;
 struct Player{int type=1;int getPlayerType()const{return type;}};
 struct LocomotorSet {int surfaces=1;bool downhill=false;
@@ -39,8 +40,10 @@ struct AIUpdateInterface {
  void doPathfind(Pathfinder*);
  Object* obj=nullptr;LocomotorSet locomotor;Coord3D from{25,25,0},to{95,95,0};ObjectID ignored=0;
  bool eligible=true,through=false,idle=true;
+ bool safe=false;Coord3D repulsor1{25,25,0},repulsor2{25,25,0};Real repulsorRadius=60;
  ObjectID getIgnoredObstacleID()const{return ignored;}bool isAircraftThatAdjustsDestination()const{return false;}bool isIdle()const{return idle;}
- bool predictOrdinaryPath(Coord3D&f,Coord3D&t,ObjectID&i){f=from;t=to;i=ignored;return eligible;}
+ bool predictOrdinaryPath(Coord3D&f,Coord3D&t,ObjectID&i){f=from;t=to;i=ignored;return eligible&&!safe;}
+ bool predictSafePath(Coord3D&f,Coord3D&r1,Coord3D&r2,Real&r){f=from;r1=repulsor1;r2=repulsor2;r=repulsorRadius;return eligible&&safe;}
  const LocomotorSet&getLocomotorSet()const{return locomotor;}
  bool canPathThroughUnits()const{return through;}
 };
@@ -53,6 +56,7 @@ struct Object {
  AIUpdateInterface*getAI()const{return getAIUpdateInterface();}
  bool canCrushOrSquish(Object*,int)const{return crush;}
  ObjectID getID()const{return id;}
+ const Coord3D*getPosition()const{return &ai.from;}
 };
 struct Logic {std::map<ObjectID,Object*> objects;Object*findObjectByID(ObjectID id){auto i=objects.find(id);return i==objects.end()?nullptr:i->second;}}logic;
 Logic*TheGameLogic=&logic;
@@ -81,17 +85,20 @@ struct Pathfinder {
  struct Layer {PathfindCell*getCell(int,int){return nullptr;}}m_layers[4];
  struct Zones {
   bool needToCalculateZones(){return false;}template<class... A>void calculateZones(A&&...){}
+  void setAllPassable(){auto&c=activePathfindSearchContext();for(std::size_t i=0;i<c.m_corridor.size();++i)c.setCorridorPassable(i,true);}
   int getEffectiveZone(int,bool,int z){return z;}int getEffectiveTerrainZone(int z){return z;}
   bool isPassable(int x,int y){auto block=std::size_t(x/4)*3+y/4;auto&c=activePathfindSearchContext();
    bool result=c.corridorPassable(block);observeParallelCorridor(block,result);return result;}
  }m_zoneManager;
  ObjectID m_queuedPathfindRequests[512]{};int m_queuePRHead=0,m_queuePRTail=2;
  std::atomic<int> workerLoops{0},callerLoops{0};bool rendezvous=false;
+ std::vector<ICoord2D> serialExpansion;
  std::atomic<int> arrived{0};
  std::map<ObjectID,Path> results;
  Pathfinder();~Pathfinder();
  PathfindSearchContext&searchState(){return activePathfindSearchContext();}
- void getRadiusAndCenter(const Object*,int&r,bool&c){r=0;c=true;}
+ int testRadius=0;bool testCenter=true;
+ void getRadiusAndCenter(const Object*,int&r,bool&c){r=testRadius;c=testCenter;}
  void clip(Coord3D*,Coord3D*){}
  void worldToCell(const Coord3D*p,ICoord2D*c){*c={int(p->x/10),int(p->y/10)};}
  PathfindCell*getCell(int,int,int);
@@ -101,10 +108,13 @@ struct Pathfinder {
  Real searchGroundHeight(Real,Real);
  void processPathfindQueue();unsigned m_occupancySamplesRemaining=0;
  void prepareParallelBatch();void clearParallelBatch();
+ PathfindParallelJob*takeParallelResult(const Object*,const LocomotorSet&,const Coord3D&,const Coord3D&,const Coord3D*,Real,
+  PathfindCell*,PathfindCell*,const ICoord2D&,const PathfindMovementSettings&);
  void beginSearchState();void cleanOpenAndClosedLists();
  void forceCleanCells(){++m_parallelWorldEpoch;searchState().m_openList.reset();searchState().m_closedList.reset();searchState().beginSearch();}
  void debugShowSearch(bool){}
- bool checkDestination(const Object*,int,int,int,int,bool){return true;}
+ bool rejectDestinations=false;
+ bool checkDestination(const Object*,int,int,int,int,bool);
  bool checkForMovement(const Object*,TCheckMovementInfo&);
  PathOccupancy::Result evaluateOccupancyQuery(const Object*,const PathOccupancy::Input&);
  bool checkCellOutsideExtents(ICoord2D&c){return c.x<0||c.x>11||c.y<0||c.y>11;}
@@ -123,6 +133,10 @@ struct Pathfinder {
  int examineNeighboringCells(PathfindCell*,PathfindCell*,const LocomotorSet&,bool,bool,int,const ICoord2D&,const Object*,int);
  int examineNeighboringCellsWithMovement(PathfindCell*,PathfindCell*,const PathfindMovementInput&,bool,bool,int,const ICoord2D&,const Object*,int);
  OrdinarySearchOutcome runOrdinarySearchLoop(PathfindCell*,PathfindCell*,const PathfindMovementInput&,bool,bool,int,const ICoord2D&,const Object*);
+ OrdinarySearchOutcome runSafeSearchLoop(PathfindCell*,const PathfindMovementInput&,bool,bool,int,const ICoord2D&,const Coord3D&,const Coord3D&,Real);
+ Path*findSafePath(const Object*,const LocomotorSet&,const Coord3D*,const Coord3D*,const Coord3D*,Real);
+ void adjustCoordToCell(int x,int y,bool center,Coord3D&p,int){pathXY(x,y,center,p);p.z=terrain.getGroundHeight(p.x,p.y);}
+ static void pathXY(int x,int y,bool center,Coord3D&p){p.x=center?(float(x)+.5f)*10:(float(x)+.05)*10;p.y=center?(float(y)+.5f)*10:(float(y)+.05)*10;}
  Path*internalFindPath(Object*,const LocomotorSet&,const Coord3D*,const Coord3D*);
 };
 ''' + block(SOURCE, 'struct LiveOccupancyReader {') + '\n' + block(SOURCE, 'struct PathfindExclusiveWorker {') + '\n' + block(SOURCE, 'struct PathfindParallelReads {') + '\n' + block(SOURCE, 'struct PathfindParallelJob {') + '\n' + block(SOURCE, 'struct PathfindParallelBatch {')
@@ -140,6 +154,7 @@ struct Pathfinder {
     source += '\n#define PROFILER_PLOT(a,b) ((void)0)\n'
     source += '\n'.join(function(m) for m in [
         'void Pathfinder::processPathfindQueue()', 'void observeParallelCorridor(', 'void Pathfinder::observeParallelCell(', 'Real Pathfinder::searchGroundHeight(',
+        'PathfindParallelJob* Pathfinder::takeParallelResult(',
         'void Pathfinder::clearParallelBatch()', 'void Pathfinder::prepareParallelBatch()',
         'void Pathfinder::beginSearchState()', 'void Pathfinder::cleanOpenAndClosedLists()',
         'PathfindMovementSettings Pathfinder::captureMovementSettings(',
@@ -147,10 +162,13 @@ struct Pathfinder {
         'Bool Pathfinder::checkForMovement(', '/*static*/ Int Pathfinder::examineCellsCallback(', 'Int Pathfinder::examineNeighboringCells(',
         'Int Pathfinder::examineNeighboringCellsWithMovement(',
         'Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(', 'Path *Pathfinder::internalFindPath(',
+        'static void pathfindCellXY(', 'Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(', 'Path *Pathfinder::findSafePath(',
     ])
     source += r'''
 std::vector<ObjectID> applied;
-void AIUpdateInterface::doPathfind(Pathfinder*p){assert(std::this_thread::get_id()==p->owner);applied.push_back(obj->getID());p->internalFindPath(obj,locomotor,&from,&to);}
+void AIUpdateInterface::doPathfind(Pathfinder*p){assert(std::this_thread::get_id()==p->owner);applied.push_back(obj->getID());
+ if(safe)p->findSafePath(obj,locomotor,&from,&repulsor1,&repulsor2,repulsorRadius);
+ else p->internalFindPath(obj,locomotor,&from,&to);}
 Pathfinder::Pathfinder(){mainPathfindSearchContext().resizeCorridor(9);
  for(int x=0;x<12;++x){m_map[x]=storage[x];for(int y=0;y<12;++y){storage[x][y].setLayer(1);storage[x][y].setZone(1);}}
 }
@@ -160,8 +178,14 @@ PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object*obj,const 
  if(auto* reads=searchState().m_parallelReads)reads->query(input,result);
  return result;
 }
-void Pathfinder::checkChangeLayers(PathfindCell*) {
+bool Pathfinder::checkDestination(const Object*obj,int x,int y,int layer,int radius,bool center){
+ if(rejectDestinations)return false;
+ PathOccupancy::Input input;input.destination=true;input.x=x;input.y=y;input.layer=layer;input.radius=radius;input.center=center;
+ return evaluateOccupancyQuery(obj,input).allowed;
+}
+void Pathfinder::checkChangeLayers(PathfindCell*cell) {
  if(ExclusiveSearchWorker::onWorker())++workerLoops;else ++callerLoops;
+ if(!searchState().m_parallelReads)serialExpansion.push_back({cell->getXIndex(),cell->getYIndex()});
  // Both jobs must reach the kernel before either can proceed: catches a silently serialized executor.
  if(rendezvous && searchState().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}
 }
@@ -178,7 +202,9 @@ struct World {
  }
  ~World(){logic.objects.clear();PathfindCellInfo::releaseCellInfos();}
  void queue(Pathfinder&p){p.m_queuedPathfindRequests[0]=1;p.m_queuedPathfindRequests[1]=2;}
- Path*consume(Pathfinder&p,Object&o){if(p.m_parallelBatch)for(auto&job:p.m_parallelBatch->jobs)if(job.id==o.id)p.m_queuePRHead=job.queueIndex;return p.internalFindPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to);}
+ Path*consume(Pathfinder&p,Object&o){if(p.m_parallelBatch)for(auto&job:p.m_parallelBatch->jobs)if(job.id==o.id)p.m_queuePRHead=job.queueIndex;
+  if(o.ai.safe)return p.findSafePath(&o,o.ai.locomotor,&o.ai.from,&o.ai.repulsor1,&o.ai.repulsor2,o.ai.repulsorRadius);
+  return p.internalFindPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to);}
 };
 '''
     source=source.replace('if(rendezvous && searchState().m_parallelReads && searchState().m_closedList.getHead()==searchState().m_closedList.getTailDummy()){}',
@@ -186,7 +212,104 @@ struct World {
     return source
 
 
+def safe_route_cases():
+    return r'''
+int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radius:{0,1})for(bool tunneling:{false,true})for(int seed=0;seed<16;++seed){
+ World w;Pathfinder p;s_useFixedPathfinding=fixed;p.testCenter=center;p.testRadius=radius;
+ w.a.ai.safe=true;w.a.ai.repulsor1={float(25+(seed%3)*10),25,0};w.a.ai.repulsor2={55,55,10};
+ w.a.ai.repulsorRadius=seed%4==0?500:60;p.rejectDestinations=seed%7==0;
+ for(int x=0;x<12;++x)for(int y=0;y<12;++y)if((x*31+y*17+seed*13)%11==0)p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.storage[2][2].setType(PathfindCell::CELL_CLEAR);
+ mainPathfindSearchContext().m_isTunneling=tunneling;
+ mainPathfindSearchContext().m_cumulativeCellsAllocated=0;
+ auto*path=w.consume(p,w.a);
+ std::printf("%d:%d:%d:%d:%d:%d R ",fixed,center,radius,tunneling,seed,path!=nullptr);
+ if(path)for(auto c:path->route)std::printf("%d,%d;",c.x,c.y);
+ std::printf(" E ");for(auto c:p.serialExpansion)std::printf("%d,%d;",c.x,c.y);
+ auto&state=mainPathfindSearchContext();
+ std::printf(" B %d T %d I %d\n",state.m_cumulativeCellsAllocated,state.m_isTunneling,int(state.m_ignoreObstacleID));
+ std::printf(" C %d %d %zu\n",state.m_openList.empty(),state.m_closedList.empty(),state.m_records.size());
+ assert(state.m_openList.empty()&&state.m_closedList.empty());
+}}
+'''
+
+
 class ParallelBatchTests(unittest.TestCase):
+    def test_safe_serial_routes_expansions_and_cleanup_match_previous_engine(self):
+        for limit in [2000,3]:
+            source=fixture().replace('MAX_SAFE_PATH_CELL_COUNT=2000',f'MAX_SAFE_PATH_CELL_COUNT={limit}')
+            result=run_cpp(source+safe_route_cases()).stdout
+            # Captured from f023ce8e9's previous monolithic safe search with these same world services.
+            self.assertEqual(hashlib.sha256(result.encode()).hexdigest(),
+                             {2000:'549220bfbce123c6c998b3ac08fc72b7e9ffd4712e9cdeb93ab073768966a3a2',
+                              3:'9775eb34fb0bd21fe9b15e8f3007722a6dc842a8d3055976241783d62491dafd'}[limit])
+
+    def test_safe_and_mixed_pairs_match_serial_routes_and_budget(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fixed:{false,true})for(int kinds:{1,2,3})for(int seed=0;seed<8;++seed){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;
+ w.a.ai.safe=(kinds&1)!=0;w.b.ai.safe=(kinds&2)!=0;
+ w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2={65,65,0};
+ for(int x=0;x<12;++x)for(int y=0;y<12;++y)if((x*31+y*17+seed*13)%11==0)p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.storage[2][2].setType(PathfindCell::CELL_CLEAR);p.storage[2][8].setType(PathfindCell::CELL_CLEAR);
+ p.storage[9][9].setType(PathfindCell::CELL_CLEAR);p.storage[9][2].setType(PathfindCell::CELL_CLEAR);
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ auto&state=mainPathfindSearchContext();state.m_cumulativeCellsAllocated=0;
+ auto a=route(w.consume(p,w.a)),b=route(w.consume(p,w.b));auto budget=state.m_cumulativeCellsAllocated;
+ state.m_cumulativeCellsAllocated=0;p.serialExpansion.clear();p.prepareParallelBatch();
+ assert(p.m_parallelBatch->batches==1&&p.m_exclusiveWorker->searches==1);
+ assert(route(w.consume(p,w.a))==a);assert(route(w.consume(p,w.b))==b);
+ assert(p.m_parallelBatch->accepted==2&&p.m_parallelBatch->rejected==0);
+ assert(p.m_parallelBatch->safeSearches==unsigned(w.a.ai.safe+w.b.ai.safe));
+ assert(p.m_parallelBatch->safeAccepted==p.m_parallelBatch->safeSearches);
+ assert(state.m_cumulativeCellsAllocated==budget&&state.m_openList.empty()&&state.m_closedList.empty());
+}}
+''')
+
+    def test_two_safe_searches_really_overlap_and_finalize_on_main(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);w.a.ai.safe=w.b.ai.safe=true;
+ w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2=w.b.ai.from;
+ p.rendezvous=true;p.prepareParallelBatch();assert(p.arrived==2&&p.workerLoops>0&&p.callerLoops>0);
+ assert(w.consume(p,w.a)&&w.consume(p,w.b));assert(p.m_parallelBatch->safeAccepted==2);
+}
+''')
+
+    def test_safe_rejects_changed_repulsors_radius_request_and_live_world(self):
+        run_cpp(fixture()+r'''
+int main(){for(int change=0;change<11;++change){World w;Pathfinder p;w.queue(p);w.b.ai.safe=true;
+ w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2=w.b.ai.from;
+ p.prepareParallelBatch();assert(w.consume(p,w.a));
+ switch(change){
+ case 0:w.b.ai.repulsor1.x+=1;break;
+ case 1:w.b.ai.repulsor2.y+=1;break;
+ case 2:w.b.ai.repulsorRadius+=1;break;
+ case 3:w.b.ai.from.x+=1;break;
+ case 4:w.b.ai.safe=false;break;
+ case 5:mainPathfindSearchContext().m_ignoreObstacleID=57;break;
+ case 6:mainPathfindSearchContext().m_isTunneling=true;break;
+ case 7:PathOccupancy::validationLifecycleEpoch().fetch_add(1);break;
+ case 8:p.storage[2][8].setPinched(true);break;
+ case 9:w.b.ai.locomotor.surfaces=3;break;
+ case 10:p.m_parallelBatch->jobs[1].reads.overflow=true;break;
+ }
+ w.consume(p,w.b);assert(p.m_parallelBatch->accepted==1&&p.m_parallelBatch->rejected==1&&p.m_parallelBatch->safeAccepted==0);
+ auto searched=p.m_exclusiveWorker->searches;w.consume(p,w.b);assert(p.m_parallelBatch->rejected==1&&p.m_exclusiveWorker->searches==searched);
+}}
+''')
+
+    def test_safe_queue_budget_and_inherited_ignore_are_preserved(self):
+        source=fixture().replace('PATHFIND_CELLS_PER_FRAME=5000','PATHFIND_CELLS_PER_FRAME=1')
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;w.queue(p);w.a.ai.safe=w.b.ai.safe=true;
+ mainPathfindSearchContext().m_ignoreObstacleID=41;w.a.ai.ignored=77;w.b.ai.ignored=78;
+ p.processPathfindQueue();assert(p.m_queuePRHead==1&&p.m_parallelBatch->safeAccepted==1&&p.m_parallelBatch->unused==1);
+ assert(mainPathfindSearchContext().m_ignoreObstacleID==41);
+ assert((applied==std::vector<ObjectID>{1}));
+ p.processPathfindQueue();assert((applied==std::vector<ObjectID>{1,2})&&p.m_queuePRHead==2);
+}
+''')
+
     def test_two_actual_searches_and_ordered_reuse(self):
         run_cpp(fixture() + r'''
 int main(){World w;Pathfinder p;w.queue(p);p.rendezvous=true;p.prepareParallelBatch();
@@ -196,6 +319,78 @@ int main(){World w;Pathfinder p;w.queue(p);p.rendezvous=true;p.prepareParallelBa
  p.m_queuePRHead=1;p.prepareParallelBatch();assert(p.m_parallelBatch->batches==1);
  assert(w.consume(p,w.b));assert(p.m_parallelBatch->accepted==2&&p.m_parallelBatch->rejected==0);
  assert(!mainPathfindSearchContext().m_parallelReads);
+}
+''')
+
+    def test_safe_prediction_copies_live_repulsors_without_mutating_ai(self):
+        ai_source=(ROOT/'GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/AIUpdate.cpp').read_text()
+        a=ai_source.index('Bool AIUpdateInterface::predictSafePath(')
+        predictor=ai_source[a:ai_source.index('\n}',a)+2]
+        run_cpp(r'''
+#include <cassert>
+#include <map>
+using Bool=bool;using Real=float;using ObjectID=int;
+struct Coord3D{float x=0,y=0,z=0;void set(float a,float b,float c){x=a;y=b;z=c;}};
+struct Object{Coord3D position;float vision=50;const Coord3D*getPosition(){return &position;}float getVisionRange(){return vision;}};
+struct Logic{std::map<int,Object*> objects;Object*findObjectByID(int id){auto i=objects.find(id);return i==objects.end()?nullptr:i->second;}}logic;
+auto*TheGameLogic=&logic;
+struct AI{struct Data{float m_repulsedDistance=25;}data;Data*getAiData(){return &data;}}ai;
+auto*TheAI=&ai;
+struct AIUpdateInterface{bool m_waitingForPath=true,m_isSafePath=true;int m_repulsor1=1,m_repulsor2=2;Object obj;
+ Object*getObject(){return &obj;}bool predictSafePath(Coord3D&,Coord3D&,Coord3D&,Real&);};
+'''+predictor+r'''
+int main(){AIUpdateInterface update;update.obj.position={10,20,30};Coord3D from,r1,r2;float radius=0;
+ assert(update.predictSafePath(from,r1,r2,radius));assert(from.x==10&&from.z==30&&r1.x==-1000&&r2.y==-1000&&radius==75);
+ Object first,second;first.position={40,50,60};second.position={70,80,90};logic.objects[1]=&first;
+ assert(update.predictSafePath(from,r1,r2,radius));assert(r1.z==60&&r2.z==60);
+ logic.objects[2]=&second;assert(update.predictSafePath(from,r1,r2,radius));assert(r1.x==40&&r2.x==70);
+ logic.objects.erase(1);assert(update.predictSafePath(from,r1,r2,radius));assert(r1.x==-1000&&r2.x==70);
+ second.position.x=99;update.obj.vision=100;ai.data.m_repulsedDistance=5;
+ assert(update.predictSafePath(from,r1,r2,radius));assert(r2.x==99&&radius==105);
+ assert(update.m_waitingForPath&&update.m_isSafePath&&update.m_repulsor1==1&&update.m_repulsor2==2&&update.obj.position.x==10);
+ update.m_waitingForPath=false;r1.x=123;assert(!update.predictSafePath(from,r1,r2,radius)&&r1.x==123);
+ update.m_waitingForPath=true;update.m_isSafePath=false;assert(!update.predictSafePath(from,r1,r2,radius)&&r1.x==123);
+}
+''')
+
+    def test_safe_pause_blocks_admission_and_reset_discards_results(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);w.a.ai.safe=w.b.ai.safe=true;
+ PathOccupancy::validationPaused().store(true);p.prepareParallelBatch();assert(!p.m_parallelBatch);
+ PathOccupancy::validationPaused().store(false);p.prepareParallelBatch();assert(p.m_parallelBatch->safeSearches==2);
+ PathOccupancy::validationPaused().store(true);w.consume(p,w.a);assert(p.m_parallelBatch->rejected==1);
+ p.clearParallelBatch();assert(!p.m_parallelBatch->active&&p.m_parallelBatch->unused==1);
+ assert(!p.m_parallelBatch->jobs[0].context.m_parallelReads&&!p.m_parallelBatch->jobs[1].context.m_parallelReads);
+ PathOccupancy::validationPaused().store(false);auto before=p.m_exclusiveWorker->searches;
+ w.consume(p,w.b);assert(p.m_exclusiveWorker->searches==before&&p.m_parallelBatch->safeAccepted==0);
+}
+''')
+
+    def test_failed_safe_completions_preserve_serial_budget_and_flags(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fixed:{false,true}){World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;
+ w.a.ai.safe=w.b.ai.safe=true;p.rejectDestinations=true;
+ auto&state=mainPathfindSearchContext();state.m_cumulativeCellsAllocated=0;
+ assert(!w.consume(p,w.a)&&!w.consume(p,w.b));auto budget=state.m_cumulativeCellsAllocated;
+ state.m_cumulativeCellsAllocated=0;p.prepareParallelBatch();assert(p.m_parallelBatch->safeSearches==2);
+ assert(!w.consume(p,w.a)&&!w.consume(p,w.b));
+ assert(p.m_parallelBatch->safeAccepted==2&&state.m_cumulativeCellsAllocated==budget&&!state.m_isTunneling);
+ assert(state.m_openList.empty()&&state.m_closedList.empty());
+}}
+''')
+
+    def test_safe_live_occupancy_rejection_without_cell_mutation(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);w.b.ai.safe=true;
+ w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2=w.b.ai.from;
+ Object third;third.id=3;logic.objects[3]=&third;p.storage[2][7].setPosUnit(3,{2,7});
+ p.prepareParallelBatch();assert(w.consume(p,w.a));auto&job=p.m_parallelBatch->jobs[1];
+ assert(!job.reads.queries.empty());
+ w.b.relation=ALLIES;
+ bool changed=false;for(const auto&q:job.reads.queries){LiveOccupancyReader live={&p,&w.b};
+  if(!(PathOccupancy::evaluate(q.input,live)==q.result))changed=true;}
+ assert(changed);w.consume(p,w.b);assert(p.m_parallelBatch->rejected==1&&p.m_parallelBatch->safeAccepted==0);
+ p.storage[2][7].setPosUnit(0,{2,7});logic.objects.erase(3);
 }
 ''')
 

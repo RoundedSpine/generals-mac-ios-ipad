@@ -1040,6 +1040,9 @@ protected:
  void clearParallelBatch();
  void observeParallelCell(PathfindCell* cell);
  Real searchGroundHeight(Real x, Real y);
+ PathfindParallelJob* takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
+  const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
+  PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings);
  void invalidateParallelResults() {++m_parallelWorldEpoch;}
 #endif
 	PathfindExclusiveWorker *m_exclusiveWorker;
@@ -1048,6 +1051,10 @@ protected:
 	OrdinarySearchOutcome runOrdinarySearchLoop(PathfindCell *parentCell, PathfindCell *goalCell,
 		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
 		const ICoord2D& startCellNdx, const Object *obj);
+ // GeneralsX @feature Codex 27/10/2026 Escape loop owns only scratch; final path creation and cleanup remain on the caller.
+ OrdinarySearchOutcome runSafeSearchLoop(PathfindCell* parentCell, const PathfindMovementInput& movement,
+  Bool isHuman, Bool centerInCell, Int radius, const ICoord2D& startIndex,
+  const Coord3D& repulsor1, const Coord3D& repulsor2, Real repulsorRadius);
 	virtual Path *internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to);	///< Find a short, valid path between given locations
 	Path *findHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);
 	Path *findClosestHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to, Bool crusher);

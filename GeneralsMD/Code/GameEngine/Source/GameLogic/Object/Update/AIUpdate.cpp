@@ -406,6 +406,19 @@ Bool AIUpdateInterface::predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID
  from = *getObject()->getPosition(); to = m_requestedDestination; ignored = getIgnoredObstacleID();
  return true;
 }
+// GeneralsX @feature Codex 27/10/2026 Adapt Reimagined's safe-path prediction; resolve live repulsors only on main.
+// Reference: dement123, ZeroHourReimagined_1.0.0_source, AIUpdateInterface::predictPathfind.
+Bool AIUpdateInterface::predictSafePath(Coord3D& from, Coord3D& repulsor1, Coord3D& repulsor2, Real& radius)
+{
+ if (!m_waitingForPath || !m_isSafePath) return false;
+ from=*getObject()->getPosition();
+ repulsor1.set(-1000,-1000,0);
+ if (Object* repulsor=TheGameLogic->findObjectByID(m_repulsor1)) repulsor1=*repulsor->getPosition();
+ repulsor2=repulsor1;
+ if (Object* repulsor=TheGameLogic->findObjectByID(m_repulsor2)) repulsor2=*repulsor->getPosition();
+ radius=getObject()->getVisionRange()+TheAI->getAiData()->m_repulsedDistance;
+ return true;
+}
 #endif
 
 void AIUpdateInterface::doPathfind( PathfindServicesInterface *pathfinder )
