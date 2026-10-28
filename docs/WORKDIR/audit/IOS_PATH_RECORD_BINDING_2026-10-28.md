@@ -86,3 +86,76 @@ Keep existing diagnostics for the next device session; compare large-search
 and queue outliers without inferring a gain from unmatched gameplay sessions.
 Per-result rejection/outlier correlation, compact search-only records and zone
 cost investigations remain separate work.
+
+## Native build and first device log
+
+Code b7b492ab2 passed Mac QA, the complete workflow race-check stage, iOS SDK
+compilation, device packaging and artifact upload in
+[run 40614987881](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40614987881).
+The runner remains macos-15 ARM64. The separate dependency-save step was skipped.
+
+The supplied generals-stderr.log identifies revision ~b7b492a, reaches the score
+screen and exits zero. It reports no fatal, assertion or primitive-restart error.
+The existing FFmpeg WAV sample_count warning remains. This is successful session
+evidence, not proof of every lifetime/replay case or measured resident memory.
+
+All 3,058 admission outcomes balance: 220 dispatched, 220 existing pairs,
+2,161 short queues, 207 dozer exclusions and 250 unsupported predictions; all
+other categories are zero. Prediction failures are 221 non-final, 24 attack and
+five no-longer-waiting. Short queues account for 70.67% of preparation calls;
+they still limit available parallel work rather than indicating insufficient
+worker count. There are no capture failures, unavailable workers or exceptions.
+
+220 pairs equal 440 task slots: 414 primary and 26 fallback-only completions.
+Primary results have 392 accepted, 22 rejected and none unused (94.69%
+acceptance). All 26 fallbacks are early searches: 15 accepted, 11 rejected, none
+unused. No speculative safe or separately queued closest work is recorded.
+Serial kernels split into 2,032 ordinary and 45 closest. Reused results (407)
+plus serial kernels (2,077) equal all 2,484 finalizations. Reuse is 16.38% of
+those measured completion phases, not all queries, unit commands or CPU time.
+
+| Phase | Calls | Total ms | Maximum ms |
+| --- | ---: | ---: | ---: |
+| Pending queue | 2,219 | 651.994 | 73.888 |
+| Pair barrier | 220 | 106.093 | 56.875 |
+| Worker kernel | 220 | 71.177 | 35.077 |
+| Caller kernel | 220 | 67.353 | 56.865 |
+| Serial kernel | 2,077 | 205.981 | 14.552 |
+| Validation | 440 | 2.253 | 0.353 |
+| Hierarchy | 2,521 | 68.361 | 0.917 |
+| Finalization | 2,484 | 62.810 | 10.593 |
+
+Pending queue mean is 0.294 ms; eight calls reach 20 ms, one reaches 50 ms and
+none reaches 100/500 ms. This does not reproduce the older half-second symptom
+inside the measured queue scopes and does not cover complete input/render frames.
+Phase totals overlap and must not be added together.
+
+Queue 1242 takes 73.888 ms: a 56.875 ms pair plus 16.330 ms in two serial
+ordinary kernels. Its caller task takes 56.865 ms with 4,429 cellsExamined and
+5,056 records; its worker takes 35.077 ms with 3,229 cellsExamined and 3,683
+records. Expensive kernel wall time is therefore not confined to worker wakeup
+or the worker role. The samples do not attach acceptance/rejection outcomes to
+these tasks, so serial work in this queue does not identify which speculative
+result was reused or recomputed. Validation is printed rounded to three decimals;
+0.000 ms is not sufficient to infer which validation path was taken.
+
+Queue 98 takes 36.502 ms with seven pairs and three serial kernels. Its retained
+pair 50 has a 22.214 ms worker kernel with 3,666 cellsExamined and 3,939 records.
+Those work counters also occur in the prior log's 23.118 ms worker sample, but
+a single similar-sized search is not a controlled performance comparison.
+Queues 152 and 542 spend 36.792/33.560 ms in synchronous zone recalculation,
+without callbacks or pairs. Pair 102 takes 2.456 ms with only 0.029/0.046 ms in
+its task kernels, leaving a separate dispatch/join/scheduling question.
+
+The previous log had 7,586 measured queue calls versus 2,219 here, with different
+largest-search work. Queue maxima of 88.101 versus 73.888 ms and different
+acceptance rates cannot establish a speedup or regression. Metadata savings and
+the hot-access simplification remain source/layout results, while this log
+confirms native execution without a reported failure in this session.
+
+Next, correlate bounded slow-task records with their eventual reused/rejected/
+discarded outcomes and first validation rejection reason. Preserve validation
+short-circuit order and live-query counts while collecting those explanations;
+do not rerun live checks just to log them. This can distinguish useful expensive
+work from duplication before the larger compact-node rewrite or dispatcher
+expansion. Keep zone-rebuild investigation separate from worker-pool expansion.
