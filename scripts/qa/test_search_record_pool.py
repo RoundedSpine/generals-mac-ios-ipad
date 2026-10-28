@@ -39,6 +39,56 @@ bool s_useFixedPathfinding=true,s_forceCleanCells=false;
 
 
 class SearchRecordPoolTest(unittest.TestCase):
+    # GeneralsX @test Codex 28/10/2026 Direct state binding saves metadata without moving arenas or merging permanent ownership.
+    def test_direct_binding_compacts_records_and_context_stays_immovable(self):
+        run_cpp(engine_fixture() + r'''
+#include <type_traits>
+struct FormerRecord{
+ PathfindCell*cell;unsigned slot;PathfindSearchNodes*owner;bool charged;
+ PathfindCellInfo*next;ICoord2D pos;ObjectID goal,posUnit,aircraft,obstacle;
+ unsigned isFree:1;unsigned fence:1;unsigned transparent:1;
+};
+static_assert(!std::is_copy_constructible<PathfindSearchContext>::value,"bound states cannot move");
+static_assert(!std::is_move_constructible<PathfindSearchContext>::value,"bound states cannot move");
+static_assert(sizeof(PathfindCellInfo)<sizeof(FormerRecord),"direct binding must reduce record storage");
+int main(){PathfindCellInfo::allocateCellInfos();
+ {PathfindCell cell;cell.setGoalUnit(17,{2,3});auto*permanent=cell.m_info;
+  assert(!permanent->m_searchState);
+  auto&c=mainPathfindSearchContext();auto*r=cell.searchInfo();
+  assert(r!=permanent && r->m_searchState==&c.get(c.m_records.index(r)));
+  assert(&r->search()==r->m_searchState && !r->m_searchCharged);
+  r->search().m_totalCost=91;assert(cell.getTotalCost()==91 && cell.getGoalUnit()==17);
+  cell.setGoalUnit(0,{2,3});assert(!cell.m_info && cell.getTotalCost()==91);
+  cell.releaseSearchInfo();assert(!c.m_records.size());
+ }
+ mainPathfindSearchContext().releaseStorage();PathfindCellInfo::releaseCellInfos();
+ printf("former_record=%zu record=%zu state=%zu context=%zu\n",sizeof(FormerRecord),sizeof(PathfindCellInfo),sizeof(PathfindSearchState),sizeof(PathfindSearchContext));
+}
+''')
+
+    def test_direct_state_recycling_and_generation_do_not_leak_search_flags(self):
+        run_cpp(engine_fixture() + r'''
+int main(){PathfindCellInfo::allocateCellInfos();auto&c=mainPathfindSearchContext();
+ {PathfindCell a,b;
+  for(unsigned pass=0;pass<600;++pass){c.beginSearch();
+   auto*first=c.allocateRecord(&a,{2,3},false);assert(first);auto*state=first->m_searchState;
+   assert(!state->m_pathParent && !state->m_open && !state->m_closed && state->m_openIndex==-1);
+   state->m_totalCost=44;state->m_blockedByAlly=true;state->m_openSequence=99;
+   c.releaseRecord(&a);assert(!c.findRecord(&a) && !c.m_transientRecords);
+   auto*recycled=c.allocateRecord(&b,{4,5},false);
+   assert(recycled==first && recycled->m_searchState==state && !state->m_totalCost && !state->m_blockedByAlly && !state->m_openSequence);
+   assert(&recycled->search()==&c.get(c.m_records.index(recycled)));
+   state->m_closed=true;state->m_openIndex=17;state->m_pathParent=recycled;
+   c.beginSearch();assert(!c.findRecord(&b) && !c.m_records.size() && !c.m_transientRecords);
+   auto*next=c.allocateRecord(&a,{7,8},false);
+   assert(next==first && &next->search()==state && !state->m_closed && state->m_openIndex==-1 && !state->m_pathParent);
+   c.releaseRecord(&a);
+  }
+ }
+ c.releaseStorage();PathfindCellInfo::releaseCellInfos();
+}
+''')
+
     def test_production_visibility_in_both_modes(self):
         # Other fixtures expose fields for invariant checks; this one keeps production access control.
         declarations = HEADER[HEADER.index('class PathfindCellInfo;'):HEADER.index('/**\n * This represents one cell')]
@@ -104,8 +154,8 @@ int main(){PathfindCellInfo::allocateCellInfos();auto&c=mainPathfindSearchContex
         run_cpp(engine_fixture() + r'''
 int main(){PathfindCellInfo::allocateCellInfos();auto&c=mainPathfindSearchContext();c.beginSearch();
  {PathfindCell unit,empty;unit.setGoalUnit(17,{7,8});unit.setPosUnit(17,{7,8});unit.setGoalAircraft(19,{7,8});
-  auto*persistent=unit.m_info;assert(persistent && !persistent->m_searchOwner && unit.hasSearchInfo());
-  auto*search=unit.searchInfo();assert(search!=persistent && search->m_searchOwner==&c);
+  auto*persistent=unit.m_info;assert(persistent && !persistent->m_searchState && unit.hasSearchInfo());
+  auto*search=unit.searchInfo();assert(search!=persistent && search->m_searchState==&c.get(c.m_records.index(search)));
   unit.setTotalCost(44);unit.setBlockedByAlly(true);
   assert(empty.allocateSearchInfo({8,8}));empty.setTotalCost(99);
   empty.setGoalUnit(27,{8,8});assert(empty.m_info && empty.m_info!=empty.searchInfo());

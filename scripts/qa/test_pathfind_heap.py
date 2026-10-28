@@ -64,7 +64,7 @@ struct Arena {
  Arena(bool heap, int n):cells(n),info(n),queue(heap){
   for(int i=0;i<n;++i){cells[i].id=i;cells[i].m_info=&info[i];
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- info[i].m_searchOwner=&mainPathfindSearchNodes();static unsigned nextSlot=0;info[i].m_searchSlot=(nextSlot++)%PATHFIND_RECORD_CAPACITY;info[i].search()=PathfindSearchState{};
+ static unsigned nextSlot=0;info[i].m_searchState=&mainPathfindSearchNodes().resetSlot((nextSlot++)%PATHFIND_RECORD_CAPACITY);
 #endif
 info[i].m_cell=&cells[i];info[i].m_openIndex=-1;}
  }

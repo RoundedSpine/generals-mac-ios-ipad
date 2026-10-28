@@ -31,5 +31,12 @@ public:
   }
   return entry.state;
  }
- void resetSlot(std::size_t slot) { get(slot) = State{}; }
+ // GeneralsX @performance Codex 28/10/2026 Explicit allocation resets initialize once and return stable state storage.
+ State& resetSlot(std::size_t slot) {
+  assert(slot < Capacity);
+  auto& entry = m_entries[slot];
+  entry.state = State{};
+  entry.stamp = m_generation;
+  return entry.state;
+ }
 };

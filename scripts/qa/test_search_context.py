@@ -41,6 +41,30 @@ constexpr unsigned CELL_INFOS_TO_ALLOCATE=PATHFIND_RECORD_CAPACITY;
 
 
 class SearchContextTest(unittest.TestCase):
+    # GeneralsX @test Codex 28/10/2026 Allocation resets publish stable state with exactly one initialization, including stamp rollover.
+    def test_explicit_reset_initializes_once_and_keeps_address(self):
+        run_cpp(r'''
+#include "stampedsearchcontext.h"
+#include <cassert>
+struct Node{
+ int cost=0;static unsigned assignments;
+ Node&operator=(const Node&other){cost=other.cost;++assignments;return *this;}
+};
+unsigned Node::assignments=0;
+int main(){StampedSearchContext<Node,8,unsigned char> c;
+ auto*state=&c.resetSlot(3);assert(Node::assignments==1 && c.active(3));
+ state->cost=91;assert(&c.get(3)==state && c.get(3).cost==91 && Node::assignments==1);
+ for(unsigned i=0;i<600;++i){c.beginSearch();assert(!c.active(3));
+  unsigned before=Node::assignments;
+  assert(&c.resetSlot(3)==state && Node::assignments==before+1 && c.active(3));
+  assert(!state->cost && &c.get(3)==state && Node::assignments==before+1);
+  state->cost=i+1;
+ }
+ unsigned before=Node::assignments;
+ assert(&c.resetSlot(3)==state && !state->cost && Node::assignments==before+1);
+}
+''')
+
     def test_lazy_reset_and_generation_rollover(self):
         run_cpp(r'''
 #include "stampedsearchcontext.h"
@@ -83,10 +107,10 @@ int main(){
         run_cpp(allocator_fixture() + r'''
 int main(){for(int pass=0;pass<2;++pass){
  PathfindCellInfo::allocateCellInfos();PathfindCell cell;std::vector<PathfindCellInfo*> records;
- for(unsigned i=0;i<PATHFIND_RECORD_CAPACITY;++i){auto*p=PathfindCellInfo::getACellInfo(&cell,{int(i),0});assert(p && !p->m_searchOwner);records.push_back(p);}
+ for(unsigned i=0;i<PATHFIND_RECORD_CAPACITY;++i){auto*p=PathfindCellInfo::getACellInfo(&cell,{int(i),0});assert(p && !p->m_searchState);records.push_back(p);}
  assert(PathfindCellInfo::getACellInfo(&cell,{0,0})==nullptr);
  mainPathfindSearchContext().beginSearch();
- for(auto*p:records){assert(!p->m_searchOwner);PathfindCellInfo::releaseACellInfo(p);}
+ for(auto*p:records){assert(!p->m_searchState);PathfindCellInfo::releaseACellInfo(p);}
  PathfindCellInfo::releaseCellInfos();
 }}
 ''')

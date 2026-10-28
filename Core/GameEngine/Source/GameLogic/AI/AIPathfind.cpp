@@ -1185,7 +1185,8 @@ void PathfindCellInfo::allocateCellInfos()
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
 	// Map/engine allocation starts a new private search generation.
 	mainPathfindSearchContext().beginSearch();
-	for (UnsignedInt i = 0; i < CELL_INFOS_TO_ALLOCATE; ++i) s_infoArray[i].m_searchOwner = nullptr;
+ // GeneralsX @performance Codex 28/10/2026 Permanent records never point into a private search-state arena.
+	for (UnsignedInt i = 0; i < CELL_INFOS_TO_ALLOCATE; ++i) s_infoArray[i].m_searchState = nullptr;
 #endif
 	s_infoArray[CELL_INFOS_TO_ALLOCATE-1].freeLink() = nullptr;
 	s_infoArray[CELL_INFOS_TO_ALLOCATE-1].m_isFree = true;

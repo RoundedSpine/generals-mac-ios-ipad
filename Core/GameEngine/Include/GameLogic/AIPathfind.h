@@ -268,8 +268,9 @@ public:
 
 	PathfindSearchState& search() const {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-		assert(m_searchOwner);
-  return m_searchOwner->get(m_searchSlot);
+  // GeneralsX @performance Codex 28/10/2026 Live private records bind directly to stable arena state at allocation.
+  assert(m_searchState);
+  return *m_searchState;
 #else
 		return const_cast<PathfindCellInfo*>(this)->m_search;
 #endif
@@ -290,9 +291,8 @@ protected:
 
 	PathfindCell *m_cell;
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
-	UnsignedInt m_searchSlot;
- PathfindSearchNodes* m_searchOwner;
- Bool m_searchCharged;
+ // GeneralsX @performance Codex 28/10/2026 Replace owner/slot lookup with one pointer; keep permanent free links separate.
+ PathfindSearchState* m_searchState;
 	PathfindCellInfo* m_nextFree;
 #else
 	PathfindSearchState m_search;
@@ -308,6 +308,10 @@ protected:
 	ObjectID m_obstacleID;	///< the object ID who overlaps this cell
 
 	UnsignedInt m_isFree:1;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ // GeneralsX @performance Codex 28/10/2026 Pack private admission accounting beside existing flags, outside pointer padding.
+ UnsignedInt m_searchCharged:1;
+#endif
 	UnsignedInt m_obstacleIsFence:1;///< True if occupied by a fence.
 	UnsignedInt m_obstacleIsTransparent:1;///< True if obstacle is transparent (undefined if obstacleid is invalid)
 	/// @todo Do we need both mark values in this cell?  Can't store a single value and compare it?
@@ -403,18 +407,17 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   auto* record = m_records.acquire(cell);
   if (!record) return nullptr;
   record->m_cell = cell; record->m_pos = pos;
-  record->m_searchSlot = m_records.index(record);
-  record->m_searchOwner = this;
+  // GeneralsX @performance Codex 28/10/2026 Reset once before publishing the direct state pointer; records never outlive their generation.
+  record->m_searchState = &resetSlot(m_records.index(record));
   record->m_searchCharged = !persistent;
   if (record->m_searchCharged) ++m_transientRecords;
-  resetSlot(record->m_searchSlot);
   return record;
  }
  void releaseRecord(const PathfindCell* cell) {
   auto* record = findRecord(cell);
   if (!record) return;
   if (record->m_searchCharged) { assert(m_transientRecords); --m_transientRecords; }
-  resetSlot(record->m_searchSlot);
+  record->search() = PathfindSearchState{};
   m_records.release(cell);
  }
 #endif

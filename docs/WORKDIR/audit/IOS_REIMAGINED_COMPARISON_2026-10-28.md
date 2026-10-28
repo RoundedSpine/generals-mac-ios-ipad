@@ -107,3 +107,18 @@ rerun. Existing evidence remains the 172 Mac QA tests, workflow race checks
 (including 54 batch tests), successful iOS SDK/package build 40538565784, and the
 device log above. The subsequent runner-label-only ARM64 change does not alter
 the runtime implementation compared here.
+
+## Subsequent measurements and metadata compaction
+
+The later ~3228907 device log and successful ARM64 build are recorded in the
+[pair-admission review](IOS_PATH_ADMISSION_2026-10-28.md). They show real reuse,
+short-queue/eligibility limits, heavy-search outliers and synchronous zone costs;
+they do not establish a matched speed comparison with Reimagined. Both sources
+still calculate zones synchronously before draining pending requests.
+
+The follow-up [direct-state binding change](IOS_PATH_RECORD_BINDING_2026-10-28.md)
+reduces our record metadata from 72 to 56 bytes on the local 64-bit fixture ABI
+and removes repeated owner/slot resolution from live search-state access.
+Private record and state arrays remain separate and bounded. This narrows one
+storage/access cost without adopting Reimagined's compact dense search-only node
+layout, broader dispatcher, worker pool or grouped budget policy.
