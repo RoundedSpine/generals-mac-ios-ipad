@@ -105,9 +105,24 @@ and combined-fallback assertions are also checked separately under sanitizers.
 All 72 batch cases pass ThreadSanitizer. The final expanded kind/fallback
 assertions also pass their targeted TSan and ASan/UBSan runs. Diff checks pass.
 
-Native SDK and device outcome reports remain pending. Fixtures still use
-controlled world and Path services rather than full-engine replay validation.
-No performance claim.
+Code aff9c059d passed Mac QA, the full workflow race-check stage, native iOS SDK
+compilation, device packaging and unsigned artifact upload in
+[run 40637961023](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40637961023).
+The host remains macos-15 ARM64; the separate dependency-save step was skipped.
+Device outcome reports remain pending. Fixtures still use controlled world and
+Path services rather than full-engine replay validation. No performance claim.
+
+The next supplied log still identifies ~b7b492a. It has neither PATH_RESULT_OUTCOMES
+nor PATH_RESULT_REJECTIONS nor per-task result/reason fields in PATH_PAIR_SLOW.
+It therefore cannot validate the aff9c059d diagnostics or identify the slow
+results' outcomes. This older-code session exits zero: 849 pairs balance as
+1,664 primary plus 34 fallback-only slots; 1,466 primary and 22 fallback results
+are accepted, with 198/12 rejected and none unused. 1,488 reused plus 6,817
+serial kernels equal 8,305 finalizations. Queue maximum is 78.018 ms, with no
+measured pending queue reaching 100/500 ms. Its 60.564 ms largest pair again
+coincides with serial work but supplies no individual outcome evidence. Install
+the IPA from the verified run above and obtain a fresh normal-exit log identifying
+~aff9c05 before using rejection reasons to choose a runtime change.
 
 After installing the new IPA, use the same gameplay and exit normally. Match
 PATH_PAIR_SLOW pair/queue IDs to the existing queue samples, then inspect both
