@@ -122,3 +122,21 @@ and removes repeated owner/slot resolution from live search-state access.
 Private record and state arrays remain separate and bounded. This narrows one
 storage/access cost without adopting Reimagined's compact dense search-only node
 layout, broader dispatcher, worker pool or grouped budget policy.
+
+## Subsequent preparation fidelity and reuse
+
+The [ordinary corridor and read-log change](IOS_PATH_CORRIDOR_READS_2026-10-28.md)
+now prepares the real ordinary hierarchy in each private context on main, and
+deduplicates exact query/height observations without caching live search answers.
+Its ~40bb42b device session reuses 1,524/1,548 primary phases, with no corridor or
+explicit read-overflow rejection. The original keyed bounds remain; this does not
+introduce dense map-sized storage or establish a matched performance comparison.
+
+The next [closest preparation change](IOS_PATH_CLOSEST_PREPARATION_2026-10-28.md)
+also captures the real closest hierarchy outcome/corridor in private main-side
+preparation instead of assuming success. It strengthens coarse Path ownership
+through cleanup and adds bounded scalar mismatch summaries while retaining exact
+admission/policy validation. Local regression and sanitizer checks pass; native
+SDK and device confirmation for this subsequent change remain pending. Hierarchy
+and finalization still execute on main, one worker still pairs two adjacent
+requests, and the storage, dispatch and scheduling differences above remain.

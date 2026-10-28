@@ -170,7 +170,7 @@ struct Pathfinder {
  Path*findSafePath(const Object*,const LocomotorSet&,const Coord3D*,const Coord3D*,const Coord3D*,Real);
  ClosestSearchOutcome runClosestSearchLoop(PathfindCell*,PathfindCell*,const PathfindMovementInput&,Bool,Bool,Int,const ICoord2D&,const PathfindClosestSettings&);
  Path*findClosestPath(Object*,const LocomotorSet&,const Coord3D*,Coord3D*,Bool,Real,Bool);
- bool hierarchical=true;int hierarchicalCalls=0,restrictCorridor=-1;
+ bool hierarchical=true;int hierarchicalCalls=0,speculativeClosestHierarchicalCalls=0,restrictCorridor=-1;
  Path*findClosestHierarchicalPath(Bool,const LocomotorSet&,const Coord3D*,const Coord3D*,Bool);
  void adjustCoordToCell(int x,int y,bool center,Coord3D&p,int){pathXY(x,y,center,p);p.z=terrain.getGroundHeight(p.x,p.y);}
  static void pathXY(int x,int y,bool center,Coord3D&p){p.x=center?(float(x)+.5f)*10:(float(x)+.05)*10;p.y=center?(float(y)+.5f)*10:(float(y)+.05)*10;}
@@ -247,8 +247,11 @@ Path*Pathfinder::buildActualPath(const Object*o,int,const Coord3D*,PathfindCell*
  return &path;
 }
 Path*Pathfinder::findClosestHierarchicalPath(Bool,const LocomotorSet&,const Coord3D*,const Coord3D*,Bool){
- assert(std::this_thread::get_id()==owner&&(!m_parallelBatch||!m_parallelBatch->preparing));
- ++hierarchicalCalls;searchState().m_isTunneling=false;searchState().m_cumulativeCellsAllocated+=2;
+ assert(std::this_thread::get_id()==owner);
+ // GeneralsX @test Codex 28/10/2026 Count actual and private coarse preparation separately; both must remain on main.
+ if(m_parallelBatch&&m_parallelBatch->preparing){assert(activePathfindSearchContext().m_speculativePreparation);++speculativeClosestHierarchicalCalls;}
+ else ++hierarchicalCalls;
+ searchState().m_isTunneling=false;searchState().m_cumulativeCellsAllocated+=2;
  if(!hierarchical)return nullptr;
  m_zoneManager.setAllPassable();if(restrictCorridor>=0)activePathfindSearchContext().setCorridorPassable(restrictCorridor,false);
  return new Path;
@@ -414,6 +417,163 @@ int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
 
 
 class ParallelBatchTests(unittest.TestCase):
+    def test_closest_preparation_releases_completed_coarse_path_if_cleanup_aborts(self):
+        # GeneralsX @test Codex 28/10/2026 Compile the real coarse routine; a returned Path needs ownership until list cleanup completes.
+        source=fixture().replace('struct Path {std::vector<ICoord2D> route;',
+            'struct Path {static inline int alive=0;Path(){++alive;}~Path(){--alive;}std::vector<ICoord2D> route;',1)
+        source=source.replace('struct Zones {',r'''struct Zones {
+  static constexpr int ZONE_BLOCK_SIZE=4;
+  int getBlockZone(int,bool,int,int,PathfindCell**){return 1;}
+  void getExtent(ICoord2D&out){out={3,3};}
+  bool interactsWithBridge(int,int){return false;}
+''',1)
+        source=source.replace('struct Layer {PathfindCell*getCell',r'''struct Layer {
+  void getStartCellIndex(ICoord2D*out){*out={0,0};}void getEndCellIndex(ICoord2D*out){*out={0,0};}
+  bool isUnused(){return true;}bool isDestroyed(){return false;}int getZone(){return 1;}
+  PathfindCell*getCell''',1)
+        source=source.replace('void beginSearchState();void cleanOpenAndClosedLists();',r'''
+ bool failHierarchicalCleanup=false;
+ Path*internal_findHierarchicalPath(Bool,int,const Coord3D*,const Coord3D*,Bool,Bool);
+ Path*buildHierarchicalPath(const Coord3D*,PathfindCell*){return new Path;}
+ void processHierarchicalCell(const ICoord2D&,const ICoord2D&,PathfindCell*,PathfindCell*,zoneStorageType,zoneStorageType*,Int&,Bool,Int&){}
+ void beginSearchState();void cleanOpenAndClosedLists();''',1)
+        cleanup=function('void Pathfinder::cleanOpenAndClosedLists()')
+        source=source.replace(cleanup,cleanup.replace('{','{\n if(failHierarchicalCleanup&&Path::alive)activePathfindSearchContext().abortSpeculativeRecovery();',1),1)
+        source+='\nusing PathfindZoneManager=Pathfinder::Zones;constexpr Real HUGE_DIST=1.0e9f;Real sqr(Real x){return x*x;}\n'
+        source+=function('Path *Pathfinder::internal_findHierarchicalPath(')
+        run_cpp(source+r'''
+int main(){for(bool fixed:{false,true})for(bool closest:{false,true})for(bool fail:{false,true}){
+ World w;Pathfinder p;s_useFixedPathfinding=fixed;auto c=std::make_unique<PathfindSearchContext>();c->resizeCorridor(9);
+ const Coord3D from{25,25,0},to=closest?Coord3D{95,95,0}:Coord3D{35,35,0};p.failHierarchicalCleanup=fail;
+ Path*path=nullptr;bool caught=false;
+ try{SearchContextBinding<PathfindSearchContext> binding(*c);PathfindSearchContext::PreparationScope preparation(*c);
+  path=p.internal_findHierarchicalPath(true,1,&from,&to,false,closest);
+ }catch(const PathfindSearchContext::SpeculativeRecovery&){caught=true;}
+ assert(caught==fail&&!c->m_speculativePreparation);
+ if(fail)assert(!path&&!Path::alive);else{assert(path&&Path::alive==1);delete path;assert(!Path::alive);}
+ c->m_openList.reset();c->m_closedList.reset();c->beginSearch();
+}}
+''')
+
+    # GeneralsX @test Codex 28/10/2026 Closest preparation must capture real hierarchy policy/corridors without charging the caller.
+    def test_closest_preparation_matches_real_hierarchy_and_serial_accounting(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fixed:{false,true})for(int kind=0;kind<3;++kind)for(bool hierarchy:{false,true})for(int restrict:{-1,0}){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;p.hierarchical=hierarchy;p.restrictCorridor=restrict;
+ w.a.ai.closest=w.b.ai.closest=kind==0;p.quickAllowed=kind!=1;
+ if(kind==2)for(int y=0;y<12;++y)p.storage[6][y].setType(PathfindCell::CELL_OBSTACLE);
+ const auto originalA=w.a.ai.to,originalB=w.b.ai.to;auto&c=mainPathfindSearchContext();
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto p:path->route)r.push_back(p.x*100+p.y);return r;};
+ auto consume=[&](Object&o){p.m_queuePRHead=o.id-1;
+  if(kind==0)return route(p.findClosestPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to,false,o.ai.pathCostMultiplier,false));
+  auto*path=p.findPathWithInputs(&o,o.ai.locomotor,&o.ai.from,&o.ai.to);
+  if(!path){p.confirmParallelFallback(&o,o.ai.locomotor,o.ai.from,o.ai.to,false);path=p.findClosestPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to,false,0,false);}
+  return route(path);
+ };
+ c.m_cumulativeCellsAllocated=0;const auto a=consume(w.a),b=consume(w.b);const auto budget=c.m_cumulativeCellsAllocated;
+ const auto targetA=w.a.ai.to,targetB=w.b.ai.to;const auto corridor=c.m_corridor;
+ w.a.ai.to=originalA;w.b.ai.to=originalB;c.m_cumulativeCellsAllocated=0;c.m_isTunneling=false;p.m_queuePRHead=0;
+ p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
+ assert(batch.batches==1&&p.speculativeClosestHierarchicalCalls==2&&c.m_cumulativeCellsAllocated==0&&c.m_corridor==corridor);
+ for(auto&primary:batch.jobs){auto&job=kind?*primary.fallback:primary;
+  assert(job.captured&&job.closestSettings.gotHierarchicalPath==hierarchy&&!job.context.m_speculativePreparation);
+  assert(job.context.corridorPassable(0)==(!hierarchy||restrict<0));
+ }
+ assert(w.a.ai.to.x==originalA.x&&w.a.ai.to.y==originalA.y&&w.b.ai.to.x==originalB.x&&w.b.ai.to.y==originalB.y);
+ assert(consume(w.a)==a&&consume(w.b)==b&&c.m_cumulativeCellsAllocated==budget);
+ assert(w.a.ai.to.x==targetA.x&&w.a.ai.to.y==targetA.y&&w.b.ai.to.x==targetB.x&&w.b.ai.to.y==targetB.y);
+ assert(!batch.rejected&&!batch.fallbackRejected);
+ assert((kind?batch.fallbackAccepted:batch.closestAccepted)==2);
+ assert(!p.m_pathTiming.closestMismatch(kind!=0).calls&&!p.m_pathTiming.rejections(kind!=0,PathSearchTiming::Rejection::Corridor));
+}}
+''',timeout=45)
+
+    def test_closest_preparation_recovery_keeps_world_and_worker_available(self):
+        source=fixture().replace('searchState().m_isTunneling=false;searchState().m_cumulativeCellsAllocated+=2;\n if(!hierarchical)',
+                                 'activePathfindSearchContext().abortSpeculativeRecovery();\n searchState().m_isTunneling=false;searchState().m_cumulativeCellsAllocated+=2;\n if(!hierarchical)',1)
+        self.assertIn('activePathfindSearchContext().abortSpeculativeRecovery();',source)
+        run_cpp(source+r'''
+int main(){for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);auto&c=mainPathfindSearchContext();
+ w.a.ai.closest=w.b.ai.closest=!fallback;p.quickAllowed=!fallback;s_useFixedPathfinding=false;
+ c.m_cumulativeCellsAllocated=4990;c.setCorridorPassable(4,false);const auto corridor=c.m_corridor;
+ p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
+ assert(!batch.active&&!batch.batches&&!p.m_parallelWorldEpoch&&!p.m_exclusiveWorkerUnavailable);
+ assert(!s_useFixedPathfinding&&!s_forceCleanCells&&c.m_cumulativeCellsAllocated==4990&&c.m_corridor==corridor);
+ assert(!SearchContextBinding<PathfindSearchContext>::current()&&p.m_exclusiveWorker->searches==0);
+ for(auto&job:batch.jobs){assert(!job.captured&&!job.context.m_speculativePreparation&&!job.context.m_parallelReads);
+  if(job.fallback)assert(!job.fallback->captured&&!job.fallback->context.m_speculativePreparation&&!job.fallback->context.m_parallelReads);
+ }
+ assert(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));
+ s_useFixedPathfinding=true;
+}}
+''')
+
+    def test_closest_preparation_tunneling_still_skips_hierarchy(self):
+        run_cpp(fixture()+r'''
+int main(){for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);
+ w.a.ai.closest=w.b.ai.closest=!fallback;p.quickAllowed=!fallback;
+ p.storage[2][2].setType(PathfindCell::CELL_OBSTACLE);p.storage[2][8].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();assert(!p.speculativeClosestHierarchicalCalls);
+ for(auto&primary:p.m_parallelBatch->jobs){auto&job=fallback?*primary.fallback:primary;
+  assert(job.tunneling&&job.closestSettings.startedStuck&&!job.closestSettings.gotHierarchicalPath);
+ }
+ if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+ p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,fallback?0:w.a.ai.pathCostMultiplier,false);
+ assert(!p.hierarchicalCalls&&!p.m_pathTiming.closestMismatch(fallback).calls);
+ assert((fallback?p.m_parallelBatch->fallbackAccepted:p.m_parallelBatch->closestAccepted)==1);
+}}
+''')
+
+    def test_mismatch_admission_is_exact_and_short_circuited_for_both_phases(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;
+ for(bool fallback:{false,true})for(int change=0;change<4;++change){World w;Pathfinder p;w.queue(p);
+  if(change==1)p.storage[0][0].setGoalUnit(99,{0,0});p.quickAllowed=!fallback;p.prepareParallelBatch();
+  if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  if(change==1)p.storage[0][0].setGoalUnit(0,{0,0});else p.storage[0][0].setGoalUnit(99,{0,0});
+  if(change==2)++p.m_parallelWorldEpoch;
+  if(change==3){auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];job.to.x+=1;}
+  if(fallback)p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);else w.consume(p,w.a);
+  const auto&s=p.m_pathTiming.admissionMismatch(fallback);const bool reached=change<2;
+  assert(s.calls==unsigned(reached)&&s.higher==unsigned(change==0)&&s.lower==unsigned(change==1));
+  assert(p.m_pathTiming.rejections(fallback,T::Rejection::Admission)==unsigned(reached));
+  if(reached){assert(s.capturedMin==s.capturedMax&&s.currentMin==s.currentMax);
+   assert(s.capturedMin==unsigned(change==1)&&s.currentMin==unsigned(change==0));}
+  assert(!p.m_pathTiming.admissionMismatch(!fallback).calls);
+  p.storage[0][0].setGoalUnit(0,{0,0});
+ }
+}
+''')
+
+    def test_mismatch_policy_fields_and_admission_ranges_are_bounded_and_reported(self):
+        run_cpp(fixture()+r'''
+#include <limits>
+int main(){using T=PathSearchTiming;T t;PathfindClosestSettings original{false,0,false,false,false,false,0};
+ for(bool fallback:{false,true}){
+  assert(t.closestMatches(fallback,original,original)&&t.admissionMatches(fallback,30000,30000));
+  assert(!t.admissionMatches(fallback,0,1)&&!t.admissionMatches(fallback,30000,29999)&&!t.admissionMatches(fallback,9,4));
+  for(unsigned field=0;field<T::ClosestFieldCount;++field){auto changed=original;
+   switch(field){case T::Blocked:changed.blocked=true;break;case T::CostMultiplier:changed.pathCostMultiplier=.2f;break;
+    case T::MoveAllies:changed.moveAllies=true;break;case T::GoalObstacle:changed.goalOnObstacle=true;break;
+    case T::StartedStuck:changed.startedStuck=true;break;case T::GotHierarchy:changed.gotHierarchicalPath=true;break;
+    case T::InitialIgnored:changed.initialIgnored=5;break;}
+   assert(!t.closestMatches(fallback,original,changed));
+  }
+  auto both=original;both.blocked=both.gotHierarchicalPath=true;assert(!t.closestMatches(fallback,original,both));
+  auto nan=original;nan.pathCostMultiplier=std::numeric_limits<Real>::quiet_NaN();assert(!t.closestMatches(fallback,nan,nan));
+  const auto&a=t.admissionMismatch(fallback);assert(a.calls==3&&a.higher==1&&a.lower==2);
+  assert(a.capturedMin==0&&a.capturedMax==30000&&a.currentMin==1&&a.currentMax==29999);
+  const auto&c=t.closestMismatch(fallback);assert(c.calls==T::ClosestFieldCount+2);
+  for(unsigned i=0;i<T::ClosestFieldCount;++i)assert(c.fields[i]==unsigned(i==T::Blocked||i==T::GotHierarchy||i==T::CostMultiplier?2:1));
+ }
+ FILE*f=tmpfile();assert(f);t.report(f);rewind(f);std::string output;char b[512];while(fgets(b,sizeof(b),f))output+=b;fclose(f);
+ for(const char*phase:{"primary","fallback"}){
+  assert(output.find(std::string("[PATH_ADMISSION_MISMATCH] phase=")+phase+" calls=3 higher=1 lower=2 captured_min=0 captured_max=30000 current_min=1 current_max=29999")!=std::string::npos);
+  assert(output.find(std::string("[PATH_CLOSEST_MISMATCH] phase=")+phase+" calls=9 blocked=2 cost_multiplier=2 move_allies=1 goal_obstacle=1 started_stuck=1 hierarchy=2 initial_ignored=1")!=std::string::npos);
+ }
+}
+''')
+
     # GeneralsX @test Codex 28/10/2026 Preserve exact bounded dependencies while removing repeated observations and matching coarse preparation.
     def test_bounded_observation_index_collision_rollover_conflict_and_failure(self):
         run_cpp(r'''

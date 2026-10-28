@@ -34,6 +34,16 @@ public:
   std::uint64_t queries=0,queryObservations=0,heights=0,heightObservations=0;
   unsigned flags=0;
  };
+ // GeneralsX @feature Codex 28/10/2026 Bounded scalar summaries explain reached admission/policy failures without storing requests.
+ struct AdmissionMismatch {
+  std::uint64_t calls=0,higher=0,lower=0;
+  unsigned capturedMin=0,capturedMax=0,currentMin=0,currentMax=0;
+ };
+ enum ClosestField { Blocked, CostMultiplier, MoveAllies, GoalObstacle, StartedStuck, GotHierarchy, InitialIgnored, ClosestFieldCount };
+ struct ClosestMismatch {
+  std::uint64_t calls=0;
+  std::array<std::uint64_t,ClosestFieldCount> fields{};
+ };
  struct TaskSample {
   Kind kind=Kind::Ordinary;
   bool primary=false, fallback=false;
@@ -169,6 +179,30 @@ public:
  }
  std::uint64_t results(bool fallback,Result result)const{return m_results[unsigned(fallback)][static_cast<unsigned>(result)];}
  std::uint64_t rejections(bool fallback,Rejection reason)const{return m_rejections[unsigned(fallback)][static_cast<unsigned>(reason)];}
+ bool admissionMatches(bool fallback,unsigned captured,unsigned current){
+  if(captured==current)return true;
+  auto& s=m_admissionMismatch[unsigned(fallback)];
+  if(!s.calls){s.capturedMin=s.capturedMax=captured;s.currentMin=s.currentMax=current;}
+  if(captured<s.capturedMin)s.capturedMin=captured;
+  if(captured>s.capturedMax)s.capturedMax=captured;
+  if(current<s.currentMin)s.currentMin=current;
+  if(current>s.currentMax)s.currentMax=current;
+  ++s.calls;if(current>captured)++s.higher;else ++s.lower;
+  return false;
+ }
+ template<class Settings> bool closestMatches(bool fallback,const Settings& captured,const Settings& current){
+  if(captured==current)return true;
+  auto& s=m_closestMismatch[unsigned(fallback)];++s.calls;
+  const bool differences[]={captured.blocked!=current.blocked,captured.pathCostMultiplier!=current.pathCostMultiplier,
+   captured.moveAllies!=current.moveAllies,captured.goalOnObstacle!=current.goalOnObstacle,
+   captured.startedStuck!=current.startedStuck,captured.gotHierarchicalPath!=current.gotHierarchicalPath,
+   captured.initialIgnored!=current.initialIgnored};
+  static_assert(sizeof(differences)/sizeof(*differences)==ClosestFieldCount,"closest fields must match summary");
+  for(unsigned i=0;i<ClosestFieldCount;++i)if(differences[i])++s.fields[i];
+  return false;
+ }
+ const AdmissionMismatch& admissionMismatch(bool fallback)const{return m_admissionMismatch[unsigned(fallback)];}
+ const ClosestMismatch& closestMismatch(bool fallback)const{return m_closestMismatch[unsigned(fallback)];}
  const std::array<QueueSample,retainedSamples>& slowQueues()const{return m_slowQueues;}
  const std::array<PairSample,retainedSamples>& slowPairs()const{return m_slowPairs;}
  unsigned slowQueueCount()const{return m_slowQueueCount;}
@@ -208,6 +242,15 @@ public:
    std::fprintf(output,"[PATH_RESULT_REJECTIONS] phase=%s",phase?"fallback":"primary");
    for(unsigned i=1;i<static_cast<unsigned>(Rejection::Count);++i)
     std::fprintf(output," %s=%llu",rejectionName(static_cast<Rejection>(i)),u(m_rejections[phase][i]));
+   std::fprintf(output,"\n");
+   const auto& a=m_admissionMismatch[phase];
+   std::fprintf(output,"[PATH_ADMISSION_MISMATCH] phase=%s calls=%llu higher=%llu lower=%llu captured_min=%u captured_max=%u current_min=%u current_max=%u\n",
+    phase?"fallback":"primary",u(a.calls),u(a.higher),u(a.lower),a.capturedMin,a.capturedMax,a.currentMin,a.currentMax);
+   const auto& c=m_closestMismatch[phase];
+   const char* closestFields[]={"blocked","cost_multiplier","move_allies","goal_obstacle","started_stuck","hierarchy","initial_ignored"};
+   static_assert(sizeof(closestFields)/sizeof(*closestFields)==ClosestFieldCount,"closest names must match fields");
+   std::fprintf(output,"[PATH_CLOSEST_MISMATCH] phase=%s calls=%llu",phase?"fallback":"primary",u(c.calls));
+   for(unsigned i=0;i<ClosestFieldCount;++i)std::fprintf(output," %s=%llu",closestFields[i],u(c.fields[i]));
    std::fprintf(output,"\n");
   }
   for(unsigned i=0;i<m_slowQueueCount;++i){
@@ -269,6 +312,8 @@ private:
  std::array<std::uint64_t,3> m_serialKinds{};
  std::array<std::array<std::uint64_t,static_cast<unsigned>(Result::Count)>,2> m_results{};
  std::array<std::array<std::uint64_t,static_cast<unsigned>(Rejection::Count)>,2> m_rejections{};
+ std::array<AdmissionMismatch,2> m_admissionMismatch{};
+ std::array<ClosestMismatch,2> m_closestMismatch{};
  std::array<QueueSample,retainedSamples> m_slowQueues{};
  std::array<PairSample,retainedSamples> m_slowPairs{};
  unsigned m_slowQueueCount=0,m_slowPairCount=0;

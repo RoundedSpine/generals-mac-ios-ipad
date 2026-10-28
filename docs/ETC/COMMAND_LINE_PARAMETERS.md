@@ -88,6 +88,12 @@ See [result correlation and status meanings](../WORKDIR/audit/IOS_PATH_RESULT_OU
 `[PATH_READS_SLOW]` adds bounded observation/unique-entry counts and capacity/
 conflict flags for each executed phase of those retained pairs. See
 [corridor preparation and observation-log definitions](../WORKDIR/audit/IOS_PATH_CORRIDOR_READS_2026-10-28.md).
+`[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
+and whether current usage increased or decreased at a reached rejection check.
+`[PATH_CLOSEST_MISMATCH]` counts the differing closest-policy fields; several
+fields may differ in one rejected phase. Both have separate primary/fallback
+rows, no per-request output, and preserve the original validation decisions.
+See [closest preparation and mismatch definitions](../WORKDIR/audit/IOS_PATH_CLOSEST_PREPARATION_2026-10-28.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

@@ -86,6 +86,11 @@ The bounded-preparation cases also cover restricted ordinary corridors, unchange
 authoritative accounting, recovery abort/Path cleanup, exact query/height identity,
 collision/rollover/conflict handling and large searches exceeding 8,192 repeated
 observations while reusing results within the existing distinct-entry bound.
+Closest-preparation cases cover failed and restricted coarse searches, serial
+route/destination/budget equivalence, tunneling, recovery isolation and ownership
+of completed coarse Paths through throwing cleanup. Mismatch-summary cases keep
+exact permanent admission and short-circuit ordering, classify all closest-policy
+fields and check bounded primary/fallback output.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

@@ -5685,12 +5685,21 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
     GENERALS_PATH_RESULT_CHECK(job.safe==(repulsor2!=nullptr),Kind) &&
     GENERALS_PATH_RESULT_CHECK(!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius),Repulsors) &&
     GENERALS_PATH_RESULT_CHECK(job.closest==(closest!=nullptr),Kind) &&
+#ifdef GENERALS_ZH_PATH_TIMING
+    // GeneralsX @feature Codex 28/10/2026 Classify scalar mismatches at the original reached check, without repeating live reads.
+    GENERALS_PATH_RESULT_CHECK(!closest || m_pathTiming.closestMatches(job.fallbackResult,job.closestSettings,*closest),ClosestPolicy) &&
+#else
     GENERALS_PATH_RESULT_CHECK(!closest || job.closestSettings==*closest,ClosestPolicy) &&
+#endif
     GENERALS_PATH_RESULT_CHECK(!job.fallbackResult || (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getPath()==nullptr),FallbackPath) &&
     GENERALS_PATH_RESULT_CHECK(job.epoch==m_parallelWorldEpoch,WorldEpoch) &&
     GENERALS_PATH_RESULT_CHECK(job.lifecycle==PathOccupancy::validationLifecycleEpoch().load(),Lifecycle) &&
     GENERALS_PATH_RESULT_CHECK(!PathOccupancy::validationPaused().load(),Paused) &&
+#ifdef GENERALS_ZH_PATH_TIMING
+    GENERALS_PATH_RESULT_CHECK(m_pathTiming.admissionMatches(job.fallbackResult,job.permanent,PathfindSearchContext::permanentRecordsInUse()),Admission) &&
+#else
     GENERALS_PATH_RESULT_CHECK(job.permanent==PathfindSearchContext::permanentRecordsInUse(),Admission) &&
+#endif
     GENERALS_PATH_RESULT_CHECK(job.ignored==searchState().m_ignoreObstacleID,IgnoredObstacle) &&
     GENERALS_PATH_RESULT_CHECK(job.tunneling==searchState().m_isTunneling,Tunneling) &&
     GENERALS_PATH_RESULT_CHECK(job.start==start,StartCell) && GENERALS_PATH_RESULT_CHECK(job.goal==goal,GoalCell) &&
@@ -7465,12 +7474,13 @@ void Pathfinder::prepareParallelBatch()
    if (job.safe) job.context.m_isTunneling=mainPathfindSearchContext().m_isTunneling;
    batch.preparing=&job;
    {SearchContextBinding<PathfindSearchContext> binding(job.context);
+    // GeneralsX @bugfix Codex 28/10/2026 All private preparation, including closest hierarchy, must abort before shared recovery.
+    PathfindSearchContext::PreparationScope preparation(job.context);
     if (job.safe) findSafePath(job.obj,*job.locomotor,&job.from,&job.to,&job.repulsor2,job.repulsorRadius);
     else if (job.closest) findClosestPath(job.obj,*job.locomotor,&job.from,&job.to,blocked[i],pathCostMultiplier[i],false);
     // Outer terrain rejection stays authoritative on main; prepare only the fallback kernel when it already rules out ordinary search.
     else {
      // GeneralsX @bugfix Codex 28/10/2026 Prepare the ordinary hierarchy in this job's context before capturing its fine kernel.
-     PathfindSearchContext::PreparationScope preparation(job.context);
      findPathWithInputs(job.obj,*job.locomotor,&job.from,&job.to);
     }}
    batch.preparing=nullptr;
@@ -7498,6 +7508,7 @@ void Pathfinder::prepareParallelBatch()
      fallback.context.m_ignoreObstacleID=job.ignored;fallback.context.m_parallelReads=&fallback.reads;
      batch.preparing=&fallback;
      {SearchContextBinding<PathfindSearchContext> binding(fallback.context);
+      PathfindSearchContext::PreparationScope preparation(fallback.context);
       findClosestPath(fallback.obj,*fallback.locomotor,&fallback.from,&fallback.to,false,0,false);}
      batch.preparing=nullptr;
     }
@@ -8953,6 +8964,11 @@ Path *Pathfinder::findClosestHierarchicalPath( Bool isHuman, const LocomotorSet&
 Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSurfaceTypeMask locomotorSurface, const Coord3D *from,
 													 const Coord3D *rawTo, Bool crusher, Bool closestOK)
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // GeneralsX @bugfix Codex 28/10/2026 Keep completed coarse Paths owned until list cleanup can no longer abort preparation.
+ const auto disposeCoarsePath=[](Path* path){if(path)deleteInstance(path);};
+ std::unique_ptr<Path,decltype(disposeCoarsePath)> completedPath(nullptr,disposeCoarsePath);
+#endif
 	//CRCDEBUG_LOG(("Pathfinder::findGroundPath()"));
 #ifdef DEBUG_LOGGING
 	Int startTimeMS = ::GetTickCount();
@@ -9274,6 +9290,9 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 			searchState().m_isTunneling = false;
 			// construct and return path
 			Path *path =  buildHierarchicalPath( from, goalCell );
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+   completedPath.reset(path);
+#endif
 #if defined(RTS_DEBUG)
 			Bool show = TheGlobalData->m_debugAI==AI_DEBUG_PATHS;
 			show |= (TheGlobalData->m_debugAI==AI_DEBUG_GROUND_PATHS);
@@ -9297,7 +9316,12 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 				parentCell->releaseSearchInfo();
 				goalCell->releaseSearchInfo();
 			}
+
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+   return completedPath.release();
+#else
 			return path;
+#endif
 		}
 
 #if defined(RTS_DEBUG)
@@ -9463,6 +9487,9 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 		searchState().m_isTunneling = false;
 		// construct and return path
 		Path *path =  buildHierarchicalPath( from, closestCell );
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+  completedPath.reset(path);
+#endif
 
 #if RETAIL_COMPATIBLE_PATHFINDING
 		if (!s_useFixedPathfinding)
@@ -9479,7 +9506,11 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 			parentCell->releaseSearchInfo();
 			goalCell->releaseSearchInfo();
 		}
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+  return completedPath.release();
+#else
 		return path;
+#endif
 	}
 
 	// failure - goal cannot be reached
@@ -10284,13 +10315,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	}
 
  Bool gotHierarchicalPath = false;
-#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
- // Predict against an unrestricted corridor and provisional hierarchy availability. Both are checked after real main-thread preparation.
- if (m_parallelBatch && m_parallelBatch->preparing && m_parallelBatch->preparing->closest) {
-  gotHierarchicalPath=!searchState().m_isTunneling;
-  m_zoneManager.setAllPassable();
- } else
-#endif
+ // GeneralsX @bugfix Codex 28/10/2026 Capture the real closest hierarchy outcome and corridor in private main-thread preparation too.
  if (searchState().m_isTunneling) {
 		m_zoneManager.setAllPassable(); // can't optimize.
 	}	else {
@@ -10298,7 +10323,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		Path *hPat;
   {
 #ifdef GENERALS_ZH_PATH_TIMING
-   PathSearchTiming::Scope hierarchyTiming(&m_pathTiming[PathSearchTiming::Hierarchy]);
+   PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::Hierarchy]);
 #endif
    hPat=findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
   }
