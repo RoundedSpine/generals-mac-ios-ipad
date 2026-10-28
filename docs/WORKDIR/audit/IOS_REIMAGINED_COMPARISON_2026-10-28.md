@@ -1,5 +1,9 @@
 # Current pathfinding versus Reimagined — 28 October 2026
 
+For the current runtime and device evidence, see the
+[29 October comparison](IOS_REIMAGINED_COMPARISON_2026-10-29.md).
+The snapshot below preserves the earlier review and subsequent implementation notes.
+
 ## Scope and conclusion
 
 Compare experiment/ios-mod-testing at a1756448e (runtime f2088ba) directly against
