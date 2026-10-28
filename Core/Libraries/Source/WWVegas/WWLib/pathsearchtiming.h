@@ -30,12 +30,17 @@ public:
  };
  static constexpr unsigned retainedSamples=4;
  struct ResultSample {Result result=Result::NotRun;Rejection reason=Rejection::None;};
+ struct ReadSample {
+  std::uint64_t queries=0,queryObservations=0,heights=0,heightObservations=0;
+  unsigned flags=0;
+ };
  struct TaskSample {
   Kind kind=Kind::Ordinary;
   bool primary=false, fallback=false;
   std::uint64_t nanoseconds=0;
   unsigned examined=0, fallbackExamined=0, records=0, fallbackRecords=0;
   ResultSample primaryOutcome, fallbackOutcome;
+  ReadSample primaryReads,fallbackReads;
  };
  struct PairSample {
   std::uint64_t nanoseconds=0, id=0, queue=0;
@@ -225,9 +230,17 @@ public:
      role,resultName(t.fallbackOutcome.result),role,rejectionName(t.fallbackOutcome.reason));
    }
    std::fprintf(output,"\n");
+   for(unsigned j=0;j<2;++j){const auto&t=s.tasks[j];const char*role=j?"worker":"caller";
+    if(t.primary)reportReads(output,s.id,role,"primary",t.primaryReads);
+    if(t.fallback)reportReads(output,s.id,role,"fallback",t.fallbackReads);
+   }
   }
  }
 private:
+ static void reportReads(FILE* output,std::uint64_t pair,const char*role,const char*phase,const ReadSample& s){
+  std::fprintf(output,"[PATH_READS_SLOW] pair=%llu role=%s phase=%s queries=%llu query_observations=%llu heights=%llu height_observations=%llu flags=%u\n",
+   u(pair),role,phase,u(s.queries),u(s.queryObservations),u(s.heights),u(s.heightObservations),s.flags);
+ }
  static unsigned long long u(std::uint64_t value){return static_cast<unsigned long long>(value);}
  static const char* kindName(Kind kind){return kind==Kind::Safe?"safe":kind==Kind::Closest?"closest":"ordinary";}
  static const char* resultName(Result result){

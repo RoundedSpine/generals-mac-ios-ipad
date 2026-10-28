@@ -31,6 +31,8 @@
 #include "ownedpathroute.h"
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
 #include "boundedsearchreads.h"
+#include "boundedobservationlog.h"
+#include <cstring>
 #include <new>
 #include <memory>
 #endif
@@ -1144,6 +1146,10 @@ void PathfindCellInfo::forceCleanPathFindCellInfos()
 void Pathfinder::forceCleanCells()
 {
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // GeneralsX @bugfix Codex 28/10/2026 A speculative context cannot clean permanent map records.
+ activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  invalidateParallelResults();
 #endif
 
@@ -2122,6 +2128,10 @@ Int PathfindCell::releaseOpenList( PathfindCellList &list )
 		// One crash mode is where a cell has no PathfindCellInfo, resulting in a nullptr access and a crash.
 		// Therefore we signal that we need to clean the maps cells and the PathfindCellInfos
 		if(!curInfo && !s_useFixedPathfinding) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+			// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+			activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 			s_useFixedPathfinding = true;
 			s_forceCleanCells = true;
 			return count;
@@ -2157,6 +2167,10 @@ Int PathfindCell::releaseClosedList( PathfindCellList &list )
 		// One crash mode is where a cell has no PathfindCellInfo, resulting in a nullptr access and a crash.
 		// Therefore we signal that we need to clean the maps cells and the PathfindCellInfos
 		if(!curInfo && !s_useFixedPathfinding) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+			// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+			activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 			s_useFixedPathfinding = true;
 			s_forceCleanCells = true;
 			return count;
@@ -4316,14 +4330,32 @@ struct PathfindParallelReads {
  BoundedSearchReads<std::size_t, Bool, capacity> corridor;
  struct Query {PathOccupancy::Input input; PathOccupancy::Result result;};
  struct Height {Real x,y,z;};
- std::vector<Query> queries;
- std::vector<Height> heights;
+ // GeneralsX @performance Codex 28/10/2026 Complete input identities deduplicate observations, never the live reads themselves.
+ struct QueryKey {
+  std::array<std::uint32_t,6> operator()(const Query& query)const{
+   const auto&i=query.input;
+   const unsigned flags=unsigned(i.destination)|(unsigned(i.center)<<1)|(unsigned(i.considerTransient)<<2)|
+    (unsigned(i.legacy)<<3)|(unsigned(i.infantryThroughInfantry)<<4);
+   return {{static_cast<std::uint32_t>(i.x),static_cast<std::uint32_t>(i.y),static_cast<std::uint32_t>(i.layer),
+    static_cast<std::uint32_t>(i.radius),i.invalidID,flags}};
+  }
+ };
+ struct QueryValue {bool operator()(const Query&a,const Query&b)const{return a.result==b.result;}};
+ struct HeightKey {
+  std::array<unsigned char,sizeof(Real)*2> operator()(const Height& height)const{
+   std::array<unsigned char,sizeof(Real)*2> key;
+   std::memcpy(key.data(),&height.x,sizeof(Real));std::memcpy(key.data()+sizeof(Real),&height.y,sizeof(Real));return key;
+  }
+ };
+ struct HeightValue {bool operator()(const Height&a,const Height&b)const{return a.z==b.z;}};
+ BoundedObservationLog<Query,capacity,QueryKey,QueryValue> queries;
+ BoundedObservationLog<Height,capacity,HeightKey,HeightValue> heights;
  Bool overflow = false;
  void reset() {cells.reset();corridor.reset();queries.clear();heights.clear();overflow=false;}
  void query(const PathOccupancy::Input& input, const PathOccupancy::Result& result) {
-  if (queries.size()==capacity) overflow=true;
-  else queries.push_back({input,result});
+  if(!queries.observe({input,result}))overflow=true;
  }
+ void height(Real x,Real y,Real z){if(!heights.observe({x,y,z}))overflow=true;}
 };
 
 struct PathfindParallelJob {
@@ -4406,8 +4438,7 @@ void Pathfinder::observeParallelCell(PathfindCell* cell) {
 Real Pathfinder::searchGroundHeight(Real x, Real y) {
  const Real height=TheTerrainLogic->getGroundHeight(x,y);
  if (auto* reads=activePathfindSearchContext().m_parallelReads) {
-  if (reads->heights.size()==PathfindParallelReads::capacity) reads->overflow=true;
-  else reads->heights.push_back({x,y,height});
+  reads->height(x,y,height);
  }
  return height;
 }
@@ -5489,6 +5520,10 @@ void Pathfinder::beginSearchState()
 }
 
 void Pathfinder::cleanOpenAndClosedLists() {
+#if defined(GENERALS_ZH_PARALLEL_PATH_BATCH) && RETAIL_COMPATIBLE_PATHFINDING
+ // Preserve pending caller recovery when preparing a private hierarchy.
+ if(s_forceCleanCells)activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 	Int count = 0;
 	if (!searchState().m_openList.empty()) {
 		count += PathfindCell::releaseOpenList(searchState().m_openList);
@@ -5663,7 +5698,8 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
     GENERALS_PATH_RESULT_CHECK(before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
     before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
     before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
-    before.human==settings.human,Movement) && GENERALS_PATH_RESULT_CHECK(!job.reads.overflow,Overflow);
+    before.human==settings.human,Movement) &&
+    GENERALS_PATH_RESULT_CHECK(!job.reads.overflow && !job.reads.queries.invalid() && !job.reads.heights.invalid(),Overflow);
 #if RETAIL_COMPATIBLE_PATHFINDING
    valid=valid && GENERALS_PATH_RESULT_CHECK(job.fixed==s_useFixedPathfinding,FixedMode) && GENERALS_PATH_RESULT_CHECK(!s_forceCleanCells,Recovery);
 #endif
@@ -7432,7 +7468,11 @@ void Pathfinder::prepareParallelBatch()
     if (job.safe) findSafePath(job.obj,*job.locomotor,&job.from,&job.to,&job.repulsor2,job.repulsorRadius);
     else if (job.closest) findClosestPath(job.obj,*job.locomotor,&job.from,&job.to,blocked[i],pathCostMultiplier[i],false);
     // Outer terrain rejection stays authoritative on main; prepare only the fallback kernel when it already rules out ordinary search.
-    else if (clientSafeQuickDoesPathExist(*job.locomotor,&job.from,&job.to)) internalFindPath(job.obj,*job.locomotor,&job.from,&job.to);}
+    else {
+     // GeneralsX @bugfix Codex 28/10/2026 Prepare the ordinary hierarchy in this job's context before capturing its fine kernel.
+     PathfindSearchContext::PreparationScope preparation(job.context);
+     findPathWithInputs(job.obj,*job.locomotor,&job.from,&job.to);
+    }}
    batch.preparing=nullptr;
   }
   batch.active=true;
@@ -7520,6 +7560,16 @@ void Pathfinder::prepareParallelBatch()
     task.nanoseconds=job.kernelTime.totalNanoseconds+(task.fallback?job.fallback->kernelTime.totalNanoseconds:0);
     if(task.primary){task.examined=job.closest?job.closestOutcome.cellsExamined:job.outcome.cellsExamined;task.records=job.context.m_records.size();}
     if(task.fallback){task.fallbackExamined=job.fallback->closestOutcome.cellsExamined;task.fallbackRecords=job.fallback->context.m_records.size();}
+    // GeneralsX @feature Codex 28/10/2026 Copy bounded observation counts after join to distinguish deduplication, capacity and conflict.
+    const auto copyReads=[](const PathfindParallelReads& reads,PathSearchTiming::ReadSample& sample){
+     sample.queries=reads.queries.size();sample.queryObservations=reads.queries.observations();
+     sample.heights=reads.heights.size();sample.heightObservations=reads.heights.observations();
+     sample.flags=(reads.queries.full()?1u:0u)|(reads.heights.full()?2u:0u)|
+      (reads.queries.conflict()?4u:0u)|(reads.heights.conflict()?8u:0u)|
+      (reads.queries.invalid()?16u:0u)|(reads.heights.invalid()?32u:0u);
+    };
+    if(task.primary)copyReads(job.reads,task.primaryReads);
+    if(task.fallback)copyReads(job.fallback->reads,task.fallbackReads);
    }
    const auto pairId=m_pathTiming.recordPair(pairSample);
    for(unsigned i=0;i<2;++i){
@@ -7556,6 +7606,12 @@ void Pathfinder::prepareParallelBatch()
    job.context.m_parallelReads=nullptr;
    if(job.fallback) job.fallback->context.m_parallelReads=nullptr;
   }
+ } catch (const PathfindSearchContext::SpeculativeRecovery&) {
+  // GeneralsX @bugfix Codex 28/10/2026 Discard private preparation; the original caller remains responsible for recovery.
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::Capture;
+#endif
+  clearParallelBatch();
  } catch (const ExclusiveSearchWorker::EnvironmentError& error) {
 #ifdef GENERALS_ZH_PATH_TIMING
   admission.reason=PathSearchTiming::Admission::EnvironmentFailure;
@@ -7614,7 +7670,7 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
  {
 #ifdef GENERALS_ZH_PATH_TIMING
   // GeneralsX @feature Codex 28/10/2026 Hierarchy remains a separately measured main-thread phase.
-  PathSearchTiming::Scope hierarchyTiming(&m_pathTiming[PathSearchTiming::Hierarchy]);
+  PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::Hierarchy]);
 #endif
   hPat=findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
  }
@@ -8182,7 +8238,14 @@ Path *Pathfinder::buildHierarchicalPath( const Coord3D *fromPos, PathfindCell *g
 {
 	DEBUG_ASSERTCRASH( goalCell, ("Pathfinder::buildHierarchicalPath: goalCell == nullptr") );
 
-	Path *path = newInstance(Path);
+	// GeneralsX @bugfix Codex 28/10/2026 Release a partially built coarse Path if private preparation aborts recovery.
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ const auto dispose=[](Path* p){deleteInstance(p);};
+ std::unique_ptr<Path,decltype(dispose)> owner(newInstance(Path),dispose);
+ Path* path=owner.get();
+#else
+ Path *path = newInstance(Path);
+#endif
 
 	prependCells(path, fromPos, goalCell, true);
 
@@ -8233,7 +8296,11 @@ Path *Pathfinder::buildHierarchicalPath( const Coord3D *fromPos, PathfindCell *g
 		setDebugPath(path);
 	}
 #endif
-	return path;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ return owner.release();
+#else
+ return path;
+#endif
 }
 
 
@@ -9003,6 +9070,10 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 				// Retail clients will crash beyond this point, but we attempt to recover by performing a full cleanup then enabling the fixed pathfinding codepath
 #if RETAIL_COMPATIBLE_PATHFINDING
 				if (!s_useFixedPathfinding) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+					// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+					activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 					s_useFixedPathfinding = true;
 					forceCleanCells();
 				}
@@ -9030,6 +9101,10 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 				// Retail clients will crash beyond this point, but we attempt to recover by performing a full cleanup then enabling the fixed pathfinding codepath
 #if RETAIL_COMPATIBLE_PATHFINDING
 				if (!s_useFixedPathfinding) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+					// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+					activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 					s_useFixedPathfinding = true;
 					forceCleanCells();
 				}
@@ -9133,6 +9208,10 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 							// Retail clients will crash beyond this point, but we attempt to recover by performing a full cleanup then enabling the fixed pathfinding codepath
 #if RETAIL_COMPATIBLE_PATHFINDING
 							if (!s_useFixedPathfinding) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+								// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+								activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 								s_useFixedPathfinding = true;
 								forceCleanCells();
 							}
@@ -9154,6 +9233,10 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 						// Retail clients will crash beyond this point, but we attempt to recover by performing a full cleanup then enabling the fixed pathfinding codepath
 #if RETAIL_COMPATIBLE_PATHFINDING
 						if (!s_useFixedPathfinding) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+							// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+							activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 							s_useFixedPathfinding = true;
 							forceCleanCells();
 						}
@@ -9952,6 +10035,10 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 			// TheSuperHacker @info This is here to catch a retail pathfinding crash point and to recover from it
 			// A cell has gotten onto the open list without pathfinding info due to a danling m_open pointer on the previous listed cell so we need to force a cleanup
 			if (!s_useFixedPathfinding && searchState().m_openList.getHead() && !searchState().m_openList.getHead()->hasSearchInfo()) {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+				// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+				activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 				s_useFixedPathfinding = true;
 				forceCleanCells();
 				return MAX_COST;
@@ -10579,6 +10666,10 @@ void Pathfinder::prependRouteCells( RouteSink *path, const Coord3D *fromPos,
 				path->prependNode( fromPos, cell->getLayer() );
 			}
 
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+			// GeneralsX @bugfix Codex 28/10/2026 Abort private preparation before changing shared recovery state.
+			activePathfindSearchContext().abortSpeculativeRecovery();
+#endif
 			s_useFixedPathfinding = true;
 			forceCleanCells();
 			return;

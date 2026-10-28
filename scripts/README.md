@@ -82,6 +82,10 @@ validation and queue-budget tests. Its result-diagnostic cases check every first
 rejection group, enabled/disabled live-query counts, bounded sample correlation,
 primary/fallback dispositions and exactly-once cleanup across job reuse.
 Use `--tsan` for the batch race checks.
+The bounded-preparation cases also cover restricted ordinary corridors, unchanged
+authoritative accounting, recovery abort/Path cleanup, exact query/height identity,
+collision/rollover/conflict handling and large searches exceeding 8,192 repeated
+observations while reusing results within the existing distinct-entry bound.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

@@ -17,6 +17,8 @@ def fixture(timing=True):
 #include "exclusivesearchworker.h"
 #include "occupancyvalidationworker.h"
 #include "boundedsearchreads.h"
+#include "boundedobservationlog.h"
+#include <cstring>
 #include <array>
 #include <memory>
 #include <map>
@@ -384,7 +386,7 @@ int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
    case R::Occupancy:{PathOccupancy::Input input;input.destination=true;input.x=2;input.y=2;input.layer=1;input.center=true;
     LiveOccupancyReader live={&p,&w.a};auto result=PathOccupancy::evaluate(input,live);result.allowed=!result.allowed;
     job.reads.queries.clear();job.reads.query(input,result);break;}
-   case R::Height:job.reads.heights={{1,2,9999}};break;
+   case R::Height:job.reads.heights.clear();job.reads.height(1,2,9999);break;
    case R::Count:assert(false);break;
   }
   validationAiReads=validationHeightReads=0;
@@ -412,6 +414,173 @@ int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
 
 
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @test Codex 28/10/2026 Preserve exact bounded dependencies while removing repeated observations and matching coarse preparation.
+    def test_bounded_observation_index_collision_rollover_conflict_and_failure(self):
+        run_cpp(r'''
+#include "boundedobservationlog.h"
+#include <stdexcept>
+struct Value{std::array<unsigned,2> key;int value;};
+struct Key{auto operator()(const Value&v)const{return v.key;}};
+struct Equal{bool operator()(const Value&a,const Value&b)const{return a.value==b.value;}};
+struct Hash{std::size_t operator()(const std::array<unsigned,2>&)const{return 0;}};
+int main(){BoundedObservationLog<Value,4,Key,Equal,Hash,unsigned char> log;
+ for(unsigned i=0;i<4;++i)assert(log.observe({{{i,0}},int(i)}));
+ for(unsigned n=0;n<20000;++n)assert(log.observe({{{n%4,0}},int(n%4)}));
+ assert(log.size()==4&&log.observations()==20004&&!log.invalid());
+ unsigned i=0;for(const auto&v:log)assert(v.key[0]==i++);
+ assert(!log.observe({{{4,0}},4})&&log.full()&&!log.conflict()&&log.size()==4);
+ for(unsigned pass=0;pass<600;++pass){log.clear();assert(log.empty()&&!log.invalid()&&!log.observations());
+  assert(log.observe({{{1,2}},int(pass)}));assert(log.observe({{{1,2}},int(pass)}));
+  assert(!log.observe({{{1,2}},int(pass+1)})&&log.conflict()&&!log.full());
+ }
+ struct Throws{bool operator()(const Value&,const Value&)const{throw std::runtime_error("comparison");}};
+ BoundedObservationLog<Value,4,Key,Throws,Hash> failing;assert(failing.observe({{{1,2}},3}));
+ bool caught=false;try{failing.observe({{{1,2}},3});}catch(const std::runtime_error&){caught=true;}
+ assert(caught&&failing.invalid()&&!failing.full()&&!failing.conflict());
+ failing.clear();assert(failing.observe({{{1,2}},3})&&!failing.invalid());
+}
+''')
+
+    def test_bounded_read_logs_keep_every_input_field_and_conflicting_result(self):
+        run_cpp(fixture()+r'''
+#include <limits>
+int main(){auto reads=std::make_unique<PathfindParallelReads>();auto&r=*reads;
+ PathOccupancy::Input input;input.x=1;input.y=-2;input.layer=1;input.center=true;
+ PathOccupancy::Result value;value.allowed=true;
+ for(unsigned i=0;i<20000;++i)r.query(input,value);
+ assert(r.queries.size()==1&&r.queries.observations()==20000&&!r.overflow);
+ for(int field=0;field<10;++field){r.reset();auto changed=input;
+  switch(field){case 0:changed.destination=true;break;case 1:++changed.x;break;case 2:++changed.y;break;
+   case 3:++changed.layer;break;case 4:++changed.radius;break;case 5:changed.center=false;break;
+   case 6:changed.considerTransient=true;break;case 7:changed.legacy=true;break;
+   case 8:changed.infantryThroughInfantry=true;break;case 9:++changed.invalidID;break;}
+  r.query(input,value);r.query(changed,value);assert(r.queries.size()==2&&!r.overflow);
+ }
+ for(int field=0;field<5;++field){r.reset();auto changed=value;
+  switch(field){case 0:changed.allowed=false;break;case 1:++changed.allyFixedCount;break;
+   case 2:changed.allyMoving=true;break;case 3:changed.allyGoal=true;break;case 4:changed.enemyFixed=true;break;}
+  r.query(input,value);r.query(input,changed);assert(r.overflow&&r.queries.conflict()&&!r.queries.full());
+ }
+ r.reset();for(unsigned i=0;i<r.capacity;++i){input.x=i;r.query(input,value);}
+ input.x=0;r.query(input,value);assert(r.queries.size()==r.capacity&&!r.overflow);
+ input.x=r.capacity;r.query(input,value);assert(r.overflow&&r.queries.full()&&!r.queries.conflict());
+ r.reset();for(unsigned i=0;i<20000;++i)r.height(1,2,3);
+ assert(r.heights.size()==1&&r.heights.observations()==20000&&!r.overflow);
+ r.height(1,2,4);assert(r.overflow&&r.heights.conflict()&&!r.heights.full());
+ r.reset();r.height(0.0f,2,3);r.height(-0.0f,2,3);assert(r.heights.size()==2&&!r.overflow);
+ r.reset();for(unsigned i=0;i<r.capacity;++i)r.height(Real(i),2,3);
+ r.height(0,2,3);assert(r.heights.size()==r.capacity&&!r.overflow);
+ r.height(Real(r.capacity),2,3);assert(r.overflow&&r.heights.full());
+ r.reset();r.height(1,2,std::numeric_limits<Real>::quiet_NaN());r.height(1,2,std::numeric_limits<Real>::quiet_NaN());
+ assert(r.overflow&&r.heights.conflict());
+}
+''')
+
+    def test_bounded_query_observations_never_cache_actual_live_evaluation(self):
+        source=validation_outcome_fixture()
+        a=source.index('PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(')
+        b=source.index('\n}',a)+2
+        source=source[:a]+function('PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(')+source[b:]
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;Object third;third.id=3;logic.objects[3]=&third;p.storage[5][5].setPosUnit(3,{5,5});
+ auto reads=std::make_unique<PathfindParallelReads>();auto&c=mainPathfindSearchContext();c.m_parallelReads=reads.get();
+ PathOccupancy::Input input;input.x=5;input.y=5;input.layer=1;input.center=true;validationAiReads=0;
+ const auto original=p.evaluateOccupancyQuery(&w.a,input);
+ for(int i=0;i<12000;++i)assert(p.evaluateOccupancyQuery(&w.a,input)==original);
+ assert(validationAiReads>=12001&&reads->queries.size()==1&&reads->queries.observations()==12001&&!reads->overflow);
+ w.a.relation=ALLIES;const auto changed=p.evaluateOccupancyQuery(&w.a,input);assert(!(changed==original));
+ assert(reads->overflow&&reads->queries.conflict());
+ c.m_parallelReads=nullptr;p.storage[5][5].setPosUnit(0,{5,5});logic.objects.erase(3);
+}
+''')
+
+    def test_bounded_hierarchy_preparation_matches_restricted_serial_corridors(self):
+        source=fixture().replace('Path*findHierarchicalPath(Bool,const LocomotorSet&,const Coord3D*,const Coord3D*,Bool){',
+                                 'Path*findHierarchicalPath(Bool,const LocomotorSet&,const Coord3D*from,const Coord3D*,Bool){')
+        source=source.replace('m_zoneManager.setAllPassable();return new Path;',
+                              'm_zoneManager.setAllPassable();activePathfindSearchContext().setCorridorPassable(from->y<50?0:2,false);return new Path;',1)
+        run_cpp(source+r'''
+int main(){for(bool fixed:{false,true}){World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;auto&c=mainPathfindSearchContext();
+ auto route=[](Path*path){std::vector<int>v;if(!path)return std::vector<int>{-1};for(auto p:path->route)v.push_back(p.x*100+p.y);return v;};
+ auto consume=[&](Object&o){p.m_queuePRHead=o.id-1;return route(p.findPathWithInputs(&o,o.ai.locomotor,&o.ai.from,&o.ai.to));};
+ c.m_cumulativeCellsAllocated=0;const auto a=consume(w.a),b=consume(w.b);const auto budget=c.m_cumulativeCellsAllocated;
+ c.m_cumulativeCellsAllocated=0;c.m_isTunneling=true;c.setCorridorPassable(4,false);const auto corridor=c.m_corridor;
+ p.ordinaryHierarchicalCalls=0;p.m_queuePRHead=0;p.prepareParallelBatch();
+ assert(p.ordinaryHierarchicalCalls==2&&c.m_cumulativeCellsAllocated==0&&c.m_isTunneling&&c.m_corridor==corridor);
+ assert(p.m_parallelBatch->jobs[0].context.corridorPassable(2)&&!p.m_parallelBatch->jobs[0].context.corridorPassable(0));
+ assert(p.m_parallelBatch->jobs[1].context.corridorPassable(0)&&!p.m_parallelBatch->jobs[1].context.corridorPassable(2));
+ assert(consume(w.a)==a&&consume(w.b)==b&&p.ordinaryHierarchicalCalls==4);
+ assert(p.m_parallelBatch->accepted==2&&p.m_parallelBatch->rejected==0&&c.m_cumulativeCellsAllocated==budget);
+ assert(!p.m_pathTiming.rejections(false,PathSearchTiming::Rejection::Corridor));
+}}
+''')
+
+    def test_bounded_hierarchy_recovery_aborts_without_live_world_repair(self):
+        source=fixture().replace('m_zoneManager.setAllPassable();return new Path;',
+                                 'activePathfindSearchContext().abortSpeculativeRecovery();m_zoneManager.setAllPassable();return new Path;',1)
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=false;auto&main=mainPathfindSearchContext();
+ main.m_cumulativeCellsAllocated=4990;main.setCorridorPassable(3,false);const auto corridor=main.m_corridor;
+ p.prepareParallelBatch();assert(!p.m_parallelBatch->active&&!p.m_parallelBatch->batches&&!p.m_parallelWorldEpoch);
+ assert(!s_useFixedPathfinding&&!s_forceCleanCells&&main.m_cumulativeCellsAllocated==4990&&main.m_corridor==corridor);
+ assert(!SearchContextBinding<PathfindSearchContext>::current()&&!p.m_exclusiveWorkerUnavailable);
+ assert(p.m_exclusiveWorker->searches==0&&p.callerLoops==0&&p.workerLoops==0);
+ for(const auto&job:p.m_parallelBatch->jobs)assert(!job.context.m_speculativePreparation);
+ assert(p.findPathWithInputs(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to));
+ auto context=std::make_unique<PathfindSearchContext>();bool caught=false;s_forceCleanCells=true;
+ try{SearchContextBinding<PathfindSearchContext> bound(*context);PathfindSearchContext::PreparationScope preparing(*context);p.cleanOpenAndClosedLists();}
+ catch(const PathfindSearchContext::SpeculativeRecovery&){caught=true;}
+ assert(caught&&s_forceCleanCells&&!s_useFixedPathfinding&&!context->m_speculativePreparation&&!p.m_parallelWorldEpoch);
+ s_forceCleanCells=false;s_useFixedPathfinding=true;
+}
+''')
+
+    def test_bounded_hierarchy_partial_path_is_released_on_recovery(self):
+        from test_search_context import allocator_fixture
+        run_cpp('#define GENERALS_ZH_PARALLEL_PATH_BATCH 1\nstruct PathfindParallelReads;\n'+allocator_fixture()+r'''
+#include <memory>
+#define newInstance(T) new T
+#define deleteInstance(p) delete (p)
+#define RTS_GENERALS 0
+constexpr float PATHFIND_CELL_SIZE_F=10;
+struct Coord3D{float x=0,y=0,z=0;};struct Node{Coord3D pos;const Coord3D*getPosition(){return &pos;}};
+struct Path{static int alive;Node first;Path(){++alive;}~Path(){--alive;}Node*getFirstNode(){return &first;}};int Path::alive=0;
+struct PathfindZoneManager{enum{ZONE_BLOCK_SIZE=4};};
+struct Pathfinder{
+ struct Zones{void setPassable(int,int,bool){}}m_zoneManager;
+ void worldToCell(const Coord3D*p,ICoord2D*c){*c={int(p->x/10),int(p->y/10)};}
+ void prependCells(Path*,const Coord3D*,PathfindCell*,bool){activePathfindSearchContext().abortSpeculativeRecovery();}
+ Path*buildHierarchicalPath(const Coord3D*,PathfindCell*);
+};
+'''+function('Path *Pathfinder::buildHierarchicalPath(')+r'''
+int main(){Pathfinder p;PathfindCell cell;Coord3D from;auto&c=mainPathfindSearchContext();bool caught=false;
+ try{SearchContextBinding<PathfindSearchContext> bound(c);PathfindSearchContext::PreparationScope preparing(c);p.buildHierarchicalPath(&from,&cell);}
+ catch(const PathfindSearchContext::SpeculativeRecovery&){caught=true;}
+ assert(caught&&!Path::alive&&!c.m_speculativePreparation);
+ auto*path=p.buildHierarchicalPath(&from,&cell);assert(path&&Path::alive==1);delete path;assert(!Path::alive);
+}
+''')
+
+    def test_bounded_large_ordinary_observations_reuse_without_raising_capacity(self):
+        source=large_closest_fixture().replace('if(rejectDestinations||x>22)return false;','if(rejectDestinations)return false;')
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=true;
+ w.a.ai.from={25,645,0};w.a.ai.to={955,645,0};w.b.ai.from={25,805,0};w.b.ai.to={955,805,0};
+ for(int y=0;y<128;++y)p.storage[24][y].setType(PathfindCell::CELL_OBSTACLE);
+ auto route=[](Path*path){std::vector<int>v;if(!path)return std::vector<int>{-1};for(auto p:path->route)v.push_back(p.x*1000+p.y);return v;};
+ const auto original=w.a.ai.to;auto&c=mainPathfindSearchContext();c.m_cumulativeCellsAllocated=0;
+ assert(!p.findPathWithInputs(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to));
+ const auto expected=route(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));const auto budget=c.m_cumulativeCellsAllocated;
+ w.a.ai.to=original;c.m_cumulativeCellsAllocated=0;p.prepareParallelBatch();auto&job=p.m_parallelBatch->jobs[0];
+ assert(job.reads.queries.observations()>PathfindParallelReads::capacity&&job.reads.queries.size()<PathfindParallelReads::capacity&&!job.reads.overflow);
+ assert(!p.findPathWithInputs(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to));
+ assert(route(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false))==expected);
+ assert(p.m_parallelBatch->accepted==1&&p.m_parallelBatch->fallbackAccepted==1&&c.m_cumulativeCellsAllocated==budget);
+ const auto&sample=p.m_pathTiming.slowPairs()[0].tasks[0].primaryReads;
+ assert(sample.queryObservations>8192&&sample.queries<8192&&!sample.flags);
+}
+''',timeout=45)
+
     # GeneralsX @test Codex 28/10/2026 Outcomes resolve once on main and stay associated with the original retained pair/role/phase.
     def test_result_reuse_rejection_discard_and_reset_accounting(self):
         run_cpp(fixture()+r'''
@@ -804,7 +973,7 @@ int main(){for(bool fixed:{false,true})for(int reason=0;reason<3;++reason)for(in
  const auto targetA=w.a.ai.to,targetB=w.b.ai.to;auto corridor=state.m_corridor;
  w.a.ai.to=originalA;w.b.ai.to=originalB;p.m_queuePRHead=0;state.m_cumulativeCellsAllocated=0;state.m_isTunneling=false;
  p.ordinaryHierarchicalCalls=p.hierarchicalCalls=0;p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
- assert(batch.batches==1&&p.hierarchicalCalls==0&&p.ordinaryHierarchicalCalls==0);
+ assert(batch.batches==1&&p.hierarchicalCalls==0&&p.ordinaryHierarchicalCalls==(reason==2?0:2));
  assert(consume(w.a)==a&&consume(w.b)==b);
  assert(w.a.ai.to.x==targetA.x&&w.a.ai.to.y==targetA.y&&w.b.ai.to.x==targetB.x&&w.b.ai.to.y==targetB.y);
  assert(state.m_cumulativeCellsAllocated==budget&&state.m_corridor==corridor&&!state.m_isTunneling&&state.m_ignoreObstacleID==0);

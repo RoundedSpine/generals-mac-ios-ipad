@@ -372,6 +372,19 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
  BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;
  unsigned m_transientRecords = 0;
  SearchContextOwnership m_ownership;
+ // GeneralsX @bugfix Codex 28/10/2026 Speculative main-side preparation must never perform live-world retail recovery.
+ struct SpeculativeRecovery {};
+ bool m_speculativePreparation=false;
+ void abortSpeculativeRecovery() const {if(m_speculativePreparation)throw SpeculativeRecovery{};}
+ struct PreparationScope {
+  PathfindSearchContext& context;bool previous;
+  explicit PreparationScope(PathfindSearchContext& selected):context(selected),previous(selected.m_speculativePreparation){
+   assert(SearchContextBinding<PathfindSearchContext>::current()==&context);context.m_speculativePreparation=true;
+  }
+  ~PreparationScope(){context.m_speculativePreparation=previous;}
+  PreparationScope(const PreparationScope&)=delete;
+  PreparationScope& operator=(const PreparationScope&)=delete;
+ };
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  PathfindParallelReads* m_parallelReads = nullptr;
 #endif

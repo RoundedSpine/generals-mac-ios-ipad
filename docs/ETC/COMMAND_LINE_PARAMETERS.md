@@ -85,6 +85,9 @@ The slow-pair rows also include separate primary/fallback dispositions and the
 first validation rejection group for each task role. `[PATH_RESULT_OUTCOMES]`
 and `[PATH_RESULT_REJECTIONS]` summarize those phases, including evicted samples.
 See [result correlation and status meanings](../WORKDIR/audit/IOS_PATH_RESULT_OUTCOMES_2026-10-28.md).
+`[PATH_READS_SLOW]` adds bounded observation/unique-entry counts and capacity/
+conflict flags for each executed phase of those retained pairs. See
+[corridor preparation and observation-log definitions](../WORKDIR/audit/IOS_PATH_CORRIDOR_READS_2026-10-28.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 
