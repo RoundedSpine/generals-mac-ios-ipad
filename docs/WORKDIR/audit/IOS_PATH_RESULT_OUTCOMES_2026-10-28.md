@@ -1,0 +1,117 @@
+# Correlating slow searches with result outcomes — 28 October 2026
+
+## Purpose and scope
+
+The ~b7b492a device log contains a 56.865 ms caller kernel and a 35.077 ms worker
+kernel in the same pair, followed by serial work in that queue. Its retained
+samples cannot identify whether those speculative results were reused, rejected
+or never requested. Add that explanation before changing storage or dispatch.
+
+Extend the existing optional GENERALS_PATH_TIMING diagnostics, already enabled
+in the experimental IPA and default OFF elsewhere. Keep all validation policy,
+eligibility, worker count, search limits, original per-request queue accounting,
+zone processing and graphics behavior. No new launch flag or cache reset.
+
+## Ownership and bounded correlation
+
+The existing join completes before main assigns each executed primary/fallback
+phase its scalar pair ID, role and pending outcome. Main alone resolves that
+phase; worker code still writes only its existing private kernel timer. An early
+fallback-only task has no executed primary phase and keeps primary=not_run.
+
+On terminal resolution, update the corresponding role/phase in the retained
+sample with that pair ID. A fixed scan of at most four samples handles sorting
+and eviction; no pointer into the sorted sample array is cached in a job. If the
+pair was evicted, count its terminal outcome/reason in session aggregates without
+updating another retained sample. No map cells, objects, names or engine pointers
+are added to retained records. Job reset clears its IDs and status; terminal
+guards make repeated cleanup idempotent.
+
+The four retained pairs are still selected by barrier duration, not by result
+outcome or individual kernel duration. No additional history vector, per-request
+log write, per-cell probe, clock, lock or thread is introduced.
+
+## Status semantics
+
+Each caller/worker task now has primary_result/primary_reason and
+fallback_result/fallback_reason in its PATH_PAIR_SLOW row:
+
+| Status | Meaning |
+| --- | --- |
+| not_run | This phase did not execute in the completed pair |
+| pending | Executed phase has not yet reached a terminal outcome when sampled |
+| reused | Validation passed and the existing main-side finalization/accounting completed |
+| rejected | A selected candidate failed an existing validation check; reason is its first failed group |
+| discarded | Executed work was never selected for validation before the original cleanup boundary |
+| validated_unfinished | Validation passed, but finalization did not reach the existing acceptance increment before cleanup |
+
+The joined job internally distinguishes validated from pending so exceptional
+finalization can be explained. Retained snapshots become terminal at rejection,
+completed reuse or cleanup. Destructor cleanup now occurs before timing report,
+so a normal exit resolves remaining pending samples before printing them.
+
+Reused includes valid no-path results. One ordinary failure followed by a closest
+fallback can reuse two phases for a single AI callback; these are not counts of
+successful routes or unit commands. Discarded does not mean validation rejected
+the result and does not identify whether budget, changed callback behavior or
+another circumstance prevented selection. Identity/queue-position candidates
+skipped before validation retain the existing behavior and become discarded if
+they remain unselected; no new rejection counter is charged for those skips.
+
+## First rejection groups and query preservation
+
+Record a check's failure in place through a timing-only wrapper. The wrapper's
+disabled form is the original condition. Preserve the original && chain, guard
+order and early loop exits. Never repeat a live query to classify its failure.
+
+Groups follow the existing validation order: object identity, locomotor identity,
+from/to endpoints, search kind, safe repulsor settings, closest policy, fallback
+path precondition, world/lifecycle epochs, paused state, permanent admission,
+ignored obstacle, tunneling, prepared start/goal cells and index, movement settings,
+explicit read overflow, retail/failover mode, cell dependencies, corridor
+dependencies, live occupancy answers and terrain heights. The two kind checks
+share one category; movement settings retain their existing internal order but
+share a category. Only the first failed group contributes a reason.
+
+cell_dependencies and corridor_dependencies include failure of their bounded
+read logs, not only changed values. They do not name an exact cell or imply a
+reproduced race. An earlier world_epoch rejection leaves later checks unexamined;
+it does not show whether those later checks would also have failed.
+
+Two PATH_RESULT_OUTCOMES rows summarize primary/fallback reused, rejected,
+discarded and validated_unfinished counts. Two PATH_RESULT_REJECTIONS rows give
+the per-phase first-reason counts. Retained sample limits remain four queues and
+four pairs, with four additional aggregate lines in the shutdown summary.
+For an ordinary completed session, the primary reused/rejected/discarded totals
+match the existing accepted/rejected/unused totals, and likewise for fallbacks.
+Exceptional partial dispatches need not be a normal accounting run. No summary
+is guaranteed after crash or force-quit.
+
+## Verification and next device check
+
+Six added cases exercise actual ordinary/safe/closest reuse, rejected and unused
+work, the original one-cell scheduling cutoff, every rejection group, timing
+enabled/disabled live-read counts, first-failure priority, sorting/eviction and
+fallback-only correlation through job reuse. Existing ordinary-failure fallback
+coverage now also checks both phase outcomes independently. Successful direct
+validation followed by cleanup exercises validated_unfinished.
+
+All 193 local workflow QA tests pass, including all 72 batch cases. The six new
+cases pass ASan/UBSan. An additional compiled comparison against the prior
+cffe4080f validator produces exactly the same 26 outcome/live-read traces as the
+instrumented validator. This independently checks the pre-change guard behavior,
+in addition to the persistent ON/OFF comparison. The final ordinary/safe/closest
+and combined-fallback assertions are also checked separately under sanitizers.
+All 72 batch cases pass ThreadSanitizer. The final expanded kind/fallback
+assertions also pass their targeted TSan and ASan/UBSan runs. Diff checks pass.
+
+Native SDK and device outcome reports remain pending. Fixtures still use
+controlled world and Path services rather than full-engine replay validation.
+No performance claim.
+
+After installing the new IPA, use the same gameplay and exit normally. Match
+PATH_PAIR_SLOW pair/queue IDs to the existing queue samples, then inspect both
+roles' primary/fallback status and first reason. This can distinguish reused
+expensive work from rejected or unused speculation before deciding which
+validation/storage/dispatch change is warranted. Separate main-thread zone
+rebuild outliers from these search results.

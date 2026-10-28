@@ -342,7 +342,167 @@ def large_closest_case():
 '''
 
 
+# GeneralsX @test Codex 28/10/2026 Trace validation reads in both compile modes using actual joined searches and validator guards.
+def validation_outcome_fixture(timing=True):
+    source=fixture(timing)
+    source=source.replace('struct Object {\n ObjectID id=',
+                          'std::atomic<unsigned> validationAiReads{0},validationHeightReads{0};\nstruct Object {\n ObjectID id=',1)
+    source=source.replace('AIUpdateInterface*getAIUpdateInterface()const{return hasAI?',
+                          'AIUpdateInterface*getAIUpdateInterface()const{++validationAiReads;return hasAI?',1)
+    return source.replace('Real getGroundHeight(Real x,Real y){return',
+                          'Real getGroundHeight(Real x,Real y){++validationHeightReads;return',1)
+
+
+def validation_outcome_cases():
+    return r'''
+int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
+ for(unsigned scenario=0;scenario<unsigned(R::Count);++scenario){World w;Pathfinder p;w.queue(p);
+  if(scenario==unsigned(R::Repulsors))w.a.ai.safe=true;
+  if(scenario==unsigned(R::ClosestPolicy))w.a.ai.closest=true;
+  if(scenario==unsigned(R::FallbackPath))p.quickAllowed=false;
+  p.prepareParallelBatch();auto&primary=p.m_parallelBatch->jobs[0];
+  bool fallback=scenario==unsigned(R::FallbackPath);
+  if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  auto&job=fallback?*primary.fallback:primary;
+  auto from=job.from,to=job.to,r2=job.repulsor2;auto radius=job.repulsorRadius;
+  auto*start=job.start;auto*goal=job.goal;auto index=job.startIndex;auto settings=job.settings;
+  auto closestSettings=job.closestSettings;const auto*closest=job.closest?&closestSettings:nullptr;
+  const auto*repulsor=job.safe?&r2:nullptr;
+  switch(static_cast<R>(scenario)){
+   case R::None:break;case R::Object:job.obj=&w.b;break;case R::Locomotor:job.locomotor=&w.b.ai.locomotor;break;
+   case R::From:++from.x;break;case R::To:++to.x;break;case R::Kind:job.safe=true;break;
+   case R::Repulsors:++radius;break;case R::ClosestPolicy:closestSettings.goalOnObstacle=!closestSettings.goalOnObstacle;break;
+   case R::FallbackPath:w.a.ai.existingPath=true;break;case R::WorldEpoch:++p.m_parallelWorldEpoch;break;
+   case R::Lifecycle:PathOccupancy::validationLifecycleEpoch().fetch_add(1);break;
+   case R::Paused:PathOccupancy::validationPaused().store(true);break;case R::Admission:++job.permanent;break;
+   case R::IgnoredObstacle:++job.ignored;break;case R::Tunneling:job.tunneling=!job.tunneling;break;
+   case R::StartCell:start=nullptr;break;case R::GoalCell:goal=nullptr;break;case R::StartIndex:++index.x;break;
+   case R::Movement:++settings.radius;break;case R::Overflow:job.reads.overflow=true;break;
+   case R::FixedMode:s_useFixedPathfinding=!s_useFixedPathfinding;break;case R::Recovery:s_forceCleanCells=true;break;
+   case R::Cells:job.start->setPinched(true);break;
+   case R::Corridor:job.reads.corridor.reset();job.reads.corridor.observe(0,true);mainPathfindSearchContext().setCorridorPassable(0,false);break;
+   case R::Occupancy:{PathOccupancy::Input input;input.destination=true;input.x=2;input.y=2;input.layer=1;input.center=true;
+    LiveOccupancyReader live={&p,&w.a};auto result=PathOccupancy::evaluate(input,live);result.allowed=!result.allowed;
+    job.reads.queries.clear();job.reads.query(input,result);break;}
+   case R::Height:job.reads.heights={{1,2,9999}};break;
+   case R::Count:assert(false);break;
+  }
+  validationAiReads=validationHeightReads=0;
+  auto*result=p.takeParallelResult(&w.a,w.a.ai.locomotor,from,to,repulsor,radius,start,goal,index,settings,closest);
+  assert(bool(result)==(scenario==0));assert(job.used);
+  if(scenario>0&&scenario<unsigned(R::Occupancy)){
+   assert(validationAiReads==(fallback?2u:0u)&&validationHeightReads==0);
+  }
+  printf("%u %u %u %u %llu %llu\n",scenario,unsigned(result!=nullptr),unsigned(validationAiReads.load()),unsigned(validationHeightReads.load()),
+   p.m_parallelBatch->rejected,p.m_parallelBatch->fallbackRejected);
+  PathOccupancy::validationPaused().store(false);s_useFixedPathfinding=true;s_forceCleanCells=false;
+  p.clearParallelBatch();
+#ifdef GENERALS_ZH_PATH_TIMING
+  const auto&task=p.m_pathTiming.slowPairs()[0].tasks[0];
+  const auto&outcome=fallback?task.fallbackOutcome:task.primaryOutcome;
+  assert(outcome.result==(scenario?S::Rejected:S::Unfinished));
+  assert(outcome.reason==static_cast<R>(scenario));
+  assert(p.m_pathTiming.results(fallback,scenario?S::Rejected:S::Unfinished)==1);
+  for(unsigned reason=0;reason<unsigned(R::Count);++reason)
+   assert(p.m_pathTiming.rejections(fallback,static_cast<R>(reason))==unsigned(scenario&&scenario==reason));
+#endif
+ }
+}
+'''
+
+
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @test Codex 28/10/2026 Outcomes resolve once on main and stay associated with the original retained pair/role/phase.
+    def test_result_reuse_rejection_discard_and_reset_accounting(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;using S=T::Result;using R=T::Rejection;
+ for(int kind=0;kind<3;++kind)for(int mode=0;mode<3;++mode){World w;Pathfinder p;w.queue(p);
+  w.a.ai.safe=w.b.ai.safe=kind==1;w.a.ai.closest=w.b.ai.closest=kind==2;
+  w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2=w.b.ai.from;p.prepareParallelBatch();
+  const auto id=p.m_parallelBatch->jobs[0].timingPair;assert(id==1&&p.m_parallelBatch->jobs[1].timingRole==1);
+  if(mode==0){assert(w.consume(p,w.a)&&w.consume(p,w.b));}
+  if(mode==1){++p.m_parallelWorldEpoch;assert(w.consume(p,w.a));}
+  p.clearParallelBatch();p.clearParallelBatch();auto&t=p.m_pathTiming;const auto&pair=t.slowPairs()[0];
+  assert(pair.id==id&&pair.tasks[0].primaryOutcome.result==(mode==0?S::Reused:mode==1?S::Rejected:S::Discarded));
+  assert(pair.tasks[1].primaryOutcome.result==(mode==0?S::Reused:S::Discarded));
+  assert(pair.tasks[0].primaryOutcome.reason==(mode==1?R::WorldEpoch:R::None));
+  assert(t.results(false,S::Reused)==unsigned(mode==0?2:0));
+  assert(t.results(false,S::Rejected)==unsigned(mode==1));
+  assert(t.results(false,S::Discarded)==unsigned(mode==2?2:mode==1?1:0));
+  for(const auto&job:p.m_parallelBatch->jobs)assert(!job.timingPair&&job.timingResult==S::NotRun);
+ }
+}
+''')
+        run_cpp(fixture().replace('PATHFIND_CELLS_PER_FRAME=5000','PATHFIND_CELLS_PER_FRAME=1')+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.processPathfindQueue();using T=PathSearchTiming;using S=T::Result;
+ assert(p.m_pathTiming.results(false,S::Reused)==1&&p.m_pathTiming.results(false,S::Discarded)==1);
+ assert(p.m_pathTiming.slowPairs()[0].tasks[1].primaryOutcome.result==S::Discarded&&p.m_queuePRHead==1);
+}
+''')
+
+    def test_result_rejection_reasons_cover_every_validation_group(self):
+        run_cpp(validation_outcome_fixture()+validation_outcome_cases())
+
+    def test_result_diagnostics_preserve_validation_query_counts(self):
+        self.assertEqual(run_cpp(validation_outcome_fixture(False)+validation_outcome_cases()).stdout,
+                         run_cpp(validation_outcome_fixture(True)+validation_outcome_cases()).stdout)
+
+    def test_result_correlation_survives_sorting_and_eviction(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <type_traits>
+int main(){using T=PathSearchTiming;using S=T::Result;using R=T::Rejection;T t;
+ static_assert(std::is_trivially_copyable<T::PairSample>::value,"snapshots own no live handles");
+ for(int ms:{9,4,8,3,7,6}){T::PairSample sample;sample.nanoseconds=ms*1000000;
+  sample.tasks[0].primary=sample.tasks[1].primary=true;sample.tasks[1].fallback=true;t[T::Pair].record(sample.nanoseconds);
+  const auto id=t.recordPair(sample);assert(id==t[T::Pair].calls);
+ }
+ assert(t.slowPairs()[0].id==1&&t.slowPairs()[1].id==3&&t.slowPairs()[2].id==5&&t.slowPairs()[3].id==6);
+ t.resolveResult(1,1,false,S::Rejected,R::Cells);t.resolveResult(3,0,false,S::Reused,R::None);
+ t.resolveResult(2,0,false,S::Reused,R::None); // Evicted work still contributes exactly one terminal aggregate.
+ t.resolveResult(1,1,true,S::Discarded,R::None);
+ assert(t.results(false,S::Reused)==2&&t.results(false,S::Rejected)==1&&t.results(true,S::Discarded)==1);
+ assert(t.rejections(false,R::Cells)==1&&t.slowPairs()[0].tasks[1].primaryOutcome.reason==R::Cells);
+ assert(t.slowPairs()[0].tasks[1].fallbackOutcome.result==S::Discarded&&t.slowPairs()[1].tasks[0].primaryOutcome.result==S::Reused);
+ assert(t.slowPairs()[2].tasks[0].primaryOutcome.result==S::Pending);
+}
+''')
+
+    def test_result_fallback_outcomes_and_pair_identity_survive_reuse(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.quickAllowed=false;p.prepareParallelBatch();using T=PathSearchTiming;using S=T::Result;using R=T::Rejection;
+ p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+ assert(p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false));
+ ++p.m_parallelWorldEpoch;p.m_queuePRHead=1;p.confirmParallelFallback(&w.b,w.b.ai.locomotor,w.b.ai.from,w.b.ai.to,false);
+ p.findClosestPath(&w.b,w.b.ai.locomotor,&w.b.ai.from,&w.b.ai.to,false,0,false);p.clearParallelBatch();
+ auto&t=p.m_pathTiming;auto first=t.slowPairs()[0];assert(first.id==1);
+ assert(first.tasks[0].primaryOutcome.result==S::NotRun&&first.tasks[0].fallbackOutcome.result==S::Reused);
+ assert(first.tasks[1].fallbackOutcome.result==S::Rejected&&first.tasks[1].fallbackOutcome.reason==R::WorldEpoch);
+ assert(t.results(true,S::Reused)==1&&t.results(true,S::Rejected)==1&&t.results(false,S::Reused)==0);
+ w.queue(p);p.m_queuePRHead=0;p.prepareParallelBatch();assert(p.m_parallelBatch->jobs[0].fallback->timingPair==2);p.clearParallelBatch();p.clearParallelBatch();
+ assert(t.results(true,S::Discarded)==2&&t.results(true,S::Reused)==1&&t.results(true,S::Rejected)==1);
+ bool found=false;for(const auto&pair:t.slowPairs())if(pair.id==1){found=true;
+  assert(pair.tasks[0].fallbackOutcome.result==S::Reused&&pair.tasks[1].fallbackOutcome.reason==R::WorldEpoch);}
+ assert(found);
+}
+''')
+
+    def test_result_first_failure_priority_and_report_fields(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
+ auto&job=p.m_parallelBatch->jobs[0];++p.m_parallelWorldEpoch;job.reads.overflow=true;s_forceCleanCells=true;
+ w.consume(p,w.a);s_forceCleanCells=false;p.clearParallelBatch();
+ assert(p.m_pathTiming.rejections(false,R::WorldEpoch)==1&&p.m_pathTiming.rejections(false,R::Overflow)==0);
+ assert(p.m_pathTiming.rejections(false,R::Recovery)==0&&p.m_pathTiming.results(false,S::Discarded)==1);
+ FILE*f=std::tmpfile();assert(f);p.m_pathTiming.report(f);std::rewind(f);std::string report;char buffer[2048];
+ while(std::fgets(buffer,sizeof buffer,f))report+=buffer;std::fclose(f);
+ assert(report.find("[PATH_RESULT_OUTCOMES] phase=primary reused=0 rejected=1 discarded=1 validated_unfinished=0")!=std::string::npos);
+ assert(report.find("[PATH_RESULT_REJECTIONS] phase=primary")!=std::string::npos);
+ assert(report.find("caller_primary_result=rejected caller_primary_reason=world_epoch")!=std::string::npos);
+ assert(report.find("worker_primary_result=discarded worker_primary_reason=none")!=std::string::npos);
+}
+''')
+
     def test_prediction_reason_preserves_short_circuit_queries(self):
         ai_source=(ROOT/'GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/AIUpdate.cpp').read_text()
         ai_header=(ROOT/'GeneralsMD/Code/GameEngine/Include/GameLogic/Module/AIUpdate.h').read_text()
@@ -904,6 +1064,9 @@ int main(){World w;Pathfinder p;w.queue(p);
  assert(w.a.ai.to.x<60&&p.hierarchicalCalls==1&&p.workerLoops==workerSteps&&p.m_exclusiveWorker->searches==dispatched);
  assert(p.m_parallelBatch->closestSearches==0&&p.m_parallelBatch->closestAccepted==0);
  assert(p.m_parallelBatch->fallbackSearches==2&&p.m_parallelBatch->fallbackAccepted==1);
+ using S=PathSearchTiming::Result;auto&t=p.m_pathTiming;auto sample=t.slowPairs()[0];
+ assert(sample.tasks[0].primaryOutcome.result==S::Reused&&sample.tasks[0].fallbackOutcome.result==S::Reused);
+ assert(t.results(false,S::Reused)==1&&t.results(true,S::Reused)==1);
 }
 ''')
 

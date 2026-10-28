@@ -4332,6 +4332,15 @@ struct PathfindParallelJob {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Each task writes only its own metric; main merges after the join.
  PathSearchTiming::Metric kernelTime;
+ // GeneralsX @feature Codex 28/10/2026 Correlation is assigned after join; only main resolves a job's result once.
+ std::uint64_t timingPair=0;
+ unsigned timingRole=0;
+ PathSearchTiming::Result timingResult=PathSearchTiming::Result::NotRun;
+ void resolveTiming(PathSearchTiming& timing,PathSearchTiming::Result result,
+                    PathSearchTiming::Rejection reason=PathSearchTiming::Rejection::None) {
+  if(!timingPair || (timingResult!=PathSearchTiming::Result::Pending && timingResult!=PathSearchTiming::Result::Validated))return;
+  timing.resolveResult(timingPair,timingRole,fallbackResult,result,reason);timingResult=result;
+ }
 #endif
  Object *obj = nullptr;
  const LocomotorSet *locomotor = nullptr;
@@ -4358,6 +4367,7 @@ struct PathfindParallelJob {
   if (fallback) fallback->reset();
 #ifdef GENERALS_ZH_PATH_TIMING
   kernelTime={};
+  timingPair=0;timingRole=0;timingResult=PathSearchTiming::Result::NotRun;
 #endif
   fallbackResult=fallbackAllowed=earlyFallback=false;
   outcome={nullptr,0,false};
@@ -4405,6 +4415,12 @@ Real Pathfinder::searchGroundHeight(Real x, Real y) {
 void Pathfinder::clearParallelBatch() {
  if (!m_parallelBatch) return;
  for (auto& job:m_parallelBatch->jobs) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  // GeneralsX @feature Codex 28/10/2026 Pending work becomes discarded at the original cleanup boundary; unfinished validated work is distinct.
+  job.resolveTiming(m_pathTiming,job.timingResult==PathSearchTiming::Result::Validated?PathSearchTiming::Result::Unfinished:PathSearchTiming::Result::Discarded);
+  if(job.fallback)job.fallback->resolveTiming(m_pathTiming,
+   job.fallback->timingResult==PathSearchTiming::Result::Validated?PathSearchTiming::Result::Unfinished:PathSearchTiming::Result::Discarded);
+#endif
   if(job.ready && !job.used) ++m_parallelBatch->unused;
   if(job.fallback && job.fallback->ready && !job.fallback->used) ++m_parallelBatch->fallbackUnused;
   job.reset();
@@ -4436,12 +4452,16 @@ Pathfinder::Pathfinder() :m_map(nullptr)
 
 Pathfinder::~Pathfinder()
 {
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // GeneralsX @feature Codex 28/10/2026 Resolve any remaining dispositions before reporting the retained scalar samples.
+ clearParallelBatch();
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Report bounded session aggregates after all synchronous queue calls have returned.
  m_pathTiming.report(stderr);
 #endif
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
- clearParallelBatch();delete m_parallelBatch;m_parallelBatch=nullptr;
+ delete m_parallelBatch;m_parallelBatch=nullptr;
 #endif
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
 	delete m_exclusiveWorker;
@@ -5616,35 +5636,58 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
   auto& current=activePathfindSearchContext();
    const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
    const auto& before=job.settings;
-   Bool valid=job.obj==obj && job.locomotor==&locomotorSet && samePoint(job.from,from) && samePoint(job.to,to) &&
-    job.safe==(repulsor2!=nullptr) && (!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius)) &&
-    job.closest==(closest!=nullptr) && (!closest || job.closestSettings==*closest) &&
-    (!job.fallbackResult || (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getPath()==nullptr)) &&
-    job.epoch==m_parallelWorldEpoch && job.lifecycle==PathOccupancy::validationLifecycleEpoch().load() &&
-    !PathOccupancy::validationPaused().load() && job.permanent==PathfindSearchContext::permanentRecordsInUse() &&
-    job.ignored==searchState().m_ignoreObstacleID && job.tunneling==searchState().m_isTunneling &&
-    job.start==start && job.goal==goal && job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y &&
-    before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
+#ifdef GENERALS_ZH_PATH_TIMING
+   // GeneralsX @feature Codex 28/10/2026 Explain the first failing check in place; never repeat live reads or defeat short-circuiting.
+   auto rejection=PathSearchTiming::Rejection::None;
+   const auto check=[&](Bool condition,PathSearchTiming::Rejection reason){if(!condition)rejection=reason;return condition;};
+#define GENERALS_PATH_RESULT_CHECK(condition,reason) check((condition),PathSearchTiming::Rejection::reason)
+#else
+#define GENERALS_PATH_RESULT_CHECK(condition,reason) (condition)
+#endif
+   Bool valid=GENERALS_PATH_RESULT_CHECK(job.obj==obj,Object) &&
+    GENERALS_PATH_RESULT_CHECK(job.locomotor==&locomotorSet,Locomotor) &&
+    GENERALS_PATH_RESULT_CHECK(samePoint(job.from,from),From) && GENERALS_PATH_RESULT_CHECK(samePoint(job.to,to),To) &&
+    GENERALS_PATH_RESULT_CHECK(job.safe==(repulsor2!=nullptr),Kind) &&
+    GENERALS_PATH_RESULT_CHECK(!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius),Repulsors) &&
+    GENERALS_PATH_RESULT_CHECK(job.closest==(closest!=nullptr),Kind) &&
+    GENERALS_PATH_RESULT_CHECK(!closest || job.closestSettings==*closest,ClosestPolicy) &&
+    GENERALS_PATH_RESULT_CHECK(!job.fallbackResult || (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getPath()==nullptr),FallbackPath) &&
+    GENERALS_PATH_RESULT_CHECK(job.epoch==m_parallelWorldEpoch,WorldEpoch) &&
+    GENERALS_PATH_RESULT_CHECK(job.lifecycle==PathOccupancy::validationLifecycleEpoch().load(),Lifecycle) &&
+    GENERALS_PATH_RESULT_CHECK(!PathOccupancy::validationPaused().load(),Paused) &&
+    GENERALS_PATH_RESULT_CHECK(job.permanent==PathfindSearchContext::permanentRecordsInUse(),Admission) &&
+    GENERALS_PATH_RESULT_CHECK(job.ignored==searchState().m_ignoreObstacleID,IgnoredObstacle) &&
+    GENERALS_PATH_RESULT_CHECK(job.tunneling==searchState().m_isTunneling,Tunneling) &&
+    GENERALS_PATH_RESULT_CHECK(job.start==start,StartCell) && GENERALS_PATH_RESULT_CHECK(job.goal==goal,GoalCell) &&
+    GENERALS_PATH_RESULT_CHECK(job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y,StartIndex) &&
+    GENERALS_PATH_RESULT_CHECK(before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
     before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
     before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
-    before.human==settings.human && !job.reads.overflow;
+    before.human==settings.human,Movement) && GENERALS_PATH_RESULT_CHECK(!job.reads.overflow,Overflow);
 #if RETAIL_COMPATIBLE_PATHFINDING
-   valid=valid && job.fixed==s_useFixedPathfinding && !s_forceCleanCells;
+   valid=valid && GENERALS_PATH_RESULT_CHECK(job.fixed==s_useFixedPathfinding,FixedMode) && GENERALS_PATH_RESULT_CHECK(!s_forceCleanCells,Recovery);
 #endif
-   if (valid) valid=job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}) &&
-    job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);});
+   if (valid) valid=GENERALS_PATH_RESULT_CHECK(job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}),Cells) &&
+    GENERALS_PATH_RESULT_CHECK(job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);}),Corridor);
    if (valid) for (const auto& query:job.reads.queries) {
     LiveOccupancyReader live={this,obj};
-    if (!(PathOccupancy::evaluate(query.input,live)==query.result)) {valid=false;break;}
+    if (!GENERALS_PATH_RESULT_CHECK(PathOccupancy::evaluate(query.input,live)==query.result,Occupancy)) {valid=false;break;}
    }
    if (valid) for (const auto& height:job.reads.heights) {
-    if (TheTerrainLogic->getGroundHeight(height.x,height.y)!=height.z) {valid=false;break;}
+    if (!GENERALS_PATH_RESULT_CHECK(TheTerrainLogic->getGroundHeight(height.x,height.y)==height.z,Height)) {valid=false;break;}
    }
+#undef GENERALS_PATH_RESULT_CHECK
    if (!valid) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    job.resolveTiming(m_pathTiming,PathSearchTiming::Result::Rejected,rejection);
+#endif
     if (job.fallbackResult) ++m_parallelBatch->fallbackRejected;
     else ++m_parallelBatch->rejected;
     break;
    }
+#ifdef GENERALS_ZH_PATH_TIMING
+  job.timingResult=PathSearchTiming::Result::Validated;
+#endif
   return &job;
  }
  return nullptr;
@@ -7478,7 +7521,14 @@ void Pathfinder::prepareParallelBatch()
     if(task.primary){task.examined=job.closest?job.closestOutcome.cellsExamined:job.outcome.cellsExamined;task.records=job.context.m_records.size();}
     if(task.fallback){task.fallbackExamined=job.fallback->closestOutcome.cellsExamined;task.fallbackRecords=job.fallback->context.m_records.size();}
    }
-   m_pathTiming.recordPair(pairSample);
+   const auto pairId=m_pathTiming.recordPair(pairSample);
+   for(unsigned i=0;i<2;++i){
+    auto&job=batch.jobs[i];
+    if(job.kernelTime.calls){job.timingPair=pairId;job.timingRole=i;job.timingResult=PathSearchTiming::Result::Pending;}
+    if(job.fallback && job.fallback->kernelTime.calls){
+     job.fallback->timingPair=pairId;job.fallback->timingRole=i;job.fallback->timingResult=PathSearchTiming::Result::Pending;
+    }
+   }
    admission.reason=PathSearchTiming::Admission::Dispatched;
 #endif
    for (auto& job:batch.jobs) {
@@ -7961,6 +8011,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
    current.m_corridor.swap(job->context.m_corridor);
    job->fallbackAllowed=!path && !job->outcome.found && job->fallback && job->fallback->ready;
    ++m_parallelBatch->accepted;
+#ifdef GENERALS_ZH_PATH_TIMING
+   job->resolveTiming(m_pathTiming,PathSearchTiming::Result::Reused);
+#endif
    return path;
   }
  }
@@ -10372,6 +10425,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
     ++m_parallelBatch->fallbackAccepted;if(job->earlyFallback) ++m_parallelBatch->earlyFallbackAccepted;
    }
    else {++m_parallelBatch->accepted;++m_parallelBatch->closestAccepted;}
+#ifdef GENERALS_ZH_PATH_TIMING
+   job->resolveTiming(m_pathTiming,PathSearchTiming::Result::Reused);
+#endif
    return path;
   }
  }
@@ -12664,6 +12720,9 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
    current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
    current.m_corridor.swap(job->context.m_corridor);
    ++m_parallelBatch->accepted;++m_parallelBatch->safeAccepted;
+#ifdef GENERALS_ZH_PATH_TIMING
+   job->resolveTiming(m_pathTiming,PathSearchTiming::Result::Reused);
+#endif
    return path;
   }
  }

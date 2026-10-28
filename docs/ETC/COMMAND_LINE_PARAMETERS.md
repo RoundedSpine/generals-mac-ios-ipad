@@ -81,6 +81,10 @@ The same option also prints `[PATH_PAIR_ADMISSION]`, per-slot prediction/capture
 counts, `[PATH_SERIAL_KINDS]` and at most four each of `[PATH_QUEUE_SLOW]` and
 `[PATH_PAIR_SLOW]`. These retain only copied scalar work counters and queue-call
 ordinals. See [admission and slow-call field definitions](../WORKDIR/audit/IOS_PATH_ADMISSION_2026-10-28.md).
+The slow-pair rows also include separate primary/fallback dispositions and the
+first validation rejection group for each task role. `[PATH_RESULT_OUTCOMES]`
+and `[PATH_RESULT_REJECTIONS]` summarize those phases, including evicted samples.
+See [result correlation and status meanings](../WORKDIR/audit/IOS_PATH_RESULT_OUTCOMES_2026-10-28.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

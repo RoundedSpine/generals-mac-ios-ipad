@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cassert>
 #include "pathsearchprediction.h"
 
 // GeneralsX @feature Codex 28/10/2026 Measure phase boundaries without per-cell clocks, allocation or concurrent shared counters.
@@ -14,17 +15,27 @@ public:
  BasicPathSearchTiming& operator=(const BasicPathSearchTiming&)=delete;
  enum Phase { Queue, Preparation, CallerPreparation, Pair, WorkerKernel, CallerKernel, SerialKernel, Validation, Hierarchy, Finalization, PhaseCount };
  enum class Kind { Ordinary, Safe, Closest, Count };
+ // GeneralsX @feature Codex 28/10/2026 Main-thread terminal outcomes explain retained work without retaining engine handles.
+ enum class Result { NotRun, Pending, Validated, Reused, Rejected, Discarded, Unfinished, Count };
+ enum class Rejection {
+  None, Object, Locomotor, From, To, Kind, Repulsors, ClosestPolicy, FallbackPath,
+  WorldEpoch, Lifecycle, Paused, Admission, IgnoredObstacle, Tunneling,
+  StartCell, GoalCell, StartIndex, Movement, Overflow, FixedMode, Recovery,
+  Cells, Corridor, Occupancy, Height, Count
+ };
  enum class Admission {
   Dispatched, ExistingPair, ExistingAttempt, Unavailable, Debug, Paused, Nested, ShortQueue,
   Duplicate, MissingObject, MissingAI, Dozer, CrusherKey, Prediction, Capture,
   EnvironmentFailure, ThreadFailure, AllocationFailure, Exception, DebugBuild, Count
  };
  static constexpr unsigned retainedSamples=4;
+ struct ResultSample {Result result=Result::NotRun;Rejection reason=Rejection::None;};
  struct TaskSample {
   Kind kind=Kind::Ordinary;
   bool primary=false, fallback=false;
   std::uint64_t nanoseconds=0;
   unsigned examined=0, fallbackExamined=0, records=0, fallbackRecords=0;
+  ResultSample primaryOutcome, fallbackOutcome;
  };
  struct PairSample {
   std::uint64_t nanoseconds=0, id=0, queue=0;
@@ -130,10 +141,29 @@ public:
   if(immobile)++m_captureImmobile[slot];
   if(oldPath)++m_captureOldPath[slot];
  }
- void recordPair(PairSample sample){
+ std::uint64_t recordPair(PairSample sample){
   sample.id=m_metrics[Pair].calls;sample.queue=m_activeQueue?m_activeQueue->id:0;
+  for(auto& task:sample.tasks){
+   task.primaryOutcome.result=task.primary?Result::Pending:Result::NotRun;
+   task.fallbackOutcome.result=task.fallback?Result::Pending:Result::NotRun;
+  }
   retain(m_slowPairs,m_slowPairCount,sample);
+  return sample.id;
  }
+ // The owning joined job calls once per executed phase, even if this pair was evicted from the top four.
+ void resolveResult(std::uint64_t pair,unsigned role,bool fallback,Result result,Rejection reason){
+  assert(role<2 && (result==Result::Reused || result==Result::Rejected || result==Result::Discarded || result==Result::Unfinished));
+  assert((result==Result::Rejected)==(reason!=Rejection::None));
+  ++m_results[unsigned(fallback)][static_cast<unsigned>(result)];
+  if(result==Result::Rejected)++m_rejections[unsigned(fallback)][static_cast<unsigned>(reason)];
+  for(unsigned i=0;i<m_slowPairCount;++i)if(m_slowPairs[i].id==pair){
+   auto& task=m_slowPairs[i].tasks[role];
+   (fallback?task.fallbackOutcome:task.primaryOutcome)={result,reason};
+   break;
+  }
+ }
+ std::uint64_t results(bool fallback,Result result)const{return m_results[unsigned(fallback)][static_cast<unsigned>(result)];}
+ std::uint64_t rejections(bool fallback,Rejection reason)const{return m_rejections[unsigned(fallback)][static_cast<unsigned>(reason)];}
  const std::array<QueueSample,retainedSamples>& slowQueues()const{return m_slowQueues;}
  const std::array<PairSample,retainedSamples>& slowPairs()const{return m_slowPairs;}
  unsigned slowQueueCount()const{return m_slowQueueCount;}
@@ -166,6 +196,15 @@ public:
     u(m_capture[slot][0]),u(m_capture[slot][1]),u(m_capture[slot][2]),u(m_captureImmobile[slot]),u(m_captureOldPath[slot]));
   }
   std::fprintf(output,"[PATH_SERIAL_KINDS] ordinary=%llu safe=%llu closest=%llu\n",u(m_serialKinds[0]),u(m_serialKinds[1]),u(m_serialKinds[2]));
+  for(unsigned phase=0;phase<2;++phase){
+   std::fprintf(output,"[PATH_RESULT_OUTCOMES] phase=%s reused=%llu rejected=%llu discarded=%llu validated_unfinished=%llu\n",
+    phase?"fallback":"primary",u(results(phase,Result::Reused)),u(results(phase,Result::Rejected)),
+    u(results(phase,Result::Discarded)),u(results(phase,Result::Unfinished)));
+   std::fprintf(output,"[PATH_RESULT_REJECTIONS] phase=%s",phase?"fallback":"primary");
+   for(unsigned i=1;i<static_cast<unsigned>(Rejection::Count);++i)
+    std::fprintf(output," %s=%llu",rejectionName(static_cast<Rejection>(i)),u(m_rejections[phase][i]));
+   std::fprintf(output,"\n");
+  }
   for(unsigned i=0;i<m_slowQueueCount;++i){
    const auto&s=m_slowQueues[i];
    std::fprintf(output,"[PATH_QUEUE_SLOW] rank=%u queue=%llu ms=%.3f depth=%u entries=%u callbacks=%u charged=%u zones=%u completed=%u pairs=%llu serial=%llu ordinary=%llu safe=%llu closest=%llu prepare_ms=%.3f pair_ms=%.3f serial_ms=%.3f validate_ms=%.3f hierarchy_ms=%.3f finalize_ms=%.3f\n",
@@ -181,6 +220,9 @@ public:
     std::fprintf(output," %s_kind=%s %s_primary=%u %s_fallback=%u %s_kernel_ms=%.3f %s_examined=%u %s_fallback_examined=%u %s_records=%u %s_fallback_records=%u",
      role,kindName(t.kind),role,unsigned(t.primary),role,unsigned(t.fallback),role,t.nanoseconds/1000000.0,
      role,t.examined,role,t.fallbackExamined,role,t.records,role,t.fallbackRecords);
+    std::fprintf(output," %s_primary_result=%s %s_primary_reason=%s %s_fallback_result=%s %s_fallback_reason=%s",
+     role,resultName(t.primaryOutcome.result),role,rejectionName(t.primaryOutcome.reason),
+     role,resultName(t.fallbackOutcome.result),role,rejectionName(t.fallbackOutcome.reason));
    }
    std::fprintf(output,"\n");
   }
@@ -188,6 +230,18 @@ public:
 private:
  static unsigned long long u(std::uint64_t value){return static_cast<unsigned long long>(value);}
  static const char* kindName(Kind kind){return kind==Kind::Safe?"safe":kind==Kind::Closest?"closest":"ordinary";}
+ static const char* resultName(Result result){
+  const char* names[]={"not_run","pending","validated","reused","rejected","discarded","validated_unfinished"};
+  static_assert(sizeof(names)/sizeof(*names)==static_cast<unsigned>(Result::Count),"result names must match enum");
+  return names[static_cast<unsigned>(result)];
+ }
+ static const char* rejectionName(Rejection reason){
+  const char* names[]={"none","object","locomotor","from","to","kind","repulsors","closest_policy","fallback_path",
+   "world_epoch","lifecycle","paused","permanent_admission","ignored_obstacle","tunneling","start_cell","goal_cell",
+   "start_index","movement","overflow","fixed_mode","recovery","cell_dependencies","corridor_dependencies","occupancy","height"};
+  static_assert(sizeof(names)/sizeof(*names)==static_cast<unsigned>(Rejection::Count),"rejection names must match enum");
+  return names[static_cast<unsigned>(reason)];
+ }
  template<class Sample>static void retain(std::array<Sample,retainedSamples>& samples,unsigned& count,const Sample& sample){
   unsigned at=0;while(at<count&&samples[at].nanoseconds>=sample.nanoseconds)++at;
   if(at==retainedSamples)return;
@@ -200,6 +254,8 @@ private:
  std::array<std::array<std::uint64_t,3>,2> m_capture{};
  std::array<std::uint64_t,2> m_captureImmobile{},m_captureOldPath{};
  std::array<std::uint64_t,3> m_serialKinds{};
+ std::array<std::array<std::uint64_t,static_cast<unsigned>(Result::Count)>,2> m_results{};
+ std::array<std::array<std::uint64_t,static_cast<unsigned>(Rejection::Count)>,2> m_rejections{};
  std::array<QueueSample,retainedSamples> m_slowQueues{};
  std::array<PairSample,retainedSamples> m_slowPairs{};
  unsigned m_slowQueueCount=0,m_slowPairCount=0;

@@ -77,6 +77,12 @@ reuse, independent node owners and route ordering with actual cell/list methods.
 It also verifies compact direct state binding, immovable context storage and
 recycling/generation cleanup without leaking search flags.
 
+Run `python3 scripts/qa/test_parallel_path_batch.py` for actual two-task search,
+validation and queue-budget tests. Its result-diagnostic cases check every first
+rejection group, enabled/disabled live-query counts, bounded sample correlation,
+primary/fallback dispositions and exactly-once cleanup across job reuse.
+Use `--tsan` for the batch race checks.
+
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 
