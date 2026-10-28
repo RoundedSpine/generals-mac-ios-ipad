@@ -109,7 +109,7 @@ Code aff9c059d passed Mac QA, the full workflow race-check stage, native iOS SDK
 compilation, device packaging and unsigned artifact upload in
 [run 40637961023](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40637961023).
 The host remains macos-15 ARM64; the separate dependency-save step was skipped.
-Device outcome reports remain pending. Fixtures still use controlled world and
+The first device outcome report is recorded below. Fixtures still use controlled world and
 Path services rather than full-engine replay validation. No performance claim.
 
 The next supplied log still identifies ~b7b492a. It has neither PATH_RESULT_OUTCOMES
@@ -130,3 +130,98 @@ roles' primary/fallback status and first reason. This can distinguish reused
 expensive work from rejected or unused speculation before deciding which
 validation/storage/dispatch change is warranted. Separate main-thread zone
 rebuild outliers from these search results.
+
+## First aff9c05 device outcome evidence
+
+The next supplied log identifies ~aff9c05 and includes all new outcome/rejection
+rows and retained task fields. It reaches the score screen and exits zero, with
+no reported fatal/assertion or primitive-restart error. The existing WAV warning
+remains. This is the first native device verification of the outcome diagnostics.
+
+692 pairs balance as 1,355 primary plus 29 fallback-only completions. Primary
+outcomes are 1,260 reused, 95 rejected, zero discarded/unfinished: 92.99% reuse
+among primary completions. Fallback outcomes are 18 reused, 11 rejected, zero
+discarded/unfinished. Those counts match the existing accepted/rejected/unused
+rows exactly. 1,278 reused plus 6,687 serial kernels equal 7,965 finalizations;
+reuse is 16.05% of these measured phases, not a CPU or command percentage.
+
+First primary rejection groups:
+
+| Group | Rejections |
+| --- | ---: |
+| Corridor dependencies | 80 |
+| Permanent admission | 6 |
+| Explicit validation-log overflow | 5 |
+| Search kind | 2 |
+| World epoch | 1 |
+| Cell dependencies | 1 |
+| All others | 0 |
+
+All 11 fallback rejections are closest_policy. These are first failed groups;
+later checks were not necessarily evaluated. Corridor dependency failures account
+for 84.21% of primary rejections, but rare overflow failures dominate the retained
+expensive searches:
+
+| Pair / queue | Barrier ms | Caller kernel / outcome | Worker kernel / outcome |
+| --- | ---: | --- | --- |
+| 149 / 1469 | 61.223 | 61.200 ms, 4,428 examined, rejected: overflow | 39.087 ms, 3,227 examined, rejected: overflow |
+| 310 / 3779 | 58.887 | 58.883 ms, 6,680 examined, rejected: overflow | 57.933 ms, 6,605 examined, rejected: overflow |
+| 54 / 341 | 21.809 | 0.030 ms, one examined, reused | 21.788 ms, 3,666 examined, rejected: overflow |
+| 97 / 546 | 3.937 | 3.479 ms, 434 examined, reused | 3.801 ms, 551 examined, rejected: corridor dependencies |
+
+All five explicit overflow rejections occur in the five expensive tasks of the
+three slowest retained pairs. Those barriers total 141.919 ms, 65.00% of the
+218.351 ms session barrier total. The barrier contains overlapping task wall
+times and a tiny reused caller task in pair 54; it is not a sum of CPU work or
+a predicted time saving. Source flow confirms that rejected ordinary completions
+fall through to the serial kernel. Queue 1469 records both rejected tasks plus
+two serial kernels, taking 78.825 ms; queue 3779 takes 69.791 ms. These are now
+confirmed examples of costly rejected speculation followed by caller work.
+
+7,297 pending queue calls average 0.271 ms, maximum 78.825 ms; 14 reach 20 ms,
+two reach 50 ms and none reaches 100/500 ms. Queue 395 spends 34.137 ms on zone
+recalculation without callbacks or pairs. This identifies wasted work in brief
+queue pauses, but does not reproduce older half-second input stalls or measure
+whole-frame/render/input time.
+
+## Source investigation prompted by this log
+
+The explicit overflow flag is set by two append-only vectors: occupancy query
+observations and terrain-height observations, each capped at 8,192 entries.
+Permanent-cell/corridor read-log overflow instead appears under their dependency
+groups. The current device fields do not distinguish query versus height overflow
+or count distinct inputs, so that specific device attribution remains open.
+
+Occupancy observations are appended even when their entire input/result repeats.
+A small compiled reproduction of the actual PathfindParallelReads block confirms
+8,192 identical inputs fit, while the next identical input sets overflow despite
+only one distinct dependency. Terrain observations likewise append repeated
+coordinates. Overflow correctly rejects unverifiable results; the avoidable work
+to investigate is duplicate observation storage, not a reason to weaken validation.
+Deduplication must preserve full query/coordinate identity and all distinct
+dependencies; contradictory repeated results must continue to invalidate reuse.
+
+There is also a preparation mismatch. prepareParallelBatch resets each ordinary
+job's corridor to fully passable, then calls internalFindPath without the ordinary
+outer hierarchy. The authoritative findPathWithInputs first clears corridor
+flags, runs findHierarchicalPath and uses its corridor before the same fine
+search. This can both invalidate speculative corridor reads and admit broader
+speculative work. It is a concrete source difference, not proof that every one
+of the 80 device corridor rejections has that cause.
+
+A controlled production-dispatch/validation fixture with its main-thread hierarchy
+stub restricting one observed block reproduces one corridor rejection and one
+serial recomputation, while still producing a route. Speculative preparation
+made zero hierarchy calls; the actual request made one. The normal fixture's
+ordinary hierarchy marks every block passable, which does not expose this case
+unless a restricting hierarchy is supplied.
+
+Recommend matching speculative ordinary hierarchical preparation to the actual
+request, keeping that preparation on main and private to the job. Audit coarse
+search state, dependency capture, accounting and early-fallback semantics; preserve
+the actual caller's original hierarchy work and queue budget. Then compact the
+bounded duplicate query/height observations while keeping exact stale checks and
+overflow rejection. Matching corridors may itself reduce both over-search and
+validation volume. Fallback policy mismatches and synchronous zone cost remain
+separate investigations. No runtime changes or replacement build were made in
+this log review; only the two targeted compiled reproductions were run.
