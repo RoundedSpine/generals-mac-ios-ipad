@@ -37,6 +37,7 @@
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
 #include "searchcontextbinding.h"
+#include "searchadmissionwindow.h"
 
 #if defined(GENERALS_SEARCH_CONTEXT) && RTS_ZEROHOUR
 #define GENERALS_ZH_SEARCH_CONTEXT 1
@@ -239,6 +240,10 @@ enum {MAX_WALL_PIECES = 128};
 
 // GeneralsX @feature Codex 26/10/2026 Search-only state is isolated from permanent unit/obstacle records.
 class PathfindCellInfo;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+ // GeneralsX @bugfix Codex 29/10/2026 Allocation through cached cell pointers must retain the permanent/persistent dependency too.
+ void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* cell);
+#endif
 struct PathfindSearchState {
  PathfindCellInfo *m_nextOpen = nullptr, *m_prevOpen = nullptr, *m_pathParent = nullptr;
  unsigned long long m_openSequence = 0;
@@ -387,11 +392,13 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
  };
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  PathfindParallelReads* m_parallelReads = nullptr;
+ SearchAdmissionWindow<PATHFIND_RECORD_CAPACITY> m_admissionWindow;
 #endif
  // GeneralsX @refactor Codex 27/10/2026 Admission reads an explicit frozen count while an ordinary phase is bound.
  bool m_hasAdmissionSnapshot = false;
  unsigned m_permanentAdmission = 0;
  static unsigned permanentRecordsInUse() { return PathfindCellInfo::s_recordsInUse; }
+ unsigned admissionUse()const{return m_hasAdmissionSnapshot?m_permanentAdmission:permanentRecordsInUse();}
  struct AdmissionScope {
   PathfindSearchContext& context;
   bool previousCaptured;
@@ -415,7 +422,14 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
  PathfindCellInfo* allocateRecord(PathfindCell* cell, const ICoord2D& pos, Bool persistent) {
   if (auto* record = findRecord(cell)) return record;
   // Occupied cells already consume permanent capacity; only other search cells consume extra credit.
-  const unsigned permanentUse = m_hasAdmissionSnapshot ? m_permanentAdmission : PathfindCellInfo::s_recordsInUse;
+  const unsigned permanentUse = admissionUse();
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+  // GeneralsX @performance Codex 29/10/2026 Only speculative phases record an interval; serial/finalizer admission retains its original predicate.
+  if(m_parallelReads){
+   observeParallelAllocationCell(m_parallelReads,cell);
+   if(!persistent && !m_admissionWindow.allows(permanentUse,m_transientRecords))return nullptr;
+  }else
+#endif
   if (!persistent && permanentUse + m_transientRecords >= PATHFIND_RECORD_CAPACITY) return nullptr;
   auto* record = m_records.acquire(cell);
   if (!record) return nullptr;
@@ -438,6 +452,9 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   PathfindSearchNodes::beginSearch();
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
   m_records.beginGeneration(); m_transientRecords = 0;
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+  m_admissionWindow.reset();
+#endif
 #endif
  }
  // One byte per hierarchical block, not per terrain cell. A new map starts fully passable.

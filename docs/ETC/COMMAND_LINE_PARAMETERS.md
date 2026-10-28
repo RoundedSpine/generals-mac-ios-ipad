@@ -89,11 +89,17 @@ See [result correlation and status meanings](../WORKDIR/audit/IOS_PATH_RESULT_OU
 conflict flags for each executed phase of those retained pairs. See
 [corridor preparation and observation-log definitions](../WORKDIR/audit/IOS_PATH_CORRIDOR_READS_2026-10-28.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
-and whether current usage increased or decreased at a reached rejection check.
+and whether current usage increased, decreased or stayed equal at a rejected
+allocation-decision window check. `[PATH_ADMISSION_REUSE]` counts changed permanent
+usage only after all validation and finalization complete successfully. These are
+separate from windows that pass but fail another dependency check.
 `[PATH_CLOSEST_MISMATCH]` counts the differing closest-policy fields; several
 fields may differ in one rejected phase. Both have separate primary/fallback
-rows, no per-request output, and preserve the original validation decisions.
+rows and no per-request output; classification does not repeat live queries.
 See [closest preparation and mismatch definitions](../WORKDIR/audit/IOS_PATH_CLOSEST_PREPARATION_2026-10-28.md).
+See [allocation-decision window semantics](../WORKDIR/audit/IOS_PATH_ADMISSION_WINDOW_2026-10-29.md)
+for the subsequent replacement of exact-count equality with exact allocation
+decision equivalence; search limits and scheduling stay unchanged.
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

@@ -124,3 +124,15 @@ six added ASan/UBSan cases, successful native SDK/package run 40688598327 and th
 device session above. Those fixtures and that device session do not prove full
 engine race freedom, reference replay equivalence or all lifecycle stress cases.
 This comparison changes documentation only; unchanged tests are not rerun.
+
+## Subsequent allocation-decision implementation
+
+The [allocation-window stage](IOS_PATH_ADMISSION_WINDOW_2026-10-29.md) replaces
+our strict permanent-count equality with exact equivalence of all reached
+transient admission decisions, including denials. It retains the existing bound
+and credit policy, validates allocation-kind cell dependencies and uses the
+actual caller's frozen allowance for completion. This permits harmless count
+changes without adopting the reference's independent map-sized node capacity.
+Local regression/sanitizer checks pass; native SDK and device confirmation for
+this subsequent stage remain pending. Compact search-only storage, full worker
+APIs, wider dispatch and grouped scheduling remain separate differences.

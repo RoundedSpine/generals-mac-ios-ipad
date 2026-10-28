@@ -91,6 +91,12 @@ route/destination/budget equivalence, tunneling, recovery isolation and ownershi
 of completed coarse Paths through throwing cleanup. Mismatch-summary cases keep
 exact permanent admission and short-circuit ordering, classify all closest-policy
 fields and check bounded primary/fallback output.
+Allocation-window cases exhaustively compare capacity predicates, replay production
+allocation/release traces with persistent cells and full pools, preserve serial
+routes/budgets across count changes, reject boundary/dependency changes and verify
+that completion uses the caller's frozen allowance. They also check cached-pointer
+allocation observations, invalid windows, bounded reuse counters and unfinished
+results. Use `-k admission_window` for these cases.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

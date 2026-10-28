@@ -4358,6 +4358,11 @@ struct PathfindParallelReads {
  void height(Real x,Real y,Real z){if(!heights.observe({x,y,z}))overflow=true;}
 };
 
+// GeneralsX @bugfix Codex 29/10/2026 Capture allocation kind even when a cached pointer bypasses getCell's normal observation.
+void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* cell){
+ reads->cells.observeWith(cell,[cell]{return cell->permanentSearchValues();});
+}
+
 struct PathfindParallelJob {
  PathfindSearchContext context;
  PathfindParallelReads reads;
@@ -4371,6 +4376,7 @@ struct PathfindParallelJob {
  void resolveTiming(PathSearchTiming& timing,PathSearchTiming::Result result,
                     PathSearchTiming::Rejection reason=PathSearchTiming::Rejection::None) {
   if(!timingPair || (timingResult!=PathSearchTiming::Result::Pending && timingResult!=PathSearchTiming::Result::Validated))return;
+  if(result==PathSearchTiming::Result::Reused)timing.admissionReused(fallbackResult,permanent,validatedPermanent);
   timing.resolveResult(timingPair,timingRole,fallbackResult,result,reason);timingResult=result;
  }
 #endif
@@ -4387,7 +4393,7 @@ struct PathfindParallelJob {
  ICoord2D startIndex{};
  Pathfinder::OrdinarySearchOutcome outcome{nullptr,0,false};
  Pathfinder::ClosestSearchOutcome closestOutcome{nullptr,nullptr,0,false};
- unsigned permanent = 0;
+ unsigned permanent = 0,validatedPermanent=0;
  unsigned long long epoch = 0;
  std::uint64_t lifecycle = 0;
  Int queueIndex = -1;
@@ -4407,6 +4413,7 @@ struct PathfindParallelJob {
   context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
   context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;
   reads.reset();obj=nullptr;captured=ready=used=false;queueIndex=-1;
+  validatedPermanent=0;
  }
 };
 struct PathfindParallelBatch {
@@ -5671,6 +5678,17 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
   auto& current=activePathfindSearchContext();
    const auto samePoint=[](const Coord3D& a,const Coord3D& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;};
    const auto& before=job.settings;
+   unsigned admissionNow=0;
+   // GeneralsX @performance Codex 29/10/2026 Reuse only if every recorded allocation success/denial remains identical under the actual caller's frozen allowance.
+   const auto admissionMatches=[&]{
+    admissionNow=current.admissionUse();
+    const bool same=job.context.m_admissionWindow.matches(job.permanent,admissionNow);
+#ifdef GENERALS_ZH_PATH_TIMING
+    return m_pathTiming.admissionMatches(job.fallbackResult,job.permanent,admissionNow,same);
+#else
+    return same;
+#endif
+   };
 #ifdef GENERALS_ZH_PATH_TIMING
    // GeneralsX @feature Codex 28/10/2026 Explain the first failing check in place; never repeat live reads or defeat short-circuiting.
    auto rejection=PathSearchTiming::Rejection::None;
@@ -5695,11 +5713,7 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
     GENERALS_PATH_RESULT_CHECK(job.epoch==m_parallelWorldEpoch,WorldEpoch) &&
     GENERALS_PATH_RESULT_CHECK(job.lifecycle==PathOccupancy::validationLifecycleEpoch().load(),Lifecycle) &&
     GENERALS_PATH_RESULT_CHECK(!PathOccupancy::validationPaused().load(),Paused) &&
-#ifdef GENERALS_ZH_PATH_TIMING
-    GENERALS_PATH_RESULT_CHECK(m_pathTiming.admissionMatches(job.fallbackResult,job.permanent,PathfindSearchContext::permanentRecordsInUse()),Admission) &&
-#else
-    GENERALS_PATH_RESULT_CHECK(job.permanent==PathfindSearchContext::permanentRecordsInUse(),Admission) &&
-#endif
+    GENERALS_PATH_RESULT_CHECK(admissionMatches(),Admission) &&
     GENERALS_PATH_RESULT_CHECK(job.ignored==searchState().m_ignoreObstacleID,IgnoredObstacle) &&
     GENERALS_PATH_RESULT_CHECK(job.tunneling==searchState().m_isTunneling,Tunneling) &&
     GENERALS_PATH_RESULT_CHECK(job.start==start,StartCell) && GENERALS_PATH_RESULT_CHECK(job.goal==goal,GoalCell) &&
@@ -5733,6 +5747,7 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 #ifdef GENERALS_ZH_PATH_TIMING
   job.timingResult=PathSearchTiming::Result::Validated;
 #endif
+  job.validatedPermanent=admissionNow;
   return &job;
  }
  return nullptr;
@@ -8069,7 +8084,8 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
    Path* path;
    {
     SearchContextBinding<PathfindSearchContext> resultBinding(job->context);
-    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->permanent);
+    // GeneralsX @bugfix Codex 29/10/2026 Future finalization allocations use the consuming phase's allowance, not the prediction's old count.
+    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->validatedPermanent);
     path=finish(job->outcome);
    }
    current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
@@ -10527,7 +10543,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
    Path* path;
    {
     SearchContextBinding<PathfindSearchContext> resultBinding(job->context);
-    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->permanent);
+    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->validatedPermanent);
     path=finish(job->closestOutcome);
    }
    current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
@@ -12828,7 +12844,7 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
    Path* path;
    {
     SearchContextBinding<PathfindSearchContext> resultBinding(job->context);
-    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->permanent);
+    PathfindSearchContext::AdmissionScope resultAdmission(job->context,job->validatedPermanent);
     path=finish(job->outcome);
    }
    current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;

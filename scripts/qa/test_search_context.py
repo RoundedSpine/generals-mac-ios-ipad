@@ -23,6 +23,7 @@ def allocator_fixture(enabled=True):
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
 #include "searchcontextbinding.h"
+#include "searchadmissionwindow.h"
 #include <cassert>
 #include <cstdio>
 #include <vector>

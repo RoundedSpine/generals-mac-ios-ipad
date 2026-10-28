@@ -36,7 +36,7 @@ public:
  };
  // GeneralsX @feature Codex 28/10/2026 Bounded scalar summaries explain reached admission/policy failures without storing requests.
  struct AdmissionMismatch {
-  std::uint64_t calls=0,higher=0,lower=0;
+  std::uint64_t calls=0,higher=0,lower=0,equal=0;
   unsigned capturedMin=0,capturedMax=0,currentMin=0,currentMax=0;
  };
  enum ClosestField { Blocked, CostMultiplier, MoveAllies, GoalObstacle, StartedStuck, GotHierarchy, InitialIgnored, ClosestFieldCount };
@@ -180,16 +180,28 @@ public:
  std::uint64_t results(bool fallback,Result result)const{return m_results[unsigned(fallback)][static_cast<unsigned>(result)];}
  std::uint64_t rejections(bool fallback,Rejection reason)const{return m_rejections[unsigned(fallback)][static_cast<unsigned>(reason)];}
  bool admissionMatches(bool fallback,unsigned captured,unsigned current){
-  if(captured==current)return true;
-  auto& s=m_admissionMismatch[unsigned(fallback)];
+  return admissionMatches(fallback,captured,current,captured==current);
+ }
+ // GeneralsX @feature Codex 29/10/2026 Separate rejected windows from count changes that actually survive all checks and finalization.
+ bool admissionMatches(bool fallback,unsigned captured,unsigned current,bool sameDecisions){
+  if(sameDecisions)return true;
+  recordAdmission(m_admissionMismatch[unsigned(fallback)],captured,current);
+  return false;
+ }
+ void admissionReused(bool fallback,unsigned captured,unsigned current){
+  if(captured!=current)recordAdmission(m_admissionReuse[unsigned(fallback)],captured,current);
+ }
+ const AdmissionMismatch& admissionReuse(bool fallback)const{return m_admissionReuse[unsigned(fallback)];}
+private:
+ static void recordAdmission(AdmissionMismatch& s,unsigned captured,unsigned current){
   if(!s.calls){s.capturedMin=s.capturedMax=captured;s.currentMin=s.currentMax=current;}
   if(captured<s.capturedMin)s.capturedMin=captured;
   if(captured>s.capturedMax)s.capturedMax=captured;
   if(current<s.currentMin)s.currentMin=current;
   if(current>s.currentMax)s.currentMax=current;
-  ++s.calls;if(current>captured)++s.higher;else ++s.lower;
-  return false;
+  ++s.calls;if(current>captured)++s.higher;else if(current<captured)++s.lower;else ++s.equal;
  }
+public:
  template<class Settings> bool closestMatches(bool fallback,const Settings& captured,const Settings& current){
   if(captured==current)return true;
   auto& s=m_closestMismatch[unsigned(fallback)];++s.calls;
@@ -244,8 +256,11 @@ public:
     std::fprintf(output," %s=%llu",rejectionName(static_cast<Rejection>(i)),u(m_rejections[phase][i]));
    std::fprintf(output,"\n");
    const auto& a=m_admissionMismatch[phase];
-   std::fprintf(output,"[PATH_ADMISSION_MISMATCH] phase=%s calls=%llu higher=%llu lower=%llu captured_min=%u captured_max=%u current_min=%u current_max=%u\n",
-    phase?"fallback":"primary",u(a.calls),u(a.higher),u(a.lower),a.capturedMin,a.capturedMax,a.currentMin,a.currentMax);
+   std::fprintf(output,"[PATH_ADMISSION_MISMATCH] phase=%s calls=%llu higher=%llu lower=%llu captured_min=%u captured_max=%u current_min=%u current_max=%u equal=%llu\n",
+    phase?"fallback":"primary",u(a.calls),u(a.higher),u(a.lower),a.capturedMin,a.capturedMax,a.currentMin,a.currentMax,u(a.equal));
+   const auto& reuse=m_admissionReuse[phase];
+   std::fprintf(output,"[PATH_ADMISSION_REUSE] phase=%s calls=%llu higher=%llu lower=%llu captured_min=%u captured_max=%u current_min=%u current_max=%u\n",
+    phase?"fallback":"primary",u(reuse.calls),u(reuse.higher),u(reuse.lower),reuse.capturedMin,reuse.capturedMax,reuse.currentMin,reuse.currentMax);
    const auto& c=m_closestMismatch[phase];
    const char* closestFields[]={"blocked","cost_multiplier","move_allies","goal_obstacle","started_stuck","hierarchy","initial_ignored"};
    static_assert(sizeof(closestFields)/sizeof(*closestFields)==ClosestFieldCount,"closest names must match fields");
@@ -313,6 +328,7 @@ private:
  std::array<std::array<std::uint64_t,static_cast<unsigned>(Result::Count)>,2> m_results{};
  std::array<std::array<std::uint64_t,static_cast<unsigned>(Rejection::Count)>,2> m_rejections{};
  std::array<AdmissionMismatch,2> m_admissionMismatch{};
+ std::array<AdmissionMismatch,2> m_admissionReuse{};
  std::array<ClosestMismatch,2> m_closestMismatch{};
  std::array<QueueSample,retainedSamples> m_slowQueues{};
  std::array<PairSample,retainedSamples> m_slowPairs{};

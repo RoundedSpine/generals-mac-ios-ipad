@@ -198,7 +198,7 @@ struct Pathfinder {
     source += '\n'.join(part for _,part in sorted([(SOURCE.index('struct LiveOccupancyReader {'),reader),
                                                   (SOURCE.index('PathfindParallelJob* Pathfinder::takeParallelResult('),validator)]))+'\n'
     source += '\n'.join(function(m) for m in [
-        'void Pathfinder::processPathfindQueue()', 'void observeParallelCorridor(', 'void Pathfinder::observeParallelCell(', 'Real Pathfinder::searchGroundHeight(',
+        'void Pathfinder::processPathfindQueue()', 'void observeParallelCorridor(', 'void observeParallelAllocationCell(', 'void Pathfinder::observeParallelCell(', 'Real Pathfinder::searchGroundHeight(',
         'void Pathfinder::clearParallelBatch()', 'void Pathfinder::prepareParallelBatch()',
         'void Pathfinder::confirmParallelFallback(', 'Path *Pathfinder::findPathWithInputs(',
         'void Pathfinder::beginSearchState()', 'void Pathfinder::cleanOpenAndClosedLists()',
@@ -417,6 +417,181 @@ int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
 
 
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @test Codex 29/10/2026 Validate allocation decisions rather than treating every permanent-count change as stale.
+    def test_admission_window_exhaustive_predicate_traces_and_invalid_capture(self):
+        run_cpp(r'''
+#include "searchadmissionwindow.h"
+#include <cassert>
+#include <array>
+#include <random>
+int main(){constexpr unsigned capacity=8;std::mt19937 random(8831);
+ for(unsigned captured=0;captured<=capacity;++captured)for(unsigned seed=0;seed<300;++seed){
+  SearchAdmissionWindow<capacity>w;std::array<unsigned,40>transient{};
+  const unsigned n=seed%transient.size();
+  for(unsigned i=0;i<n;++i){transient[i]=random()%(capacity+1);assert(w.allows(captured,transient[i])==(captured+transient[i]<capacity));}
+  assert(w.valid()&&w.matches(captured,captured));
+  for(unsigned current=0;current<=capacity;++current){bool same=true;
+   for(unsigned i=0;i<n;++i)same&=(captured+transient[i]<capacity)==(current+transient[i]<capacity);
+   assert(w.matches(captured,current)==same);
+  }
+  assert(!w.matches(captured,capacity+1)&&!w.matches(capacity+1,captured));
+  if(n)assert(!w.matches(captured==capacity?0:captured+1,captured));
+  w.reset();assert(!w.observed()&&w.lower()==0&&w.upper()==capacity&&w.matches(captured,capacity));
+ }
+ SearchAdmissionWindow<capacity>w;assert(w.allows(2,1));assert(w.allows(3,1));
+ assert(!w.valid()&&!w.matches(2,2));w.reset();assert(!w.allows(0,capacity+1)&&!w.valid());
+ w.reset();assert(!w.allows(capacity+1,0)&&!w.matches(0,0));
+ // A denial must survive later releases and successful allocations in the same phase.
+ w.reset();assert(w.allows(5,2)&&!w.allows(5,3)&&w.allows(5,0));
+ assert(w.lower()==5&&w.upper()==5&&!w.matches(5,4)&&!w.matches(5,6)&&w.matches(5,5));
+}
+''')
+
+    def test_admission_window_allocator_trace_handles_release_persistent_and_full_pool(self):
+        source=fixture().replace('constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;','constexpr unsigned PATHFIND_RECORD_CAPACITY = 16;')
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;std::array<PathfindCell,24>cells;
+ for(unsigned i=0;i<4;++i)cells[i].setGoalUnit(99,{int(i),0});
+ auto context=std::make_unique<PathfindSearchContext>();auto reads=std::make_unique<PathfindParallelReads>();
+ const auto run=[&](unsigned permanent,bool tracking){
+  context->beginSearch();reads->reset();context->m_parallelReads=tracking?reads.get():nullptr;
+  SearchContextBinding<PathfindSearchContext>bound(*context);PathfindSearchContext::AdmissionScope admission(*context,permanent);
+  std::vector<unsigned>trace;std::mt19937 random(972);
+  // Persistent entries bypass transient credit, but still consume physical keyed slots.
+  for(unsigned i=0;i<24;++i)trace.push_back(cells[i].allocateSearchInfo({int(i),0}));
+  for(unsigned i=0;i<240;++i){unsigned n=random()%cells.size();
+   if(random()%3==0)cells[n].releaseSearchInfo();else trace.push_back(cells[n].allocateSearchInfo({int(n),0}));
+   trace.push_back(context->m_transientRecords);trace.push_back(context->m_records.size());
+  }
+  context->m_parallelReads=nullptr;return trace;
+ };
+ for(unsigned captured=0;captured<=16;++captured){const auto expected=run(captured,true);const auto window=context->m_admissionWindow;
+  assert(window.valid()&&window.observed()&&window.matches(captured,captured));
+  for(unsigned current=0;current<=16;++current)if(window.matches(captured,current))assert(run(current,false)==expected);
+ }
+ for(unsigned i=0;i<4;++i)cells[i].setGoalUnit(0,{int(i),0});
+}
+''')
+
+    def test_admission_window_benign_count_changes_preserve_all_search_kinds_and_budgets(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;for(bool fixed:{false,true})for(int kind=0;kind<4;++kind)for(bool higher:{false,true}){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;w.a.ai.safe=w.b.ai.safe=kind==1;
+ w.a.ai.closest=w.b.ai.closest=kind==2;p.quickAllowed=kind!=3;
+ w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2=w.b.ai.from;
+ PathfindCell outside;if(!higher)outside.setGoalUnit(77,{0,0});
+ const auto originalA=w.a.ai.to,originalB=w.b.ai.to;auto&main=mainPathfindSearchContext();
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ auto consume=[&](Object&o){if(kind!=3)return route(w.consume(p,o));
+  p.m_queuePRHead=o.id-1;p.confirmParallelFallback(&o,o.ai.locomotor,o.ai.from,o.ai.to,false);
+  return route(p.findClosestPath(&o,o.ai.locomotor,&o.ai.from,&o.ai.to,false,0,false));};
+ p.prepareParallelBatch();const auto&primary=p.m_parallelBatch->jobs[0];const auto before=kind==3?primary.fallback->permanent:primary.permanent;
+ outside.setGoalUnit(higher?77:0,{0,0});const unsigned actual=higher?1:0;
+ main.m_cumulativeCellsAllocated=0;const auto a=consume(w.a),b=consume(w.b);const auto budget=main.m_cumulativeCellsAllocated;
+ auto&batch=*p.m_parallelBatch;assert((kind==3?batch.fallbackAccepted:batch.accepted)==2&&!batch.rejected&&!batch.fallbackRejected);
+ auto&job=kind==3?*batch.jobs[0].fallback:batch.jobs[0];assert(job.validatedPermanent==actual&&before!=actual);
+ const auto&reuse=p.m_pathTiming.admissionReuse(kind==3);assert(reuse.calls==2&&reuse.higher==unsigned(higher?2:0)&&reuse.lower==unsigned(higher?0:2));
+ assert(!p.m_pathTiming.admissionMismatch(kind==3).calls);
+ p.clearParallelBatch();w.a.ai.to=originalA;w.b.ai.to=originalB;main.m_cumulativeCellsAllocated=0;
+ assert(consume(w.a)==a&&consume(w.b)==b&&main.m_cumulativeCellsAllocated==budget);
+ outside.setGoalUnit(0,{0,0});
+}}
+''',timeout=45)
+
+    def test_admission_window_rejects_changed_capacity_decisions_at_exact_boundary(self):
+        source=fixture().replace('constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;','constexpr unsigned PATHFIND_RECORD_CAPACITY = 128;')
+        run_cpp(source+r'''
+int main(){for(bool outside:{false,true}){World w;Pathfinder p;w.queue(p);w.a.ai.to={35,35,0};
+ p.prepareParallelBatch();auto&job=p.m_parallelBatch->jobs[0];const unsigned upper=job.context.m_admissionWindow.upper();
+ assert(upper>0&&upper<126);std::array<PathfindCell,128>permanent;
+ const unsigned current=upper+unsigned(outside);
+ for(unsigned i=0;i<current;++i)permanent[i].setGoalUnit(77,{int(i),0});
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ auto&main=mainPathfindSearchContext();main.m_cumulativeCellsAllocated=0;const auto actual=route(w.consume(p,w.a));const auto budget=main.m_cumulativeCellsAllocated;
+ assert(p.m_parallelBatch->accepted==unsigned(!outside)&&p.m_parallelBatch->rejected==unsigned(outside));
+ assert(p.m_pathTiming.rejections(false,PathSearchTiming::Rejection::Admission)==unsigned(outside));
+ p.clearParallelBatch();main.m_cumulativeCellsAllocated=0;
+ assert(route(w.consume(p,w.a))==actual&&main.m_cumulativeCellsAllocated==budget);
+ for(unsigned i=0;i<current;++i)permanent[i].setGoalUnit(0,{int(i),0});
+}}
+''')
+
+    def test_admission_window_completion_uses_current_frozen_allowance_for_all_kinds(self):
+        source=fixture().replace('constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;','constexpr unsigned PATHFIND_RECORD_CAPACITY = 128;')
+        source=source.replace('int testRadius=0;bool testCenter=true;',
+            'int testRadius=0;bool testCenter=true;bool testCompletion=false;unsigned completionAllocations=0;std::array<PathfindCell,128>completionCells;')
+        source=source.replace('assert(std::this_thread::get_id()==owner);auto&path=results[o->getID()];',r'''
+ assert(std::this_thread::get_id()==owner);
+ if(testCompletion){auto&c=activePathfindSearchContext();assert(c.m_hasAdmissionSnapshot&&c.admissionUse()==1);
+  completionAllocations=0;for(auto&cell:completionCells){if(!cell.allocateSearchInfo({0,0}))break;++completionAllocations;}
+  assert(c.m_transientRecords==127);
+ }
+ auto&path=results[o->getID()];''',1)
+        run_cpp(source+r'''
+int main(){for(bool fixed:{false,true})for(int kind=0;kind<4;++kind){World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;
+ w.a.ai.safe=w.b.ai.safe=kind==1;w.a.ai.closest=w.b.ai.closest=kind==2;p.quickAllowed=kind!=3;
+ w.b.ai.repulsor1=w.b.ai.from;w.b.ai.repulsor2=w.b.ai.from;p.prepareParallelBatch();
+ PathfindCell outside;outside.setGoalUnit(77,{0,0});p.testCompletion=true;
+ const auto original=w.a.ai.to;auto&main=mainPathfindSearchContext();
+ auto consume=[&](){if(kind!=3)return w.consume(p,w.a);
+  p.m_queuePRHead=0;p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  return p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);};
+ auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ main.m_cumulativeCellsAllocated=0;const auto expected=route(consume());const auto allocations=p.completionAllocations,budget=unsigned(main.m_cumulativeCellsAllocated);
+ assert((kind==3?p.m_parallelBatch->fallbackAccepted:p.m_parallelBatch->accepted)==1);
+ p.clearParallelBatch();main.m_cumulativeCellsAllocated=0;w.a.ai.to=original;
+ assert(route(consume())==expected&&p.completionAllocations==allocations&&unsigned(main.m_cumulativeCellsAllocated)==budget);
+ outside.setGoalUnit(0,{0,0});
+}}
+''')
+
+    def test_admission_window_cached_allocation_kind_and_overflow_still_reject(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;for(bool overflow:{false,true}){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();auto&job=p.m_parallelBatch->jobs[0];
+ PathfindCell cached,outside;
+ // No getCell/occupancy query observes this pointer: allocateRecord must add the dependency itself.
+ job.context.m_parallelReads=&job.reads;
+ {SearchContextBinding<PathfindSearchContext>bound(job.context);PathfindSearchContext::AdmissionScope admission(job.context,job.permanent);
+  assert(cached.allocateSearchInfo({0,0}));cached.releaseSearchInfo();}
+ job.context.m_parallelReads=nullptr;
+ if(overflow){for(unsigned i=0;i<8193;++i)job.reads.cells.observe(reinterpret_cast<PathfindCell*>(std::uintptr_t(i+1)),{});}
+ else cached.setGoalUnit(77,{0,0});
+ w.consume(p,w.a);assert(p.m_parallelBatch->rejected==1&&!p.m_parallelBatch->accepted);
+ assert(p.m_pathTiming.rejections(false,T::Rejection::Cells)==1&&!p.m_pathTiming.admissionReuse(false).calls);
+ cached.setGoalUnit(0,{0,0});
+}}
+''')
+
+    def test_admission_window_invalid_same_count_is_rejected_and_metrics_resolve_once(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();auto&job=p.m_parallelBatch->jobs[0];
+ job.context.m_admissionWindow.allows(job.permanent+1,0);assert(!job.context.m_admissionWindow.valid());
+ w.consume(p,w.a);w.consume(p,w.a);auto&t=p.m_pathTiming;const auto&m=t.admissionMismatch(false);
+ assert(m.calls==1&&m.equal==1&&!m.higher&&!m.lower&&!t.admissionReuse(false).calls);
+ assert(t.rejections(false,PathSearchTiming::Rejection::Admission)==1);
+ FILE*f=tmpfile();assert(f);t.report(f);rewind(f);std::string output;char b[512];while(fgets(b,sizeof(b),f))output+=b;fclose(f);
+ assert(output.find("[PATH_ADMISSION_REUSE] phase=primary calls=0 higher=0 lower=0")!=std::string::npos);
+}
+''')
+
+    def test_admission_window_uses_caller_snapshot_and_does_not_count_unfinished_reuse(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;p.prepareParallelBatch();
+ if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+ auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];PathfindCell one,two;
+ one.setGoalUnit(77,{0,0});auto&main=mainPathfindSearchContext();
+ {SearchContextBinding<PathfindSearchContext>bound(main);PathfindSearchContext::AdmissionScope admission(main,1);
+  // Preserve the real phase's frozen count if unrelated global usage changes after its entry.
+  two.setGoalUnit(77,{0,0});assert(PathfindSearchContext::permanentRecordsInUse()==2);
+  const auto*closest=fallback?&job.closestSettings:nullptr;
+  assert(p.takeParallelResult(&w.a,w.a.ai.locomotor,job.from,job.to,nullptr,0,job.start,job.goal,job.startIndex,job.settings,closest)==&job);
+  assert(job.validatedPermanent==1&&!p.m_pathTiming.admissionReuse(fallback).calls);
+  p.clearParallelBatch();assert(p.m_pathTiming.results(fallback,T::Result::Unfinished)==1&&!p.m_pathTiming.admissionReuse(fallback).calls);
+ }
+ one.setGoalUnit(0,{0,0});two.setGoalUnit(0,{0,0});
+}}
+''')
+
     def test_closest_preparation_releases_completed_coarse_path_if_cleanup_aborts(self):
         # GeneralsX @test Codex 28/10/2026 Compile the real coarse routine; a returned Path needs ownership until list cleanup completes.
         source=fixture().replace('struct Path {std::vector<ICoord2D> route;',
@@ -524,7 +699,7 @@ int main(){for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);
 }}
 ''')
 
-    def test_mismatch_admission_is_exact_and_short_circuited_for_both_phases(self):
+    def test_admission_window_preserves_earlier_guards_for_both_phases(self):
         run_cpp(fixture()+r'''
 int main(){using T=PathSearchTiming;
  for(bool fallback:{false,true})for(int change=0;change<4;++change){World w;Pathfinder p;w.queue(p);
@@ -534,9 +709,9 @@ int main(){using T=PathSearchTiming;
   if(change==2)++p.m_parallelWorldEpoch;
   if(change==3){auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];job.to.x+=1;}
   if(fallback)p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);else w.consume(p,w.a);
-  const auto&s=p.m_pathTiming.admissionMismatch(fallback);const bool reached=change<2;
+  const auto&s=p.m_pathTiming.admissionReuse(fallback);const bool reached=change<2;
   assert(s.calls==unsigned(reached)&&s.higher==unsigned(change==0)&&s.lower==unsigned(change==1));
-  assert(p.m_pathTiming.rejections(fallback,T::Rejection::Admission)==unsigned(reached));
+  assert(!p.m_pathTiming.rejections(fallback,T::Rejection::Admission));
   if(reached){assert(s.capturedMin==s.capturedMax&&s.currentMin==s.currentMax);
    assert(s.capturedMin==unsigned(change==1)&&s.currentMin==unsigned(change==0));}
   assert(!p.m_pathTiming.admissionMismatch(!fallback).calls);
@@ -1792,7 +1967,8 @@ int main(){for(int change=0;change<10;++change){World w;Pathfinder p;w.queue(p);
  case 2:w.b.ai.through=true;break;
  case 3:++p.m_parallelWorldEpoch;break;
  case 4:PathOccupancy::validationLifecycleEpoch().fetch_add(1);break;
- case 5:p.storage[0][0].setGoalUnit(55,{0,0});break;
+ // GeneralsX @test Codex 29/10/2026 A mismatched captured source still rejects; harmless live-count changes are covered separately.
+ case 5:++job.permanent;break;
  case 6:job.reads.overflow=true;break;
  case 7:job.reads.corridor.observe(0,true);mainPathfindSearchContext().setCorridorPassable(0,false);break;
  case 8:w.b.ai.locomotor.downhill=true;break;
@@ -1993,8 +2169,14 @@ int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();
         source=source.replace('constexpr ObjectID INVALID_ID=0;', '')
         source+='\n'.join(function(m) for m in ['inline Bool PathfindCell::isObstacleFence(',
             'inline Bool PathfindCell::isObstacleTransparent(', 'inline ObjectID PathfindCell::getObstacleID('])
+        # GeneralsX @test Codex 29/10/2026 Link the real allocation observer and dependency log in the signed-ID fixture too.
+        source+='\n#include "pathoccupancyquery.h"\n#include "boundedsearchreads.h"\n#include "boundedobservationlog.h"\n#include <cstring>\n#include <memory>\nusing Real=float;\n'
+        source+=block(SOURCE,'struct PathfindParallelReads {')+'\n'+function('void observeParallelAllocationCell(')
         run_cpp(source+r"""
 int main(){PathfindCellInfo::allocateCellInfos();{PathfindCell cell;cell.setGoalUnit(static_cast<ObjectID>(23),{4,5});
+ auto reads=std::make_unique<PathfindParallelReads>();auto&c=mainPathfindSearchContext();c.m_parallelReads=reads.get();
+ assert(cell.allocateSearchInfo({4,5}));assert(reads->cells.matches([](PathfindCell*cell){return cell->permanentSearchValues();}));
+ c.m_parallelReads=nullptr;cell.releaseSearchInfo();
  auto values=cell.permanentSearchValues();assert(values[11]==23&&values[14]==4&&values[15]==5);
  cell.setGoalUnit(INVALID_ID,{4,5});}mainPathfindSearchContext().releaseStorage();PathfindCellInfo::releaseCellInfos();}
 """)
