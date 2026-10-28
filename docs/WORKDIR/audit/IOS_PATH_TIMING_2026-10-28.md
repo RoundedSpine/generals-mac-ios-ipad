@@ -18,8 +18,9 @@ log lines, dynamic timing allocations or additional worker threads are introduce
 
 The Pathfinder owns ten session aggregates. Each records calls, total and maximum
 elapsed time, and cumulative counts at or above 1/5/20/50/100/500 milliseconds.
-Normal destruction prints a fixed eleven-line PATH_TIMING summary alongside the
-existing result counters. No summary is guaranteed after a crash or force-kill.
+Normal destruction prints eleven PATH_TIMING lines alongside the existing result
+counters, plus the bounded [admission/outlier extension](IOS_PATH_ADMISSION_2026-10-28.md)
+when that follow-up is present. No summary is guaranteed after a crash or force-kill.
 Counters span the Pathfinder lifetime, including multiple games and menu activity;
 they do not reset on a map change.
 

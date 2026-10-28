@@ -374,6 +374,9 @@ The fixture enables optional `GENERALS_PATH_TIMING` by default and tests timing
 ON/OFF route/target/budget equivalence, private post-join metrics, rejection/unused
 work and timer accounting. This adds real parallel reuse; device performance
 remains unmeasured and special requests retain caller execution.
+The same suite covers first-failure admission reasons, real predictor query
+ordering, stable top-four scalar snapshots, queue/batch correlation, serial kinds,
+debug/exception exclusions and the original budget cutoff with diagnostics enabled.
 
 Run `python3 scripts/qa/test_openal_stream.py` for production streaming regressions
 covering persistent no-context errors, pause/resume, failed queries, EOF and refill.

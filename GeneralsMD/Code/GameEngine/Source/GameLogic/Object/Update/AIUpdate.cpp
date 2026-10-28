@@ -395,15 +395,20 @@ except by the pathfinder during pathfind queue processing.  jba */
 //-------------------------------------------------------------------------------------------------
 // GeneralsX @feature Codex 27/10/2026 Predict without destroying paths, setting goals, waking units or changing waiting flags.
 #if defined(GENERALS_PARALLEL_PATH_BATCH)
-Bool AIUpdateInterface::predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored)
+Bool AIUpdateInterface::predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored, PathPredictionReason* reason)
 {
- if (!m_waitingForPath || m_isSafePath || m_isApproachPath || m_isAttackPath || m_isBlockedAndStuck ||
-     !m_isFinalGoal || canComputeQuickPath() ||
-     (m_stateMachine->getCurrentStateID() == AI_FOLLOW_EXITPRODUCTION_PATH && canPathThroughUnits())) return false;
+ // GeneralsX @feature Codex 28/10/2026 Capture the first failed guard while preserving short-circuit order and live-query counts.
+ const auto reject=[&](Bool condition,PathPredictionReason why){if(condition&&reason)*reason=why;return condition;};
+ if (reject(!m_waitingForPath,PathPredictionReason::NotWaiting) ||
+     reject(m_isSafePath,PathPredictionReason::Safe) || reject(m_isApproachPath,PathPredictionReason::Approach) ||
+     reject(m_isAttackPath,PathPredictionReason::Attack) || reject(m_isBlockedAndStuck,PathPredictionReason::Blocked) ||
+     reject(!m_isFinalGoal,PathPredictionReason::NonFinal) || reject(canComputeQuickPath(),PathPredictionReason::Quick) ||
+     reject(m_stateMachine->getCurrentStateID() == AI_FOLLOW_EXITPRODUCTION_PATH && canPathThroughUnits(),PathPredictionReason::ProductionExit)) return false;
  Region3D extent;
  TheTerrainLogic->getMaximumPathfindExtent(&extent);
- if (!extent.isInRegionNoZ(&m_requestedDestination) || !extent.isInRegionNoZ(getObject()->getPosition())) return false;
+ if (reject(!extent.isInRegionNoZ(&m_requestedDestination) || !extent.isInRegionNoZ(getObject()->getPosition()),PathPredictionReason::OutsideExtent)) return false;
  from = *getObject()->getPosition(); to = m_requestedDestination; ignored = getIgnoredObstacleID();
+ if(reason)*reason=PathPredictionReason::Accepted;
  return true;
 }
 // GeneralsX @feature Codex 27/10/2026 Adapt Reimagined's safe-path prediction; resolve live repulsors only on main.

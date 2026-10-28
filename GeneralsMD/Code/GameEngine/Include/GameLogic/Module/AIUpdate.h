@@ -28,6 +28,11 @@
 
 #pragma once
 
+// GeneralsX @feature Codex 28/10/2026 Optional prediction explanations share a small platform-independent enum.
+#if defined(GENERALS_PARALLEL_PATH_BATCH)
+#include "pathsearchprediction.h"
+#endif
+
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/AIStateMachine.h"
@@ -461,7 +466,8 @@ private:
 public:
 // GeneralsX @feature Codex 27/10/2026 Read-only prediction of the ordinary final-goal branch; execution remains in doPathfind.
 #if defined(GENERALS_PARALLEL_PATH_BATCH)
- Bool predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored);
+ // GeneralsX @feature Codex 28/10/2026 Return the existing first failed guard without another prediction pass.
+ Bool predictOrdinaryPath(Coord3D& from, Coord3D& to, ObjectID& ignored, PathPredictionReason* reason=nullptr);
  // GeneralsX @feature Codex 27/10/2026 Copy the escape request's repulsor positions and radius without changing AI state.
  Bool predictSafePath(Coord3D& from, Coord3D& repulsor1, Coord3D& repulsor2, Real& radius);
  Bool predictClosestPath(Coord3D& from, Coord3D& to, Bool& blocked, Real& pathCostMultiplier);

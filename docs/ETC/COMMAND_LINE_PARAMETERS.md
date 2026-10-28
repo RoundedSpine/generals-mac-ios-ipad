@@ -77,6 +77,10 @@ validation, hierarchy and finalization. Times are overlapping wall-clock totals,
 not CPU times or FPS measurements. No debug launch flag is needed. Crashes or
 force-quitting may prevent the shutdown summary. See
 [the phase definitions and test instructions](../WORKDIR/audit/IOS_PATH_TIMING_2026-10-28.md).
+The same option also prints `[PATH_PAIR_ADMISSION]`, per-slot prediction/capture
+counts, `[PATH_SERIAL_KINDS]` and at most four each of `[PATH_QUEUE_SLOW]` and
+`[PATH_PAIR_SLOW]`. These retain only copied scalar work counters and queue-call
+ordinals. See [admission and slow-call field definitions](../WORKDIR/audit/IOS_PATH_ADMISSION_2026-10-28.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

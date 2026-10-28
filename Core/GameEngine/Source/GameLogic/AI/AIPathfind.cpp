@@ -6707,7 +6707,7 @@ void Pathfinder::processPathfindQueue()
 	}
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Measure pending queue calls, including zone recalculation and request callbacks.
- PathSearchTiming::Scope queueTiming(m_queuePRHead!=m_queuePRTail?&m_pathTiming[PathSearchTiming::Queue]:nullptr);
+ PathSearchTiming::QueueScope queueTiming(m_pathTiming,(m_queuePRTail-m_queuePRHead+PATHFIND_QUEUE_LEN)%PATHFIND_QUEUE_LEN);
 #endif
 #ifdef DEBUG_QPF
 #ifdef DEBUG_LOGGING
@@ -6721,7 +6721,13 @@ void Pathfinder::processPathfindQueue()
 #endif
 
 	if (m_zoneManager.needToCalculateZones()) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  queueTiming.sample.zones=true;
+#endif
 		m_zoneManager.calculateZones(m_map, m_layers, m_extent);
+#ifdef GENERALS_ZH_PATH_TIMING
+  queueTiming.sample.completed=true;
+#endif
 		return;
 	}
 
@@ -6746,6 +6752,9 @@ void Pathfinder::processPathfindQueue()
 	Int pathsFound = 0;
 	while (searchState().m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME &&
 		m_queuePRTail!=m_queuePRHead) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  ++queueTiming.sample.entries;
+#endif
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
   prepareParallelBatch();
 #endif
@@ -6754,6 +6763,9 @@ void Pathfinder::processPathfindQueue()
 		if (obj) {
 			AIUpdateInterface *ai = obj->getAIUpdateInterface();
 			if (ai) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++queueTiming.sample.callbacks;
+#endif
 				ai->doPathfind(this);
 				pathsFound++;
 			}
@@ -6765,6 +6777,10 @@ void Pathfinder::processPathfindQueue()
 	}
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  clearParallelBatch();
+#endif
+#ifdef GENERALS_ZH_PATH_TIMING
+ queueTiming.sample.charged=searchState().m_cumulativeCellsAllocated;
+ queueTiming.sample.completed=true;
 #endif
 	if (pathsFound > 0) {
 		PROFILER_PLOT("PathfindCells", (double)searchState().m_cumulativeCellsAllocated);
@@ -7241,33 +7257,110 @@ Int Pathfinder::examineNeighboringCellsWithMovement(PathfindCell *parentCell, Pa
 // GeneralsX @feature Codex 27/10/2026 Speculate only two adjacent eligible requests; never dequeue or charge unused work.
 void Pathfinder::prepareParallelBatch()
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 28/10/2026 Count exactly one terminal outcome per attempt, including existing pairs and exception fallback.
+ PathSearchTiming::AdmissionScope admission(m_pathTiming);
+#endif
 #if !defined(RTS_DEBUG) && !defined(INTENSE_DEBUG) && !defined(DEBUG_LOGGING) && !defined(DUMP_PERF_STATS)
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Time attempted preparation, including ineligible pairs, but stop before dispatch.
  PathSearchTiming::Scope preparationTiming(&m_pathTiming[PathSearchTiming::Preparation]);
 #endif
- if (m_exclusiveWorkerUnavailable || TheGlobalData->m_debugAI!=0 || PathOccupancy::validationPaused().load() ||
-     SearchContextBinding<PathfindSearchContext>::current()) return;
+ if (m_exclusiveWorkerUnavailable) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::Unavailable;
+#endif
+  return;
+ }
+ if (TheGlobalData->m_debugAI!=0) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::Debug;
+#endif
+  return;
+ }
+ if (PathOccupancy::validationPaused().load()) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::Paused;
+#endif
+  return;
+ }
+ if (SearchContextBinding<PathfindSearchContext>::current()) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::Nested;
+#endif
+  return;
+ }
  if (m_parallelBatch && m_parallelBatch->active) {
-  if (m_queuePRHead==m_parallelBatch->jobs[0].queueIndex || m_queuePRHead==m_parallelBatch->jobs[1].queueIndex) return;
+  if (m_queuePRHead==m_parallelBatch->jobs[0].queueIndex || m_queuePRHead==m_parallelBatch->jobs[1].queueIndex) {
+#ifdef GENERALS_ZH_PATH_TIMING
+   const auto&first=m_parallelBatch->jobs[0];
+   admission.reason=first.ready||(first.fallback&&first.fallback->ready)?
+    PathSearchTiming::Admission::ExistingPair:PathSearchTiming::Admission::ExistingAttempt;
+#endif
+   return;
+  }
   clearParallelBatch();
  }
  const Int next=(m_queuePRHead+1)%PATHFIND_QUEUE_LEN;
- if (next==m_queuePRTail) return;
+ if (next==m_queuePRTail) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::ShortQueue;
+#endif
+  return;
+ }
  const ObjectID ids[2]={m_queuedPathfindRequests[m_queuePRHead],m_queuedPathfindRequests[next]};
- if (ids[0]==ids[1]) return;
+ if (ids[0]==ids[1]) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::Duplicate;
+#endif
+  return;
+ }
  Object* objects[2]={TheGameLogic->findObjectByID(ids[0]),TheGameLogic->findObjectByID(ids[1])};
  Coord3D from[2],to[2],repulsor2[2]{};ObjectID ignored[2];
  Bool safe[2]={false,false};Real repulsorRadius[2]={0,0};
  Bool closest[2]={false,false},blocked[2]={false,false};Real pathCostMultiplier[2]={0,0};
  for (Int i=0;i<2;++i) {
-  if (!objects[i] || !objects[i]->getAIUpdateInterface() || objects[i]->isKindOf(KINDOF_DOZER) ||
-      (objects[i]->getCrusherLevel()>0 && TheNameKeyGenerator->findExistingNameKey("SquishCollide")==NAMEKEY_INVALID)) return;
+  if (!objects[i]) {
+#ifdef GENERALS_ZH_PATH_TIMING
+   admission.reason=PathSearchTiming::Admission::MissingObject;
+#endif
+   return;
+  }
+  if (!objects[i]->getAIUpdateInterface()) {
+#ifdef GENERALS_ZH_PATH_TIMING
+   admission.reason=PathSearchTiming::Admission::MissingAI;
+#endif
+   return;
+  }
+  if (objects[i]->isKindOf(KINDOF_DOZER)) {
+#ifdef GENERALS_ZH_PATH_TIMING
+   admission.reason=PathSearchTiming::Admission::Dozer;
+#endif
+   return;
+  }
+  if (objects[i]->getCrusherLevel()>0 && TheNameKeyGenerator->findExistingNameKey("SquishCollide")==NAMEKEY_INVALID) {
+#ifdef GENERALS_ZH_PATH_TIMING
+   admission.reason=PathSearchTiming::Admission::CrusherKey;
+#endif
+   return;
+  }
   auto* ai=objects[i]->getAIUpdateInterface();
-  if (!ai->predictOrdinaryPath(from[i],to[i],ignored[i])) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  PathPredictionReason prediction=PathPredictionReason::Accepted;
+#endif
+  if (!ai->predictOrdinaryPath(from[i],to[i],ignored[i]
+#ifdef GENERALS_ZH_PATH_TIMING
+   ,&prediction
+#endif
+  )) {
    if (ai->predictSafePath(from[i],to[i],repulsor2[i],repulsorRadius[i])) safe[i]=true;
    else if (ai->predictClosestPath(from[i],to[i],blocked[i],pathCostMultiplier[i])) closest[i]=true;
-   else return;
+   else {
+#ifdef GENERALS_ZH_PATH_TIMING
+    admission.reason=PathSearchTiming::Admission::Prediction;admission.slot=i;admission.prediction=prediction;
+#endif
+    return;
+   }
    // Safe/approach callbacks inherit the context's ignored obstacle; safe also inherits tunneling.
    ignored[i]=mainPathfindSearchContext().m_ignoreObstacleID;
   }
@@ -7360,18 +7453,32 @@ void Pathfinder::prepareParallelBatch()
     }
    };
    // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
+#ifdef GENERALS_ZH_PATH_TIMING
+   PathSearchTiming::PairSample pairSample;
+#endif
    {
 #ifdef GENERALS_ZH_PATH_TIMING
     PathSearchTiming::Scope pairTiming(&m_pathTiming[PathSearchTiming::Pair]);
 #endif
     m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
+#ifdef GENERALS_ZH_PATH_TIMING
+    pairSample.nanoseconds=pairTiming.stop();
+#endif
    }
 #ifdef GENERALS_ZH_PATH_TIMING
    for(Int i=0;i<2;++i) {
     auto& metric=m_pathTiming[i?PathSearchTiming::WorkerKernel:PathSearchTiming::CallerKernel];
     metric.merge(batch.jobs[i].kernelTime);
     if(batch.jobs[i].fallback) metric.merge(batch.jobs[i].fallback->kernelTime);
+    const auto&job=batch.jobs[i];auto&task=pairSample.tasks[i];
+    task.kind=job.safe?PathSearchTiming::Kind::Safe:job.closest?PathSearchTiming::Kind::Closest:PathSearchTiming::Kind::Ordinary;
+    task.primary=job.kernelTime.calls!=0;task.fallback=job.fallback&&job.fallback->kernelTime.calls!=0;
+    task.nanoseconds=job.kernelTime.totalNanoseconds+(task.fallback?job.fallback->kernelTime.totalNanoseconds:0);
+    if(task.primary){task.examined=job.closest?job.closestOutcome.cellsExamined:job.outcome.cellsExamined;task.records=job.context.m_records.size();}
+    if(task.fallback){task.fallbackExamined=job.fallback->closestOutcome.cellsExamined;task.fallbackRecords=job.fallback->context.m_records.size();}
    }
+   m_pathTiming.recordPair(pairSample);
+   admission.reason=PathSearchTiming::Admission::Dispatched;
 #endif
    for (auto& job:batch.jobs) {
     job.ready=job.captured;
@@ -7384,22 +7491,45 @@ void Pathfinder::prepareParallelBatch()
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
   }
+#ifdef GENERALS_ZH_PATH_TIMING
+  else {
+   admission.reason=PathSearchTiming::Admission::Capture;
+   for(unsigned i=0;i<2;++i)if(!hasWork(batch.jobs[i])){
+    const auto&job=batch.jobs[i];
+    m_pathTiming.captureFailure(i,job.safe?PathSearchTiming::Kind::Safe:job.closest?PathSearchTiming::Kind::Closest:PathSearchTiming::Kind::Ordinary,
+     job.locomotor->getValidSurfaces()==0,job.obj->getAIUpdateInterface()->getPath()!=nullptr);
+   }
+  }
+#endif
   for (auto& job:batch.jobs) {
    job.context.m_parallelReads=nullptr;
    if(job.fallback) job.fallback->context.m_parallelReads=nullptr;
   }
  } catch (const ExclusiveSearchWorker::EnvironmentError& error) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::EnvironmentFailure;
+#endif
   clearParallelBatch();m_exclusiveWorkerUnavailable=true;
   fprintf(stderr,"[PATH_PARALLEL_BATCH] unavailable: %s; using ordinary dispatch\n",error.what());
  } catch (const std::system_error& error) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::ThreadFailure;
+#endif
   clearParallelBatch();m_exclusiveWorkerUnavailable=true;
   fprintf(stderr,"[PATH_PARALLEL_BATCH] unavailable: %s; using ordinary dispatch\n",error.what());
  } catch (const std::bad_alloc&) {
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::AllocationFailure;
+#endif
   clearParallelBatch();m_exclusiveWorkerUnavailable=true;
   fprintf(stderr,"[PATH_PARALLEL_BATCH] allocation unavailable; using ordinary dispatch\n");
  } catch (...) {
   clearParallelBatch();throw;
  }
+#else
+#ifdef GENERALS_ZH_PATH_TIMING
+ admission.reason=PathSearchTiming::Admission::DebugBuild;
+#endif
 #endif
 }
 #endif
@@ -7462,7 +7592,7 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Speculative kernels have private metrics; only caller fallback writes the serial aggregate.
  // GeneralsX @bugfix Codex 28/10/2026 Read context-only metadata through the context accessor, not its bookkeeping base.
- PathSearchTiming::Scope serialTiming(activePathfindSearchContext().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+ PathSearchTiming::SerialScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Ordinary);
 #endif
 	Int cellCount = 0;
 
@@ -9809,7 +9939,7 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Caller closest recomputation has separate timing from speculative tasks.
- PathSearchTiming::Scope serialTiming(activePathfindSearchContext().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+ PathSearchTiming::SerialScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Closest);
 #endif
  const Object* obj=movement.obj;
  PathfindCell* closesetCell=nullptr;
@@ -12344,7 +12474,7 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Time caller escape recomputation only when no private speculative read log is installed.
- PathSearchTiming::Scope serialTiming(activePathfindSearchContext().m_parallelReads?nullptr:&m_pathTiming[PathSearchTiming::SerialKernel]);
+ PathSearchTiming::SerialScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Safe);
 #endif
  const Real repulsorDistSqr=repulsorRadius*repulsorRadius;
  const Int MAX_CELLS=MAX_SAFE_PATH_CELL_COUNT;

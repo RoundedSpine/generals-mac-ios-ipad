@@ -54,7 +54,11 @@ struct AIUpdateInterface {
  bool safe=false;Coord3D repulsor1{25,25,0},repulsor2{25,25,0};Real repulsorRadius=60;
  bool closest=false,blocked=false;Real pathCostMultiplier=.2f;
  ObjectID getIgnoredObstacleID()const{return ignored;}bool isAircraftThatAdjustsDestination()const{return false;}bool isIdle()const{return idle;}
- bool predictOrdinaryPath(Coord3D&f,Coord3D&t,ObjectID&i){f=from;t=to;i=ignored;return eligible&&!safe&&!closest;}
+ PathPredictionReason rejectedPrediction=PathPredictionReason::Quick;
+ bool predictOrdinaryPath(Coord3D&f,Coord3D&t,ObjectID&i,PathPredictionReason*reason=nullptr){
+  f=from;t=to;i=ignored;const bool accepted=eligible&&!safe&&!closest;
+  if(reason)*reason=accepted?PathPredictionReason::Accepted:rejectedPrediction;return accepted;
+ }
  bool predictSafePath(Coord3D&f,Coord3D&r1,Coord3D&r2,Real&r){f=from;r1=repulsor1;r2=repulsor2;r=repulsorRadius;return eligible&&safe;}
  bool predictClosestPath(Coord3D&f,Coord3D&t,Bool&b,Real&cost){f=from;t=to;b=blocked;cost=pathCostMultiplier;return eligible&&!safe&&closest;}
  const LocomotorSet&getLocomotorSet()const{return locomotor;}
@@ -339,6 +343,186 @@ def large_closest_case():
 
 
 class ParallelBatchTests(unittest.TestCase):
+    def test_prediction_reason_preserves_short_circuit_queries(self):
+        ai_source=(ROOT/'GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/AIUpdate.cpp').read_text()
+        ai_header=(ROOT/'GeneralsMD/Code/GameEngine/Include/GameLogic/Module/AIUpdate.h').read_text()
+        a=ai_source.index('Bool AIUpdateInterface::predictOrdinaryPath(')
+        predictor=ai_source[a:ai_source.index('\n}',a)+2]
+        a=ai_header.index('Bool predictOrdinaryPath(')
+        declaration=ai_header[a:ai_header.index(';',a)+1]
+        source=r'''
+#include "pathsearchprediction.h"
+#include <cassert>
+#include <initializer_list>
+using Bool=bool;using ObjectID=unsigned;
+struct Coord3D{float x=0,y=0,z=0;};
+struct Region3D{bool isInRegionNoZ(const Coord3D*p)const{return p->x>=0&&p->y>=0&&p->x<=100&&p->y<=100;}};
+struct Terrain{void getMaximumPathfindExtent(Region3D*){}}terrain;auto*TheTerrainLogic=&terrain;
+constexpr int AI_FOLLOW_EXITPRODUCTION_PATH=3;
+struct Object{Coord3D p{10,20,0};const Coord3D*getPosition(){return &p;}};
+struct State{int id=0;int getCurrentStateID(){return id;}};
+struct AIUpdateInterface {
+ bool m_waitingForPath=true,m_isSafePath=false,m_isApproachPath=false,m_isAttackPath=false,m_isBlockedAndStuck=false,m_isFinalGoal=true;
+ bool quick=false,through=false;int quickCalls=0,throughCalls=0,objectCalls=0;
+ Coord3D m_requestedDestination{80,90,0};Object object;State state;State*m_stateMachine=&state;
+ bool canComputeQuickPath(){++quickCalls;return quick;}bool canPathThroughUnits(){++throughCalls;return through;}
+ Object*getObject(){++objectCalls;return &object;}unsigned getIgnoredObstacleID(){return 41;}
+ DECLARATION
+};
+'''.replace('DECLARATION',declaration)+predictor+r'''
+int main(){using R=PathPredictionReason;
+ const R expected[]={R::Accepted,R::NotWaiting,R::Safe,R::Approach,R::Attack,R::Blocked,R::NonFinal,R::Quick,R::ProductionExit,R::OutsideExtent,R::OutsideExtent,R::NotWaiting};
+ for(bool explain:{false,true})for(int scenario=0;scenario<12;++scenario){AIUpdateInterface ai;
+  switch(scenario){case 1:ai.m_waitingForPath=false;break;case 2:ai.m_isSafePath=true;break;
+   case 3:ai.m_isApproachPath=true;break;case 4:ai.m_isAttackPath=true;break;case 5:ai.m_isBlockedAndStuck=true;break;
+   case 6:ai.m_isFinalGoal=false;break;case 7:ai.quick=true;break;case 8:ai.state.id=3;ai.through=true;break;
+   case 9:ai.m_requestedDestination.x=101;break;case 10:ai.object.p.x=101;break;
+   case 11:ai.m_waitingForPath=false;ai.m_isSafePath=ai.m_isAttackPath=ai.quick=true;break;}
+  R reason=R::Count;Coord3D from{-9,-9,0},to=from;ObjectID ignored=99;
+  const bool accepted=ai.predictOrdinaryPath(from,to,ignored,explain?&reason:nullptr);
+  assert(accepted==(scenario==0));assert(reason==(explain?expected[scenario]:R::Count));
+  assert(ai.quickCalls==int(scenario==0||(scenario>=7&&scenario<=10))&&ai.throughCalls==int(scenario==8));
+  assert(ai.objectCalls==(scenario==0?2:scenario==10?1:0));
+  if(accepted)assert(from.x==10&&to.y==90&&ignored==41);else assert(from.x==-9&&to.y==-9&&ignored==99);
+ }
+}
+'''
+        run_cpp(source)
+
+    # GeneralsX @feature Codex 28/10/2026 Exercise admission accounting and scalar snapshots through the actual queue and dispatcher.
+    def test_admission_outcomes_explain_every_attempt(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;using A=T::Admission;
+ const A expected[]={A::Unavailable,A::Debug,A::Paused,A::Nested,A::ShortQueue,A::Duplicate,
+  A::MissingObject,A::MissingAI,A::Dozer,A::CrusherKey,A::Prediction,A::Prediction,A::Capture,A::Dispatched};
+ for(unsigned scenario=0;scenario<14;++scenario){World w;Pathfinder p;w.queue(p);global.m_debugAI=0;keys.present=true;
+  switch(scenario){
+   case 0:p.m_exclusiveWorkerUnavailable=true;break;case 1:global.m_debugAI=1;break;
+   case 2:PathOccupancy::validationPaused().store(true);break;case 4:p.m_queuePRTail=1;break;
+   case 5:p.m_queuedPathfindRequests[1]=1;break;case 6:logic.objects.erase(2);break;
+   case 7:w.b.hasAI=false;break;case 8:w.b.kind=KINDOF_DOZER;break;
+   case 9:w.b.crusher=1;keys.present=false;break;
+   case 10:w.a.ai.eligible=false;w.a.ai.rejectedPrediction=PathPredictionReason::Quick;break;
+   case 11:w.b.ai.eligible=false;w.b.ai.rejectedPrediction=PathPredictionReason::NonFinal;break;
+   case 12:p.m_isMapReady=false;break;
+  }
+  if(scenario==3){SearchContextBinding<PathfindSearchContext> outer(activePathfindSearchContext());p.prepareParallelBatch();}
+  else p.prepareParallelBatch();
+  assert(p.m_pathTiming.admissions(expected[scenario])==1);
+  std::uint64_t sum=0;for(unsigned i=0;i<unsigned(A::Count);++i)sum+=p.m_pathTiming.admissions(static_cast<A>(i));assert(sum==1);
+  if(scenario==10)assert(p.m_pathTiming.predictions(0,PathPredictionReason::Quick)==1);
+  if(scenario==11)assert(p.m_pathTiming.predictions(1,PathPredictionReason::NonFinal)==1);
+  if(scenario==12){p.prepareParallelBatch();assert(p.m_pathTiming.admissions(A::ExistingAttempt)==1&&p.m_pathTiming.admissions(A::ExistingPair)==0);}
+  if(scenario==13){p.prepareParallelBatch();assert(p.m_pathTiming.admissions(A::ExistingPair)==1&&p.m_pathTiming.admissions(A::Dispatched)==1);}
+  global.m_debugAI=0;keys.present=true;PathOccupancy::validationPaused().store(false);
+ }
+}
+''')
+
+    def test_admission_exception_and_debug_outcomes(self):
+        main=r'''
+int main(){World w;Pathfinder p;w.queue(p);bool caught=false;
+ try{p.prepareParallelBatch();}catch(const std::runtime_error&){caught=true;}
+ assert(p.m_pathTiming.admissions(EXPECTED)==1&&p.m_pathTiming.slowPairCount()==0);
+ assert(!p.m_parallelBatch||!p.m_parallelBatch->active);
+ assert(caught==PROPAGATES);
+}
+'''
+        call='m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});'
+        for thrown,expected,propagates in [
+            ('throw ExclusiveSearchWorker::EnvironmentError("test");','EnvironmentFailure',False),
+            ('throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));','ThreadFailure',False),
+            ('throw std::bad_alloc();','AllocationFailure',False),
+            ('throw std::runtime_error("test");','Exception',True),
+        ]:
+            run_cpp(fixture().replace(call,thrown)+main.replace('EXPECTED','PathSearchTiming::Admission::'+expected).replace('PROPAGATES',str(propagates).lower()))
+        run_cpp('#define GENERALS_ZH_PATH_TIMING 1\n#define DUMP_PERF_STATS 1\n#include "pathsearchtiming.h"\n#include <cassert>\n'
+                'struct Pathfinder {PathSearchTiming m_pathTiming;void prepareParallelBatch();};\n'+function('void Pathfinder::prepareParallelBatch()')+r'''
+int main(){Pathfinder p;p.prepareParallelBatch();assert(p.m_pathTiming.admissions(PathSearchTiming::Admission::DebugBuild)==1);}
+''')
+
+    def test_slow_samples_retain_four_and_restore_queue_context(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <cassert>
+#include <type_traits>
+struct Clock {using duration=std::chrono::nanoseconds;using time_point=std::chrono::time_point<Clock>;
+ static long long ticks;static int reads;static time_point now(){++reads;return time_point(duration(ticks));}};
+long long Clock::ticks=0;int Clock::reads=0;
+int main(){using T=BasicPathSearchTiming<Clock>;T t;
+ static_assert(std::is_trivially_copyable<T::PairSample>::value&&std::is_trivially_copyable<T::QueueSample>::value,"Snapshots must own only values");
+ {T::QueueScope empty(t,0);}assert(Clock::reads==0&&t.slowQueueCount()==0);
+ for(int ms:{2,9,4,7,9,1}){T::QueueScope q(t,3);q.sample.completed=true;Clock::ticks+=ms*1000000;}
+ assert(t.slowQueueCount()==4);const auto&top=t.slowQueues();
+ assert(top[0].id==2&&top[1].id==5&&top[2].id==4&&top[3].id==3);
+ T nested;{
+  T::QueueScope outer(nested,2);Clock::ticks+=100;
+  {T::QueueScope inner(nested,1);T::SerialScope serial(nested,true,T::Kind::Closest);Clock::ticks+=200;}
+  T::PairSample pair;{T::Scope timer(&nested[T::Pair]);Clock::ticks+=300;pair.nanoseconds=timer.stop();}
+  nested.recordPair(pair);assert(nested.slowPairs()[0].queue==outer.sample.id);
+  {T::SerialScope serial(nested,true,T::Kind::Ordinary);Clock::ticks+=400;}
+ }
+ assert(nested.slowQueueCount()==2&&nested.slowQueues()[0].serialKinds[0]==1&&nested.slowQueues()[1].serialKinds[2]==1);
+ for(int ms:{1,8,2,7,8,3}){T::PairSample sample;sample.nanoseconds=ms*1000000;t.recordPair(sample);}
+ assert(t.slowPairCount()==4&&t.slowPairs()[0].nanoseconds==8000000&&t.slowPairs()[1].nanoseconds==8000000&&t.slowPairs()[3].nanoseconds==3000000);
+}
+''')
+
+    def test_slow_queue_and_pair_capture_actual_work_after_join(self):
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.processPathfindQueue();using T=PathSearchTiming;auto&t=p.m_pathTiming;
+ assert(t.slowQueueCount()==1&&t.slowPairCount()==1);const auto&q=t.slowQueues()[0];const auto&pair=t.slowPairs()[0];
+ assert(q.id==pair.queue&&q.depth==2&&q.entries==2&&q.callbacks==2&&q.completed&&!q.zones);
+ assert(q.charged==unsigned(mainPathfindSearchContext().m_cumulativeCellsAllocated));
+ assert(q.phaseCalls[T::Pair]==1&&q.phaseCalls[T::Validation]==2&&q.phaseCalls[T::Finalization]==2&&q.phaseCalls[T::SerialKernel]==0);
+ for(const auto&task:pair.tasks)assert(task.kind==T::Kind::Ordinary&&task.primary&&!task.fallback&&task.records>0&&task.examined>0);
+ assert(!p.m_parallelBatch->active&&p.m_parallelBatch->jobs[0].context.m_records.size()==0);
+ assert(t.admissions(T::Admission::Dispatched)==1&&t.admissions(T::Admission::ExistingPair)==1);
+ FILE*f=std::tmpfile();assert(f);t.report(f);std::rewind(f);std::string report;char buffer[2048];while(std::fgets(buffer,sizeof buffer,f))report+=buffer;std::fclose(f);
+ assert(report.find("[PATH_PAIR_ADMISSION] calls=2 dispatched=1 existing_pair=1")!=std::string::npos);
+ assert(report.find("[PATH_QUEUE_SLOW] rank=1 queue=1")!=std::string::npos&&report.find("caller_kind=ordinary caller_primary=1")!=std::string::npos);
+}
+''')
+
+    def test_slow_fallback_and_mixed_kinds_are_copied(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;for(int kind=0;kind<3;++kind){World w;Pathfinder p;w.queue(p);
+ if(kind==0)w.b.ai.safe=true;else if(kind==1)w.a.ai.closest=true;else p.quickAllowed=false;
+ p.prepareParallelBatch();assert(p.m_pathTiming.slowPairCount()==1);auto saved=p.m_pathTiming.slowPairs()[0];assert(saved.queue==0);
+ if(kind==0)assert(saved.tasks[1].kind==T::Kind::Safe&&saved.tasks[1].primary);
+ if(kind==1)assert(saved.tasks[0].kind==T::Kind::Closest&&saved.tasks[0].primary);
+ if(kind==2)for(const auto&task:saved.tasks)assert(!task.primary&&task.fallback&&task.fallbackRecords>0);
+ p.clearParallelBatch();assert(p.m_pathTiming.slowPairs()[0].tasks[0].records==saved.tasks[0].records);
+}}
+''')
+
+    def test_slow_queue_records_serial_kinds_and_original_budget_cutoff(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;for(int kind=0;kind<3;++kind){World w;Pathfinder p;w.queue(p);p.m_exclusiveWorkerUnavailable=true;
+ w.a.ai.safe=w.b.ai.safe=kind==1;w.a.ai.closest=w.b.ai.closest=kind==2;p.processPathfindQueue();
+ const auto&q=p.m_pathTiming.slowQueues()[0];assert(q.serialKinds[kind]==2&&q.phaseCalls[T::SerialKernel]==2&&q.phaseCalls[T::Pair]==0);
+}}
+''')
+        run_cpp(fixture().replace('PATHFIND_CELLS_PER_FRAME=5000','PATHFIND_CELLS_PER_FRAME=1')+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.processPathfindQueue();using T=PathSearchTiming;
+ const auto first=p.m_pathTiming.slowQueues()[0];assert(first.depth==2&&first.entries==1&&first.callbacks==1&&first.charged>1);
+ assert(p.m_parallelBatch->accepted==1&&p.m_parallelBatch->unused==1&&p.m_queuePRHead==1);
+ p.processPathfindQueue();assert(p.m_pathTiming.slowQueueCount()==2&&p.m_pathTiming.admissions(T::Admission::ShortQueue)==1);
+ bool found=false;for(const auto&q:p.m_pathTiming.slowQueues())if(q.id==2){found=true;assert(q.depth==1&&q.entries==1&&q.serialKinds[0]==1);}assert(found);
+}
+''')
+        run_cpp(fixture()+r'''
+int main(){World w;Pathfinder p;p.m_queuePRHead=511;p.m_queuePRTail=1;p.m_queuedPathfindRequests[511]=1;p.m_queuedPathfindRequests[0]=2;
+ p.processPathfindQueue();const auto&q=p.m_pathTiming.slowQueues()[0];
+ assert(q.depth==2&&q.entries==2&&q.callbacks==2&&p.m_queuePRHead==1&&p.m_parallelBatch->accepted==2);
+}
+''')
+        run_cpp(fixture().replace('bool needToCalculateZones(){return false;}','bool needToCalculateZones(){return true;}')+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.processPathfindQueue();const auto&q=p.m_pathTiming.slowQueues()[0];
+ assert(q.depth==2&&q.entries==0&&q.callbacks==0&&q.charged==0&&q.zones&&q.completed&&p.m_queuePRHead==0);
+}
+''')
+
     # GeneralsX @feature Codex 28/10/2026 Exercise real timed dispatch/consumption, including work discarded or recomputed.
     def test_phase_timing_scopes_thresholds_and_exception_cleanup(self):
         run_cpp(r'''
@@ -1267,6 +1451,7 @@ int main(){World w;Pathfinder p;w.queue(p);p.processPathfindQueue();
         run_cpp(r"""
 #include <cassert>
 #include <initializer_list>
+#include "pathsearchprediction.h"
 using Bool=bool;using ObjectID=unsigned;
 struct Coord3D{float x=0,y=0,z=0;};
 struct Region3D{bool isInRegionNoZ(const Coord3D*p)const{return p->x>=0&&p->y>=0&&p->x<=100&&p->y<=100;}};
@@ -1279,7 +1464,7 @@ struct AIUpdateInterface {
  bool quick=false,through=false;Coord3D m_requestedDestination{80,90,0};Object object;State state;State*m_stateMachine=&state;
  bool canComputeQuickPath(){return quick;}bool canPathThroughUnits(){return through;}Object*getObject(){return &object;}
  unsigned getIgnoredObstacleID(){return 41;}
- bool predictOrdinaryPath(Coord3D&,Coord3D&,ObjectID&);
+ bool predictOrdinaryPath(Coord3D&,Coord3D&,ObjectID&,PathPredictionReason*reason=nullptr);
 };
 """+predictor+r"""
 int main(){AIUpdateInterface ai;Coord3D from,to;unsigned ignored=0;
