@@ -9,7 +9,7 @@ import re
 import sys
 import unittest
 from functools import partial
-from compiled_harness import run_cpp
+from compiled_harness import ROOT, run_cpp
 from test_path_movement_inputs import function, block, HEADER, SOURCE
 from test_parallel_path_batch import fixture
 
@@ -35,7 +35,8 @@ template<class T>T*allocateEngineValue(){
  return new T;
 }
 #define newInstance(T) allocateEngineValue<T>()
-#define MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(T,name) public: virtual~T(); static void*getClassMemoryPool(){assert(!ExclusiveSearchWorker::onWorker());static int pool=0;return &pool;}
+// Match GCMP_CREATE's private accessor; callers must use the class warm-up interface.
+#define MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(T,name) public: virtual~T(); private: static void*getClassMemoryPool(){assert(!ExclusiveSearchWorker::onWorker());static int pool=0;return &pool;}
 ''')
     # Use actual class fields/accessors; omit unrelated snapshot virtuals that this fixture does not link.
     a=HEADER.index('class PathNode :');b=HEADER.index('//----------------------------------------------------------------------------------------------------------',HEADER.index('class Path :',a))
@@ -153,6 +154,37 @@ struct Pathfinder {''')
 
 
 class CompletePathWorkerTests(unittest.TestCase):
+    # GeneralsX @bugfix Codex 29/10/2026 Compile warm-up against the real allocator macro, including private visibility.
+    def test_complete_warm_up_uses_real_private_pool_macro(self):
+        memory_header=(ROOT/'Core/GameEngine/Include/Common/GameMemory.h').read_text()
+        start=memory_header.index('#define GCMP_CREATE(')
+        end=memory_header.index('// ----------------------------------------------------------------------------',start)
+        pool_macro=memory_header[start:end]
+        source=complete_fixture()
+        fixture_macro=next(line for line in source.splitlines() if line.startswith('#define MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE('))
+        source=source.replace(fixture_macro,r'''
+struct MemoryPool {size_t size=0;size_t getAllocationSize()const{return size;}};
+struct PoolFactory {
+ std::array<MemoryPool,2> pools{};unsigned created=0;
+ MemoryPool*createMemoryPool(const char*,size_t size,int,int){
+  assert(!ExclusiveSearchWorker::onWorker()&&created<pools.size());
+  auto&pool=pools[created++];pool.size=size;return &pool;
+ }
+}poolFactory;
+PoolFactory*TheMemoryPoolFactory=&poolFactory;
+#define DEBUG_ASSERTCRASH(condition, message) assert(condition)
+#define MEMORY_POOL_OBJECT_ALLOCATION_SLOP 0
+'''+pool_macro+'''
+#define MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(T,name) public: virtual~T(); GCMP_CREATE(T,name,-1,-1)
+''')
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();
+ assert(p.m_parallelBatch&&p.m_parallelBatch->batches==1&&poolFactory.created==2);
+ Path::prepareMemoryPoolForSearch();PathNode::prepareMemoryPoolForSearch();
+ assert(poolFactory.created==2);p.clearParallelBatch();assert(liveEngineObjects==0);
+}
+''',timeout=30)
+
     def test_complete_paths_execute_and_transfer_before_preparation(self):
         run_cpp(complete_fixture()+r'''
 int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();

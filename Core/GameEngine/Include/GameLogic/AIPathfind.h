@@ -104,6 +104,11 @@ class PathNode : public MemoryPoolObject
 public:
 	PathNode();
 
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	// GeneralsX @bugfix Codex 29/10/2026 Warm the private lazy pool on main without exposing allocator access.
+	static void prepareMemoryPoolForSearch() { getClassMemoryPool(); }
+#endif
+
 	Coord3D *getPosition() { return &m_pos; }			///< return position of this node
 	const Coord3D *getPosition() const { return &m_pos; }			///< return position of this node
 	void setPosition( const Coord3D *pos ) { m_pos = *pos; }	///< set the position of this path node
@@ -187,6 +192,11 @@ class Path : public MemoryPoolObject, public Snapshot
 {
 public:
 	Path();
+
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	// GeneralsX @bugfix Codex 29/10/2026 Warm the private lazy pool on main without exposing allocator access.
+	static void prepareMemoryPoolForSearch() { getClassMemoryPool(); }
+#endif
 
 	PathNode *getFirstNode() { return m_path; }
 	PathNode *getLastNode() { return m_pathTail; }

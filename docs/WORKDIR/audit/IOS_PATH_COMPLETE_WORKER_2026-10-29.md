@@ -23,6 +23,23 @@ after ordinary failure or the existing real-caller no-path confirmation.
 
 ## Ownership, allocations and recovery
 
+### Native build follow-up: pool accessor visibility
+
+The supplied `logs_110803960624.zip` confirms that native compilation of
+`aa6d104b5` failed at pool warm-up: `GCMP_CREATE` makes `getClassMemoryPool()`
+private in both Path and PathNode. The fixture's substitute macro had exposed it
+publicly, despite regular and TSan checks passing in that run. Correcting fixture
+visibility reproduces both compiler errors locally before the production fix.
+
+Guarded public `prepareMemoryPoolForSearch()` methods now warm each class's own
+pool without returning or exposing the private allocator. The dispatcher uses
+these before either participant executes. No allocation, scheduling, limits or
+worker-execution changes accompany this fix. All eleven existing complete-worker
+cases pass with private visibility, and a twelfth compiles the actual production
+`GCMP_CREATE` macro and verifies that lazy initialization occurs once per class
+on main. All twelve also pass ThreadSanitizer locally. Full native iOS compilation
+is still required to validate the rebuild.
+
 Each job owns a completed engine Path with a `deleteInstance` deleter until a
 successful, single consumption transfers ownership. Primary and fallback remain
 separately validated and retain up to four phase contexts; this stage does not
@@ -119,7 +136,7 @@ scope. Queue time and matched work/paths remain useful comparisons.
 
 ## Verification and remaining limits
 
-The 235 preceding workflow regressions pass locally (110 batch cases and 125
+Initial stage: the 235 preceding workflow regressions pass locally (110 batch cases and 125
 other cases). Eleven new complete-worker cases also pass, for 246 total. The new
 eleven pass ThreadSanitizer. Ten initial cases pass ASan/UBSan; after adding the
 cleanup-after-construction regression, that case passes ASan/UBSan as well.
@@ -147,7 +164,8 @@ callback shape. A validation test initially supplied an ignored-obstacle state
 inconsistent with its first prediction; correct that fixture input. The cleanup
 regression's initial failure was a real ownership issue and was fixed in production.
 
-Native iOS SDK compilation and device testing are pending at commit time. These
+Native iOS SDK compilation and device testing were pending at the initial commit;
+the pool-visibility follow-up above records its subsequent build failure. These
 fixtures do not establish whole-engine race freedom, every platform's allocation
 behavior, iOS lifecycle stress coverage or a device speedup. Test the same heavier
 save/orders, including bridges and blocked destinations, against the prior IPA.

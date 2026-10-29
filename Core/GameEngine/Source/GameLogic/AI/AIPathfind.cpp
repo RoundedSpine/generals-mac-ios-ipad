@@ -7719,7 +7719,7 @@ void Pathfinder::prepareParallelBatch()
   }
 #endif
   // GeneralsX @bugfix Codex 29/10/2026 Resolve lazy class pools on main before any participant can allocate engine paths.
-  Path::getClassMemoryPool();PathNode::getClassMemoryPool();
+  Path::prepareMemoryPoolForSearch();PathNode::prepareMemoryPoolForSearch();
 #endif
   if (!m_parallelBatch) m_parallelBatch=new PathfindParallelBatch;
   if (!m_exclusiveWorker) {
