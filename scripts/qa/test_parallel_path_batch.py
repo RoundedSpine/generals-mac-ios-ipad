@@ -204,6 +204,7 @@ struct Pathfinder {
         'void Pathfinder::beginSearchState()', 'void Pathfinder::cleanOpenAndClosedLists()',
         'PathfindMovementSettings Pathfinder::captureMovementSettings(',
         'Bool Pathfinder::validMovementPosition(Bool crusher, PathfindLayerEnum layer,',
+        'PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(',
         'Bool Pathfinder::checkForMovement(', '/*static*/ Int Pathfinder::examineCellsCallback(', 'Int Pathfinder::examineNeighboringCells(',
         'Int Pathfinder::examineNeighboringCellsWithMovement(',
         'Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(', 'Path *Pathfinder::internalFindPath(',
@@ -220,11 +221,6 @@ Pathfinder::Pathfinder(){mainPathfindSearchContext().resizeCorridor(9);
  for(int x=0;x<12;++x){m_map[x]=storage[x];for(int y=0;y<12;++y){storage[x][y].setLayer(1);storage[x][y].setZone(1);}}
 }
 Pathfinder::~Pathfinder(){clearParallelBatch();delete m_parallelBatch;delete m_exclusiveWorker;mainPathfindSearchContext().releaseStorage();}
-PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object*obj,const PathOccupancy::Input&input){
- LiveOccupancyReader live={this,obj};auto result=PathOccupancy::evaluate(input,live);
- if(auto* reads=activePathfindSearchContext().m_parallelReads)reads->query(input,result);
- return result;
-}
 bool Pathfinder::checkDestination(const Object*obj,int x,int y,int layer,int radius,bool center){
  if(rejectDestinations)return false;
  PathOccupancy::Input input;input.destination=true;input.x=x;input.y=y;input.layer=layer;input.radius=radius;input.center=center;
@@ -416,7 +412,224 @@ int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
 '''
 
 
+# GeneralsX @test Codex 29/10/2026 Use real goal updates after controlled successful callbacks, so ordered consumption mutates the next prediction's world.
+def ordered_goal_fixture():
+    source=fixture()
+    source=source.replace('Object* obj=nullptr;LocomotorSet locomotor;',r'''
+ ICoord2D goalCell{-1,-1};
+ const ICoord2D*getPathfindGoalCell()const{return &goalCell;}
+ void setPathfindGoalCell(ICoord2D cell){goalCell=cell;}
+ bool isDoingGroundMovement()const{return true;}
+ Object* obj=nullptr;LocomotorSet locomotor;''',1)
+    source=source.replace('ObjectID id=0;int layer=',r'''
+ int destinationLayer=1;int getDestinationLayer()const{return destinationLayer;}
+ void setDestinationLayer(int layer){destinationLayer=layer;}
+ bool isDisabledByType(int)const{return false;}
+ ObjectID id=0;int layer=''',1)
+    source=source.replace('struct Terrain {void getExtent',
+                          'struct Terrain {bool objectInteractsWithBridgeEnd(const Object*,int)const{return false;}void getExtent',1)
+    source=source.replace('struct Pathfinder {\n enum',r'''
+const int KINDOF_IMMOBILE=90,KINDOF_PRODUCED_AT_HELIPAD=91,DISABLED_UNMANNED=0;
+struct Pathfinder {
+ void updateGoal(Object*,const Coord3D*,PathfindLayerEnum);void removeGoal(Object*);
+ void updateAircraftGoal(Object*,const Coord3D*){throw std::logic_error("ground-only goal fixture");}
+ enum''',1)
+    a=source.index('void AIUpdateInterface::doPathfind(Pathfinder*p)')
+    b=source.index('\nPathfinder::Pathfinder()',a)
+    source=source[:a]+r'''
+void AIUpdateInterface::doPathfind(Pathfinder*p){assert(std::this_thread::get_id()==p->owner);applied.push_back(obj->getID());
+ Path*path=nullptr;
+ if(safe)path=p->findSafePath(obj,locomotor,&from,&repulsor1,&repulsor2,repulsorRadius);
+ else if(closest)path=p->findClosestPath(obj,locomotor,&from,&to,blocked,pathCostMultiplier,false);
+ else path=p->findPathWithInputs(obj,locomotor,&from,&to);
+ // The production ordinary/approach callback publishes the last node's goal after successful path completion.
+ // Our controlled Path stores the destination first, followed by its parents.
+ if(path&&!safe){assert(!path->route.empty());const auto cell=path->route.front();
+  Coord3D goal{Real(cell.x*10+5),Real(cell.y*10+5),0};p->updateGoal(obj,&goal,1);
+ }
+}
+''' +source[b:]
+    return source+'\n'+function('void Pathfinder::updateGoal(')+'\n'+function('void Pathfinder::removeGoal(')
+
+
 class ParallelBatchTests(unittest.TestCase):
+    def test_query_only_reproduces_old_rejection_without_route_or_budget_change(self):
+        main=r'''
+int main(){using T=PathSearchTiming;for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;
+ p.prepareParallelBatch();auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];
+ job.context.m_parallelReads=&job.reads;
+ {SearchContextBinding<PathfindSearchContext>bound(job.context);PathOccupancy::Input input;
+  input.destination=true;input.x=0;input.y=11;input.layer=1;input.center=true;
+  assert(p.evaluateOccupancyQuery(&w.a,input).allowed);
+ }
+ job.context.m_parallelReads=nullptr;p.storage[0][11].setGoalUnit(77,{0,11});
+ const auto destination=w.a.ai.to;auto&context=mainPathfindSearchContext();context.m_cumulativeCellsAllocated=0;
+ const auto consume=[&](){if(!fallback)return w.consume(p,w.a);
+  p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  return p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);};
+ const auto encode=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};r.push_back(path->blocked);
+  for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+ const auto route=encode(consume());const auto budget=context.m_cumulativeCellsAllocated;
+ assert((fallback?p.m_parallelBatch->fallbackAccepted:p.m_parallelBatch->accepted)==EXPECT_REUSE);
+ assert(p.m_pathTiming.rejections(fallback,T::Rejection::Cells)==unsigned(!EXPECT_REUSE));
+ p.clearParallelBatch();w.a.ai.to=destination;context.m_cumulativeCellsAllocated=0;
+ assert(encode(consume())==route&&context.m_cumulativeCellsAllocated==budget);
+ printf("%d budget=%d route=",fallback,budget);for(int node:route)printf("%d,",node);puts("");
+ p.storage[0][11].setGoalUnit(0,{0,11});
+}}
+'''
+        current=fixture()
+        previous=current.replace(' && !context->m_occupancyQueryReads','')
+        self.assertNotEqual(current,previous)
+        old=run_cpp('#define EXPECT_REUSE 0\n'+previous+main)
+        new=run_cpp('#define EXPECT_REUSE 1\n'+current+main)
+        self.assertEqual(old.stdout,new.stdout)
+
+    def test_query_only_ordered_real_goal_updates_match_serial_routes_and_accounting(self):
+        run_cpp(ordered_goal_fixture()+r'''
+struct Trace {std::vector<int>routes;int budget;unsigned accepted,rejected,cellFailures,queryFailures;};
+Trace run(bool serial,bool fixed,int scenario,int radius){World w;Pathfinder p;w.queue(p);applied.clear();s_useFixedPathfinding=fixed;
+ p.testRadius=radius;p.m_exclusiveWorkerUnavailable=serial;
+ if(scenario==1){w.a.ai.to={55,55,0};w.b.ai.from={25,55,0};w.b.ai.to={95,55,0};}
+ if(scenario==2){w.a.ai.to=w.b.ai.to={75,75,0};w.b.relation=ALLIES;}
+ mainPathfindSearchContext().m_cumulativeCellsAllocated=0;p.processPathfindQueue();
+ assert((applied==std::vector<ObjectID>{1,2})&&p.m_queuePRHead==p.m_queuePRTail);
+ Trace trace;trace.budget=mainPathfindSearchContext().m_cumulativeCellsAllocated;
+ for(auto*object:{&w.a,&w.b}){const auto found=p.results.find(object->id);trace.routes.push_back(int(object->id));
+  if(found==p.results.end())trace.routes.push_back(-1);
+  else {trace.routes.push_back(found->second.blocked);trace.routes.push_back(found->second.requestedBlocked);
+   for(auto cell:found->second.route)trace.routes.push_back(cell.x*100+cell.y);
+  }
+  trace.routes.push_back(-2);trace.routes.push_back(object->ai.goalCell.x);trace.routes.push_back(object->ai.goalCell.y);
+ }
+ trace.accepted=p.m_parallelBatch?p.m_parallelBatch->accepted:0;trace.rejected=p.m_parallelBatch?p.m_parallelBatch->rejected:0;
+ trace.cellFailures=p.m_pathTiming.rejections(false,PathSearchTiming::Rejection::Cells);
+ trace.queryFailures=p.m_pathTiming.rejections(false,PathSearchTiming::Rejection::Occupancy);
+ assert(!p.m_pathTiming.rejections(false,PathSearchTiming::Rejection::Admission));
+ p.removeGoal(&w.a);p.removeGoal(&w.b);return trace;
+}
+int main(){unsigned cellRejections=0,queryRejections=0,reused=0;
+ for(bool fixed:{false,true})for(int scenario=0;scenario<3;++scenario)for(int radius:{0,1}){
+  const auto serial=run(true,fixed,scenario,radius),parallel=run(false,fixed,scenario,radius);
+  assert(serial.routes==parallel.routes&&serial.budget==parallel.budget);
+  cellRejections+=parallel.cellFailures;queryRejections+=parallel.queryFailures;reused+=parallel.accepted;
+ }
+ assert(cellRejections>0&&reused>0);printf("ordered goal updates cells=%u queries=%u reused=%u\n",cellRejections,queryRejections,reused);
+}
+''',timeout=30)
+
+    # GeneralsX @test Codex 29/10/2026 A query validates its returned decision, while direct and allocation reads keep exact snapshots.
+    def test_query_only_cells_revalidate_results_in_primary_and_fallback(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;
+ for(bool fixed:{false,true})for(bool fallback:{false,true})for(int change=0;change<4;++change){
+  World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;p.quickAllowed=!fallback;
+  p.prepareParallelBatch();auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];
+  auto*cell=&p.storage[0][11];bool alreadyRead=false;
+  assert(job.reads.cells.matches([&](PathfindCell*c){alreadyRead|=c==cell;return c->permanentSearchValues();}));assert(!alreadyRead);
+  if(change==3)cell->setGoalUnit(77,{0,11});
+  const auto count=job.reads.cells.size();PathOccupancy::Input input;
+  input.x=0;input.y=11;input.layer=1;input.center=true;input.destination=change!=2;
+  job.context.m_parallelReads=&job.reads;
+  {SearchContextBinding<PathfindSearchContext>bound(job.context);
+   const auto result=p.evaluateOccupancyQuery(&w.a,input);assert(result.allowed);
+   assert(!job.context.m_occupancyQueryReads&&job.reads.cells.size()==count);
+  }
+  job.context.m_parallelReads=nullptr;
+  // New unresolved/enemy goals leave the destination decision unchanged; a goal owner change can too.
+  // A resolved ally blocks a destination; a movement query also returns allyGoal, even when still allowed.
+  if(change==1)w.a.relation=ALLIES;
+  cell->setGoalUnit(change==3?78:w.b.id,{0,11});
+  const auto destination=w.a.ai.to;auto&main=mainPathfindSearchContext();main.m_cumulativeCellsAllocated=0;
+  const auto consume=[&](){if(!fallback)return w.consume(p,w.a);
+   p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+   return p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);
+  };
+  const auto route=[](Path*path){std::vector<int>r;if(!path)return std::vector<int>{-1};
+   r.push_back(path->blocked);r.push_back(path->requestedBlocked);for(auto c:path->route)r.push_back(c.x*100+c.y);return r;};
+  const auto expected=route(consume());const auto budget=main.m_cumulativeCellsAllocated;
+  const bool accepted=change==0||change==3;
+  assert((fallback?p.m_parallelBatch->fallbackAccepted:p.m_parallelBatch->accepted)==unsigned(accepted));
+  assert((fallback?p.m_parallelBatch->fallbackRejected:p.m_parallelBatch->rejected)==unsigned(!accepted));
+  assert(p.m_pathTiming.rejections(fallback,T::Rejection::Occupancy)==unsigned(!accepted));
+  assert(!p.m_pathTiming.rejections(fallback,T::Rejection::Cells));
+  p.clearParallelBatch();w.a.ai.to=destination;main.m_cumulativeCellsAllocated=0;
+  assert(route(consume())==expected&&main.m_cumulativeCellsAllocated==budget);
+  cell->setGoalUnit(0,{0,11});
+ }
+}
+''')
+
+    def test_query_only_scope_preserves_direct_and_cached_allocation_dependencies(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;
+ for(bool fallback:{false,true})for(int access=0;access<3;++access){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;
+  p.prepareParallelBatch();auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];
+  auto*cell=&p.storage[0][11];const auto count=job.reads.cells.size();
+  PathOccupancy::Input input;input.destination=true;input.x=0;input.y=11;input.layer=1;input.center=true;
+  job.context.m_parallelReads=&job.reads;
+  {SearchContextBinding<PathfindSearchContext>bound(job.context);
+   if(access==0)assert(p.getCell(1,0,11)==cell);
+   assert(p.evaluateOccupancyQuery(&w.a,input).allowed);
+   if(access==1){PathfindSearchContext::OccupancyReadScope query(job.context);
+    // Even an allocation through a cached pointer inside a query scope remains a dependency.
+    assert(cell->allocateSearchInfo({0,11}));cell->releaseSearchInfo();
+   }
+   if(access==2)assert(p.getCell(1,0,11)==cell);
+  }
+  job.context.m_parallelReads=nullptr;assert(job.reads.cells.size()==count+1);
+  cell->setGoalUnit(77,{0,11});
+  if(fallback){p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+   p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);
+  }else w.consume(p,w.a);
+  assert((fallback?p.m_parallelBatch->fallbackRejected:p.m_parallelBatch->rejected)==1);
+  assert(p.m_pathTiming.rejections(fallback,T::Rejection::Cells)==1);
+  assert(!p.m_pathTiming.rejections(fallback,T::Rejection::Occupancy));cell->setGoalUnit(0,{0,11});
+ }
+}
+''')
+
+    def test_query_only_scope_restores_after_nested_reads_and_evaluation_exception(self):
+        source=fixture().replace('struct Object {\n ObjectID id=', 'bool throwRelationship=false;\nstruct Object {\n ObjectID id=',1)
+        source=source.replace('int getRelationship(Object*)const{return relation;}',
+                              'int getRelationship(Object*)const{if(throwRelationship)throw std::runtime_error("relationship");return relation;}',1)
+        run_cpp(source+r'''
+int main(){World w;Pathfinder p;auto reads=std::make_unique<PathfindParallelReads>();auto&c=mainPathfindSearchContext();
+ c.m_parallelReads=reads.get();SearchContextBinding<PathfindSearchContext>bound(c);
+ assert(!c.m_occupancyQueryReads);
+ {PathfindSearchContext::OccupancyReadScope outer(c);assert(c.m_occupancyQueryReads);
+  {PathfindSearchContext::OccupancyReadScope inner(c);assert(c.m_occupancyQueryReads);}
+  assert(c.m_occupancyQueryReads);p.getCell(1,0,11);assert(!reads->cells.size());
+ }
+ assert(!c.m_occupancyQueryReads);p.storage[0][11].setGoalUnit(w.b.id,{0,11});
+ PathOccupancy::Input input;input.destination=true;input.x=0;input.y=11;input.layer=1;input.center=true;
+ throwRelationship=true;bool threw=false;
+ try{p.evaluateOccupancyQuery(&w.a,input);}catch(const std::runtime_error&){threw=true;}
+ throwRelationship=false;assert(threw&&!c.m_occupancyQueryReads&&!reads->cells.size()&&reads->queries.empty());
+ assert(p.evaluateOccupancyQuery(&w.a,input).allowed&&reads->queries.size()==1&&!reads->cells.size());
+ p.getCell(1,0,11);assert(reads->cells.size()==1);
+ c.m_parallelReads=nullptr;p.storage[0][11].setGoalUnit(0,{0,11});
+}
+''')
+
+    def test_query_only_dependency_overflow_still_rejects_both_phases(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;
+ p.prepareParallelBatch();auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];
+ const auto count=job.reads.cells.size();job.context.m_parallelReads=&job.reads;
+ {SearchContextBinding<PathfindSearchContext>bound(job.context);PathOccupancy::Input input;input.center=true;
+  input.layer=1;input.y=11;for(unsigned i=0;i<=job.reads.capacity;++i){input.x=100+int(i);p.evaluateOccupancyQuery(&w.a,input);}
+ }
+ job.context.m_parallelReads=nullptr;assert(!job.context.m_occupancyQueryReads&&job.reads.cells.size()==count);
+ assert(job.reads.overflow&&job.reads.queries.full());
+ if(fallback){p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  p.findClosestPath(&w.a,w.a.ai.locomotor,&w.a.ai.from,&w.a.ai.to,false,0,false);
+ }else w.consume(p,w.a);
+ assert((fallback?p.m_parallelBatch->fallbackRejected:p.m_parallelBatch->rejected)==1);
+ assert(p.m_pathTiming.rejections(fallback,T::Rejection::Overflow)==1);
+}}
+''')
+
     # GeneralsX @test Codex 29/10/2026 Cell diagnostics must classify the existing first failure without changing reads or acceptance.
     def test_cell_rejection_observer_keeps_first_failure_and_log_cause(self):
         run_cpp(r'''
@@ -929,9 +1142,6 @@ int main(){auto reads=std::make_unique<PathfindParallelReads>();auto&r=*reads;
 
     def test_bounded_query_observations_never_cache_actual_live_evaluation(self):
         source=validation_outcome_fixture()
-        a=source.index('PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(')
-        b=source.index('\n}',a)+2
-        source=source[:a]+function('PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(')+source[b:]
         run_cpp(source+r'''
 int main(){World w;Pathfinder p;Object third;third.id=3;logic.objects[3]=&third;p.storage[5][5].setPosUnit(3,{5,5});
  auto reads=std::make_unique<PathfindParallelReads>();auto&c=mainPathfindSearchContext();c.m_parallelReads=reads.get();

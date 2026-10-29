@@ -164,3 +164,18 @@ This comparison changes documentation only; unchanged tests are not rerun.
 Compact search-only storage, full worker APIs, wider dispatch and grouped
 scheduling remain separate differences. The current evidence does not establish
 performance parity with Reimagined.
+
+## Subsequent query-only dependency stage
+
+The [query dependency audit and implementation](IOS_PATH_QUERY_DEPENDENCIES_2026-10-29.md)
+find one narrower dependency: getCell inside an explicitly tracked occupancy
+evaluation need not also retain a raw 19-field snapshot. Its full returned result
+is still saved and replayed on main. Direct cell reads and allocation-kind
+observations remain exact, so this does not adopt Reimagined's independent node
+allowance or drop metadata validation. Controlled tests reproduce a redundant
+old-rule rejection with unchanged routes/budget and compare ordered actual goal
+updates against serial execution. Not all device goal changes are proven harmless.
+
+This is a dependency refinement, not a dispatch or execution-scope milestone.
+Compact nodes, complete worker APIs and wider batching remain the same major gaps.
+No new device performance comparison follows from the local regression results.

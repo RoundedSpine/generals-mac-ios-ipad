@@ -101,6 +101,10 @@ Cell-rejection cases check invalid-log causes, duplicate-at-capacity behavior,
 single-read first-failure callbacks, every snapshot field in primary/fallback
 validation, bounded reports and enabled/disabled live/snapshot read counts.
 Use `-k cell_rejection` for these diagnostic regressions.
+Query-only dependency cases compile the production occupancy evaluator, reproduce
+the old redundant snapshot rejection, compare serial routes/budgets, exercise
+ordered production goal updates, preserve direct/cached allocation dependencies,
+and check nested/throwing scopes plus query overflow. Use `-k query_only`.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

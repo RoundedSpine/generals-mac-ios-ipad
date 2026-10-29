@@ -104,6 +104,11 @@ decision equivalence; search limits and scheduling stay unchanged.
 values, a full dependency log or failed capture. Per-field counts describe the
 first differing cell of each rejected phase; they do not count every changed cell.
 See [cell-rejection classifications and fields](../WORKDIR/audit/IOS_PATH_CELL_REJECTIONS_2026-10-29.md).
+Tracked query-only cell lookups now rely on complete occupancy-result replay;
+direct cell and allocation dependencies still use exact snapshots. Some changed
+decisions can therefore reach the existing `occupancy` rejection instead of an
+earlier raw `cell_dependencies` rejection. No output field changes. See
+[query-only dependency semantics](../WORKDIR/audit/IOS_PATH_QUERY_DEPENDENCIES_2026-10-29.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

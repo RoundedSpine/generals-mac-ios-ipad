@@ -393,6 +393,17 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  PathfindParallelReads* m_parallelReads = nullptr;
  SearchAdmissionWindow<PATHFIND_RECORD_CAPACITY> m_admissionWindow;
+ // GeneralsX @performance Codex 29/10/2026 Query-only cell reads are validated by their complete returned occupancy result.
+ bool m_occupancyQueryReads=false;
+ struct OccupancyReadScope {
+  PathfindSearchContext& context;bool previous;
+  explicit OccupancyReadScope(PathfindSearchContext& selected):context(selected),previous(selected.m_occupancyQueryReads){
+   context.m_occupancyQueryReads=true;
+  }
+  ~OccupancyReadScope(){context.m_occupancyQueryReads=previous;}
+  OccupancyReadScope(const OccupancyReadScope&)=delete;
+  OccupancyReadScope& operator=(const OccupancyReadScope&)=delete;
+ };
 #endif
  // GeneralsX @refactor Codex 27/10/2026 Admission reads an explicit frozen count while an ordinary phase is bound.
  bool m_hasAdmissionSnapshot = false;
@@ -1359,7 +1370,7 @@ inline PathfindCell *Pathfinder::getCell( PathfindLayerEnum layer, Int x, Int y 
   if (!cell) cell = &m_map[x][y];
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
   if (auto* context=SearchContextBinding<PathfindSearchContext>::current())
-   if (context->m_parallelReads) observeParallelCell(cell);
+   if (context->m_parallelReads && !context->m_occupancyQueryReads) observeParallelCell(cell);
 #endif
   return cell;
 	}

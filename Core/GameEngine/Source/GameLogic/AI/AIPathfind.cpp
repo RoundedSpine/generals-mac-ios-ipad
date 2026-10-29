@@ -5775,6 +5775,9 @@ PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, cons
 	LiveOccupancyReader live = {this, obj};
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  if (auto* reads=activePathfindSearchContext().m_parallelReads) {
+  // GeneralsX @performance Codex 29/10/2026 Keep query-only snapshots out of the raw cell log; replay all five result fields before reuse.
+  // Direct cell reads and allocation-kind observation retain their independent exact snapshots.
+  PathfindSearchContext::OccupancyReadScope queryReads(activePathfindSearchContext());
   const auto result=PathOccupancy::evaluate(input,live);reads->query(input,result);return result;
  }
 #endif
