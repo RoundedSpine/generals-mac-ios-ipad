@@ -2,7 +2,7 @@
 
 ## Scope and conclusion
 
-Compare experiment/ios-mod-testing at runtime 9117f785d directly with
+Compare experiment/ios-mod-testing at runtime 26be01d4a directly with
 the supplied ZeroHourReimagined_1.0.0_source. This is a pathfinding comparison;
 Reimagined graphics and gameplay content remain outside this integration. This
 supersedes the runtime snapshot in the 28 October comparison, while retaining
@@ -19,6 +19,10 @@ The allocation-window change now accepts permanent-count differences only when
 every reached allocation decision stays equivalent. Cell diagnostics explain
 remaining raw failures. Query-only lookups now rely on complete occupancy-result
 replay; direct cell and allocation-kind dependencies retain exact snapshots.
+Registered cell reads now use a bounded cell-ID to record-slot index. This closes
+the repeated getter hash-probe gap for covered cells, while keeping the original
+allocator, larger records and separate state arena. The reference indexes a
+complete compact search node directly by cell ID.
 
 The largest remaining differences are full off-thread API execution, compact
 search-only storage, broader dispatch, and different capacity/budget policies.
@@ -36,7 +40,8 @@ The reference is not simply our implementation with additional workers enabled.
 | Dispatch | Two adjacent eligible requests, one worker plus main | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
 | Worker count | One gameplay search worker | Automatic clamp(cores - 3, 0, 8), explicit override capped at 32 |
 | Result storage | Separate retained primary/fallback phase contexts, up to four, holding loop outcomes and parent records until main finishes | Thread-local search context reused between jobs/phases; each result already owns a completed engine Path |
-| Node lookup | Bounded keyed records plus separate state arena; metadata compacted to 56 bytes on the local 64-bit fixture ABI | Direct cell-index lookup into compact PathSearchNode arrays sized to registered map cells |
+| Node lookup | Bounded cell-ID to record-slot table, record and separate state; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
+| Lookup/node memory | Index capped at 1 MiB/context plus existing bounded arenas; newest main index about 176 KiB | Node/read-mark arrays scale with registered map cells per participating context |
 | Capacity | 30,000 records/context; allocation windows preserve every reached permanent/transient admission success and denial | Nonlegacy search nodes independent of permanent metadata; default node allowance is all registered cells, with testing override |
 | Dependency checks | Explicit request, movement, preparation, admission, epochs/lifecycle, cells, corridor, live occupancy, height and bounded-log checks | Request/ignore/tunnel matching plus intersection between read-cell set and subsequent cell-write log |
 | Read tracking | Bounded exact direct/allocation cell snapshots and complete query results; query-only lookups avoid redundant raw snapshots; query/height duplicates removed while actual reads still execute | Per-cell read marks deduplicate cell observations into a sorted cell-index set |
@@ -80,42 +85,39 @@ failed cell-read log. It identifies differing fields in the first unequal cell
 using the existing single read. This adds visibility, not a faster search or a
 larger off-thread scope. The subsequent query-only stage avoids redundant raw
 snapshots inside an evaluator whose entire returned result is separately replayed.
-It preserves direct and allocation cell dependencies. The current session still
-has 15 raw goal-owner first failures, ten with metadata presence differences;
-their aggregates do not prove the remaining checks can be removed.
+It preserves direct and allocation cell dependencies. The current session has one raw
+goal-owner/metadata first failure; its aggregate does not prove that check can be
+removed. Indexed lookup changes how the record is found, not which inputs require
+validation or which allocation can succeed.
 
 ## Device evidence and performance limits
 
-The newest supplied device log is ~9117f78. It completes 945 pairs, reuses
-1,831/1,854 primary phases (98.76%) and all 36 closest fallback phases. Ten primary
-and three fallback phases complete despite changed permanent usage, with zero
-admission rejection. All fallback executions in this session are early fallbacks.
-Queued closest, safe and ordinary fine-loop-failure fallback do not execute in
-parallel here. The 23 primary first rejections are cells 15, occupancy one, kind
-five and world epoch two; fallback has no rejections. All cell first failures
-contain changed goal-owner values, ten also metadata presence changes, with no
-full or failed cell logs. Ordered main-side goal updates provide a source-supported
-explanation, not an identified per-request device trace.
-Metadata presence still determines allocation kind; do not drop the guard.
-Counts and finalizations balance, and the game exits zero.
+The newest supplied device log is ~26be01d. It completes 315 pairs, reuses 622/624
+primary phases (99.68%) and all six closest fallback phases. One primary phase
+completes despite changed permanent usage, with zero admission rejection. All
+fallback executions are early fallbacks. Queued closest, safe and ordinary
+fine-loop-failure fallback do not execute in parallel here. Primary first reasons
+are kind one and cells one; fallback has no rejection. The cell failure changes
+goal-owner, metadata, unit flags and metadata position, with no full or failed log.
+Indexed lookup does not justify removing the allocation-kind guard. All 4,298
+finalizations balance with 628 reused results and 3,670 serial kernels. Exit is zero.
 
-The longest measured queue update is 59.558 ms, including a 54.110 ms serial
-closest kernel. The next two retained updates also contain serial closest kernels
-at 38.832 and 36.886 ms, with negligible hierarchy work. The first two calls have
-depth one and cannot form an adjacent pair; the depth-two call's exclusion reason
-is not correlated in this log. The maximum pair is 33.468 ms and already reuses
-both results. The next performance audit should explain these closest kernels'
-request/pruning context. Charged counts above 5,000 remain permitted last-request
-overshoot; closest's conditional 2,000 pruning test is not a universal hard stop.
+The main index retains 180,024 bytes, approximately 176 KiB. Maximum queue time
+is 11.573 ms for 29 callbacks and 14 pairs. The slowest closest kernel is 1.459 ms;
+two retained cases reach the exact goal and two prune through the near-goal rule
+before returning a closest candidate. The earlier 54.110 ms closest kernel and
+its 38.832/36.886 ms neighbors are not reproduced. This session has fewer requests
+and much smaller retained tasks; the new counters do not identify the old costs'
+cause from this different workload. Charges above 5,000 remain permitted
+last-request overshoot; closest's conditional 2,000 test is not a universal cap.
 
-Zone rebuilding stays synchronous in both implementations, although no zone call
-is retained among this session's top four. More workers cannot guarantee a shorter
-single search, and broader groups still have a synchronous completion barrier.
-Our latest queue mean is 0.377 ms versus the preceding 0.265 ms in a different
-workload, while acceptance improves. Neither acceptance percentages nor these
-unmatched timings establish speedup or regression. All eight retained
-task samples were reused and cannot explain the rejected cell phases elsewhere
-in the session.
+Zone rebuilding stays synchronous in both implementations, though none appears in
+this session's top four. Both implementations leave a single eligible request on
+main and join all parallel work before continuing simulation. Additional workers
+do not divide an individual search loop. The latest queue mean is 0.204 ms versus
+0.377 ms previously in a different workload. Six retained tasks reuse and two
+reject (kind/cells), both small tasks in queue 3199. Neither these timings nor
+acceptance percentages establish a matched device or reference speed ranking.
 
 No matched replay benchmark or device-memory comparison with Reimagined exists.
 Dense storage scales with map size and participating threads; our bounded storage
@@ -126,20 +128,24 @@ percentage is justified.
 
 ## Useful next steps
 
-The allocation-decision, cell-classification and query-only stages are exercised
-on device. Controlled ordered goal updates match serial routes/accounting, and
-direct/allocation dependencies remain guarded. Do not remove the remaining goal
-fields or raise bounds without equivalence evidence. The largest current retained
-costs instead motivate a bounded audit of serial closest work and pruning.
-Compact bounded search-only records remain a separate useful storage step toward
-the reference's layout without adopting dense map-sized capacity.
+The allocation-decision, cell-classification, query-only and bounded indexed
+lookup stages are exercised on device. Controlled ordered goal updates and
+indexed/keyed traces match routes, expansion order and accounting. Direct and
+allocation dependencies remain guarded. Do not remove remaining goal fields or
+raise bounds without equivalence evidence. Closest work samples and a host
+getter benchmark now exist; repeat the heavier scenario for comparable work.
+
+Compact bounded search-only nodes are the next distinct storage step: remove
+permanent-record-only fields from private records and consider combining record
+and state without changing slot allocation order, capacity or admission decisions.
+Indexed resolution alone does not do that. The reference's independent map-sized
+capacity and complete dense layout remain separate policy/memory decisions.
 
 Full hierarchy and Path completion on workers is the larger execution milestone.
-It requires auditing transitive engine reads, allocations, ownership, recovery
-and result application before main-side work can be removed. A broader queue scan
-and additional workers are separate dispatch changes that should follow measured
-benefit and bounded-memory validation. Retain existing limits and per-request
-scheduling unless a deliberate policy change is authorized.
+It requires auditing transitive reads, allocations, ownership, recovery and
+application before removing main-side work. Broader scanning and additional
+workers remain separate dispatch steps requiring measured benefit and bounded
+memory. Retain per-request scheduling unless a deliberate policy change is made.
 
 ## Source anchors and verification
 
@@ -152,11 +158,11 @@ chooseWorkerCount; AIUpdate.cpp: predictPathfind; and GlobalData.cpp's default.
 Checked the current dispatcher, validator, context allocation, finalization,
 bounded observation logs, prediction gates and portable worker against them.
 
-Current validation is 225 local regression cases, 104 batch ThreadSanitizer cases
-and six new query-dependency ASan/UBSan cases. Native run
-[40810392060](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40810392060)
+Current validation is 232 local regression cases, 108 batch ThreadSanitizer cases
+and seven new index/work-counter ASan/UBSan cases. Native run
+[40843223256](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40843223256)
 also passes Mac QA/race checks, iOS SDK compilation, unsigned packaging and
-artifact upload for 9117f785d; dependency save is skipped after the cache restore.
+artifact upload for 26be01d4a; dependency save is skipped after the cache restore.
 Its device session confirms active validation and balanced outcomes. Those
 fixtures and this session do not prove full engine race freedom,
 reference replay equivalence or all lifecycle stress cases.
@@ -167,6 +173,7 @@ This comparison changes documentation only; unchanged tests are not rerun.
 - [Allocation-decision windows and device evidence](IOS_PATH_ADMISSION_WINDOW_2026-10-29.md)
 - [Cell-rejection diagnostics and counter interpretation](IOS_PATH_CELL_REJECTIONS_2026-10-29.md)
 - [Query-only dependency audit and device result](IOS_PATH_QUERY_DEPENDENCIES_2026-10-29.md)
+- [Direct indexing, work counters and device result](IOS_PATH_DIRECT_INDEX_2026-10-29.md)
 
 Compact search-only storage, full worker APIs, wider dispatch and grouped
 scheduling remain separate differences. The current evidence does not establish
@@ -193,9 +200,9 @@ a device speedup from the higher reuse rate.
 
 Recheck runClosestSearchLoop and examineNeighboringCellsWithMovement against
 Reimagined's findClosestPath and examineNeighboringCells, then inspect both node
-accessors and dispatchers. The reference's closest-candidate scoring and
-far-candidate pruning block matches ours after substituting context/settings
-names and removing comments/whitespace. This was checked directly against the
+accessors and dispatchers. The pre-instrumentation check matched closest-candidate
+scoring and far-pruning after context/settings and comment/whitespace normalization.
+The latest stage only wraps these conditions with counters. This was checked against the
 supplied files, not inferred from similar constants. It is not a proof of whole
 engine path equivalence: capacity, lifetime, neighboring services and reuse policy
 still differ.
@@ -207,7 +214,7 @@ still differ.
 | Blocked goal after a candidate exists | Zero Hour marks foundGoal, continues selecting from the remaining list and stops further neighbor expansion | Same behavior |
 | Initial stuck / failed closest hierarchy | Enable tunneling or permit all corridor blocks as appropriate | Same broad policy |
 | Neighbor expansion | Same eight-direction order and initial line shortcut; captured movement settings | Same order/shortcut; live movement getters |
-| Node access | searchInfo resolves through bounded pointer-keyed records, then a direct state pointer | Cell search index selects a compact node; generation stamp checks whether it is active |
+| Node access | Covered cell IDs select record slots and then state; keyed fallback and allocation remain | Cell search index selects a compact node and generation stamp |
 | Serial current-context access | Bound thread-local context lookup | Main context fast path when not in the parallel phase |
 | One eligible queued request | No adjacent pair; authoritative caller searches | prefetchPaths explicitly clears/returns when jobs.size() < 2; authoritative caller searches |
 | Search capacity | Retained permanent/transient credit and 30,000-record bound | Nonlegacy active nodes independent of permanent metadata, default allowance all registered cells |
@@ -216,18 +223,16 @@ Neither implementation's far-pruning count condition fires independently of its
 outer distance test. If no valid closest candidate has been found, the best
 distance remains at its initial sentinel and that pruning rule cannot bound an
 otherwise finite-distance search. Both can therefore perform substantial work
-for difficult destinations. The new log does not establish whether this explains
-its three longest closest kernels; candidate/pruning context is still missing.
+for difficult destinations. The new log does not reproduce the earlier long
+kernels; its smaller retained cases cannot identify their pruning context.
 
-The reference's node layout is the most directly relevant remaining structural
-difference for a long single search. Its getters avoid our repeated keyed lookups
-for coordinates, costs, open/closed state and parents. Our direct state binding
-already removed an extra owner/slot step, but it did not remove searchInfo's
-lookup. This is a source-level opportunity, not measured attribution of the
-54.110 ms kernel. Simply making our records smaller would not automatically
-provide its direct cell-index access, and dense indexes/nodes have map- and
-participant-dependent memory costs. Storage, lookup and capacity policy should
-be assessed separately.
+The indexed stage now removes repeated getter key probes for covered cells. Its
+lookup remains cell ID -> record slot -> record -> state. The reference instead
+uses cell ID -> compact search node. Our original keyed allocator and larger
+record format remain, including permanent-record-only fields that private search
+does not need. Compact nodes could remove those fields and the separate state
+indirection while retaining the bounded allocation policy. That is distinct from
+raising limits or copying the reference's map-sized dense storage.
 
 Some existing iOS adaptations remain worth keeping. Movement scalars are captured
 rather than repeatedly fetched from live objects during expansion. Parent terrain
@@ -244,9 +249,8 @@ requests exist, but neither pool divides an individual closest loop. Full worker
 Path completion also cannot remove these single-kernel costs by itself. The
 latest measured hierarchy/finalization costs are small relative to these kernels.
 
-Recommended follow-up: capture bounded closest work/candidate/pruning context and
-measure the keyed node-access path before choosing compact-node/direct-lookup
-work. Preserve the current allocation allowance and per-request scheduling during
+Bounded closest work samples and getter measurements are now implemented. Use
+those data for the compact-node step and repeat the heavier scenario when available. Preserve the current allocation allowance and per-request scheduling during
 that comparison. There is no source-supported reason here to copy a more
 aggressive pruning rule or raise search limits. No runtime changes or additional
 regression runs were made for this source-only comparison.
