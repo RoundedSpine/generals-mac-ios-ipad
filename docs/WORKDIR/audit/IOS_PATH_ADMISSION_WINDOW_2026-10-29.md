@@ -187,8 +187,8 @@ This does not mean every later check executes after an earlier failure.
 
 Source review confirms BoundedSearchReads::matches returns false for either an
 unusable/overflowed log or a differing exact cell snapshot. The current device
-summary combines both under cell_dependencies. The eight retained slow pairs'
-task samples all end Reused and therefore cannot identify the 26 rejected
+summary combines both under cell_dependencies. All eight task samples from the
+four retained slow pairs end Reused and therefore cannot identify the 26 rejected
 phases. Their PATH_READS_SLOW flags describe query/height logs, not cell-log
 capacity. They do not rule out cell-log overflow elsewhere in the session.
 
