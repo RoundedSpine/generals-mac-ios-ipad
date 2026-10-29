@@ -188,3 +188,65 @@ Compact nodes, complete worker APIs and wider batching remain the same major gap
 The native/device follow-up above verifies this stage executes. It does not
 attribute a particular accepted request to the narrowed dependency or establish
 a device speedup from the higher reuse rate.
+
+## Focused source comparison: the slow closest searches
+
+Recheck runClosestSearchLoop and examineNeighboringCellsWithMovement against
+Reimagined's findClosestPath and examineNeighboringCells, then inspect both node
+accessors and dispatchers. The reference's closest-candidate scoring and
+far-candidate pruning block matches ours after substituting context/settings
+names and removing comments/whitespace. This was checked directly against the
+supplied files, not inferred from similar constants. It is not a proof of whole
+engine path equivalence: capacity, lifetime, neighboring services and reuse policy
+still differ.
+
+| Closest-search detail | Current iOS source | Reimagined source |
+| --- | --- | --- |
+| Candidate score | Squared goal distance plus costSoFar * (costSoFar * factor) * pathCostMultiplier, strict less-than replacement | Same expression and replacement rule |
+| Far pruning | Outer distance > best screen distance * 4, then prune on failed hierarchy, count > 2000 or sufficiently near candidate | Same conditions; no unconditional 2,000-node cutoff |
+| Blocked goal after a candidate exists | Zero Hour marks foundGoal, continues selecting from the remaining list and stops further neighbor expansion | Same behavior |
+| Initial stuck / failed closest hierarchy | Enable tunneling or permit all corridor blocks as appropriate | Same broad policy |
+| Neighbor expansion | Same eight-direction order and initial line shortcut; captured movement settings | Same order/shortcut; live movement getters |
+| Node access | searchInfo resolves through bounded pointer-keyed records, then a direct state pointer | Cell search index selects a compact node; generation stamp checks whether it is active |
+| Serial current-context access | Bound thread-local context lookup | Main context fast path when not in the parallel phase |
+| One eligible queued request | No adjacent pair; authoritative caller searches | prefetchPaths explicitly clears/returns when jobs.size() < 2; authoritative caller searches |
+| Search capacity | Retained permanent/transient credit and 30,000-record bound | Nonlegacy active nodes independent of permanent metadata, default allowance all registered cells |
+
+Neither implementation's far-pruning count condition fires independently of its
+outer distance test. If no valid closest candidate has been found, the best
+distance remains at its initial sentinel and that pruning rule cannot bound an
+otherwise finite-distance search. Both can therefore perform substantial work
+for difficult destinations. The new log does not establish whether this explains
+its three longest closest kernels; candidate/pruning context is still missing.
+
+The reference's node layout is the most directly relevant remaining structural
+difference for a long single search. Its getters avoid our repeated keyed lookups
+for coordinates, costs, open/closed state and parents. Our direct state binding
+already removed an extra owner/slot step, but it did not remove searchInfo's
+lookup. This is a source-level opportunity, not measured attribution of the
+54.110 ms kernel. Simply making our records smaller would not automatically
+provide its direct cell-index access, and dense indexes/nodes have map- and
+participant-dependent memory costs. Storage, lookup and capacity policy should
+be assessed separately.
+
+Some existing iOS adaptations remain worth keeping. Movement scalars are captured
+rather than repeatedly fetched from live objects during expansion. Parent terrain
+height is read only in downhill/cliff branches; the reference's neighboring-cell
+routine reads it before the neighbor loop even when those branches are unused.
+Our branch-local version can reread it for several eligible neighbors, so this
+source observation alone does not establish fewer reads for downhill/cliff work.
+The explicit query-result, allocation and lifecycle validation remains a distinct
+adaptation, not a prerequisite to copy the reference's raw read/write-set scheme.
+
+For the two depth-one slow calls, adopting the reference's pool/width would still
+leave only one request to compute. Wider scanning can help when several eligible
+requests exist, but neither pool divides an individual closest loop. Full worker
+Path completion also cannot remove these single-kernel costs by itself. The
+latest measured hierarchy/finalization costs are small relative to these kernels.
+
+Recommended follow-up: capture bounded closest work/candidate/pruning context and
+measure the keyed node-access path before choosing compact-node/direct-lookup
+work. Preserve the current allocation allowance and per-request scheduling during
+that comparison. There is no source-supported reason here to copy a more
+aggressive pruning rule or raise search limits. No runtime changes or additional
+regression runs were made for this source-only comparison.
