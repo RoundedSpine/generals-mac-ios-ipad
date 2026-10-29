@@ -1403,6 +1403,19 @@ PathfindCell::PathfindCell() :m_info(nullptr)
 	reset();
 }
 
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+// GeneralsX @performance Codex 29/10/2026 Stable physical-cell IDs distinguish overlapping layers without changing allocation credit.
+void PathfindCell::registerSearchCells(PathfindCell* cells,unsigned count)
+{
+ const unsigned first=pathfindSearchCellIndices().reserve(count);
+ if(first==SearchCellIndices::invalid)return; // Identity exhaustion leaves the existing keyed path available.
+ for(unsigned i=0;i<count;++i){
+  assert(cells[i].m_searchIndex==SearchCellIndices::invalid);
+  cells[i].m_searchIndex=first+i;
+ }
+}
+#endif
+
 /**
  * Destructor
  */
@@ -3841,6 +3854,9 @@ void PathfindLayer::allocateCells(const IRegion2D *extent)
 	// Allocate cells.
 	// pool[]ify
 	m_blockOfMapCells = MSGNEW("PathfindMapCells") PathfindCell[m_width*m_height];
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ PathfindCell::registerSearchCells(m_blockOfMapCells,static_cast<unsigned>(m_width*m_height));
+#endif
 	m_layerCells = MSGNEW("PathfindMapCells") PathfindCellP[m_width];
 	Int i;
 	for (i=0; i<m_width; i++) {
@@ -3899,6 +3915,9 @@ void PathfindLayer::allocateCellsForWallLayer(const IRegion2D *extent, ObjectID 
 
 	// Allocate cells.
 	m_blockOfMapCells = MSGNEW("PathfindMapCells") PathfindCell[m_width*m_height];
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ PathfindCell::registerSearchCells(m_blockOfMapCells,static_cast<unsigned>(m_width*m_height));
+#endif
 	m_layerCells = MSGNEW("PathfindMapCells") PathfindCellP[m_width];
 
 	for (i=0; i<m_width; i++) {
@@ -4539,6 +4558,10 @@ void Pathfinder::reset()
 	for (i=0; i<=LAYER_LAST; i++) {
 		m_layers[i].reset();
 	}
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ // GeneralsX @performance Codex 29/10/2026 Retire all physical cells before reusing IDs; joined batches were invalidated above.
+ pathfindSearchCellIndices().reset();
+#endif
 
 	// reset the pathfind grid
 	m_extent.lo.x=m_extent.lo.y=m_extent.hi.x=m_extent.hi.y=0;
@@ -5276,6 +5299,9 @@ void Pathfinder::newMap()
  		m_zoneManager.allocateBlocks(m_extent);
 		// Allocate cells.
 		m_blockOfMapCells = MSGNEW("PathfindMapCells") PathfindCell[(bounds.hi.x+1)*(bounds.hi.y+1)];
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+  PathfindCell::registerSearchCells(m_blockOfMapCells,static_cast<unsigned>((bounds.hi.x+1)*(bounds.hi.y+1)));
+#endif
 		m_map = MSGNEW("PathfindMapCells") PathfindCellP[bounds.hi.x+1];
 		Int i;
 		for (i=0; i<=bounds.hi.x; i++) {
@@ -10146,16 +10172,38 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Caller closest recomputation has separate timing from speculative tasks.
- PathSearchTiming::SerialScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Closest);
+ PathSearchTiming::ClosestScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads);
+ auto& work=serialTiming.sample;work.startX=startCellNdx.x;work.startY=startCellNdx.y;
+ work.goalX=goalCell->getXIndex();work.goalY=goalCell->getYIndex();work.radius=radius;
+ work.costMultiplier=closest.pathCostMultiplier;
+ work.flags=unsigned(closest.gotHierarchicalPath)|(unsigned(closest.startedStuck)<<1)|
+  (unsigned(searchState().m_isTunneling)<<2)|(unsigned(closest.blocked)<<3)|(unsigned(closest.goalOnObstacle)<<4);
 #endif
  const Object* obj=movement.obj;
  PathfindCell* closesetCell=nullptr;
  Real closestDistanceSqr=FLT_MAX;
  Real closestDistScreenSqr=FLT_MAX;
  Int count=0;
+ // GeneralsX @feature Codex 29/10/2026 Count loop work without changing query order, pruning rules or the existing serial timer.
+ const auto destination=[&](PathfindCell* cell){
+#ifdef GENERALS_ZH_PATH_TIMING
+  ++work.destinationChecks;
+#endif
+  return checkDestination(obj,cell->getXIndex(),cell->getYIndex(),cell->getLayer(),radius,centerInCell);
+ };
+ const auto finishClosest=[&](PathfindCell* last,PathfindCell* best,Bool reached){
+#ifdef GENERALS_ZH_PATH_TIMING
+  work.examined=static_cast<unsigned>(count);work.records=static_cast<unsigned>(activePathfindSearchContext().m_records.size());
+  work.indexBytes=static_cast<unsigned>(activePathfindSearchContext().m_recordIndex.bytes());work.outcome=reached?1:best?2:3;
+#endif
+  return ClosestSearchOutcome{last,best,count,reached};
+ };
 	Bool foundGoal = false;
 	while( !searchState().m_openList.empty() )
 	{
+#ifdef GENERALS_ZH_PATH_TIMING
+  ++work.pops;
+#endif
 		Real dx;
 		Real dy;
 		Real distSqr;
@@ -10168,7 +10216,7 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 			// success - found a path to the goal
 			if (!closest.goalOnObstacle) {
 				// See if the goal is a valid destination.  If not, accept closest cell.
-				if (closesetCell!=nullptr && !movement.canPathThroughUnits() && !checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(), parentCell->getLayer(), radius, centerInCell)) {
+				if (closesetCell!=nullptr && !movement.canPathThroughUnits() && !destination(parentCell)) {
 #if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
 					break;
 #else
@@ -10179,12 +10227,15 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 				}
 			}
 
-			return {parentCell,nullptr,count,true};
+			return finishClosest(parentCell,nullptr,true);
 		}
 		// put parent cell onto closed list - its evaluation is finished
 		parentCell->putOnClosedList( searchState().m_closedList );
-		if (!searchState().m_isTunneling && checkDestination(obj, parentCell->getXIndex(), parentCell->getYIndex(), parentCell->getLayer(), radius, centerInCell)) {
+		if (!searchState().m_isTunneling && destination(parentCell)) {
 			if (!closest.startedStuck || validMovementPosition( movement.isCrusher(), movement.getValidSurfaces(), parentCell )) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++work.candidates;
+#endif
 				dx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
 				dy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
 				distSqr = dx*dx+dy*dy;
@@ -10193,6 +10244,9 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 				}
 				distSqr += (parentCell->getCostSoFar()*(parentCell->getCostSoFar()*COST_TO_DISTANCE_FACTOR_SQR))*closest.pathCostMultiplier;
 				if (distSqr < closestDistanceSqr) {
+#ifdef GENERALS_ZH_PATH_TIMING
+     ++work.improvements;
+#endif
 					closesetCell = parentCell;
 					closestDistanceSqr = distSqr;
 				}
@@ -10204,17 +10258,32 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 		distSqr = dx*dx+dy*dy;
 		// If we are 2x farther than the closest location already found, don't continue.
 		if (distSqr > closestDistScreenSqr*4) {
+#ifdef GENERALS_ZH_PATH_TIMING
+   ++work.farTests;
+#endif
 			Bool skip = false;
 			if (!closest.gotHierarchicalPath) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++work.noHierarchy;
+#endif
 				skip = true;
 			}
 			if (count>2000) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++work.over2000;
+#endif
 				skip = true;
 			}
 			if (closestDistScreenSqr < 10*10*PATHFIND_CELL_SIZE_F) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++work.nearGoal;
+#endif
 				skip = true;
 			}
 			if (skip) {
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++work.farPrunes;
+#endif
 				continue;
 			}
 		}
@@ -10222,11 +10291,14 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 		if (!foundGoal) {
 			// Check to see if we can change layers in this cell.
 			checkChangeLayers(parentCell);
+#ifdef GENERALS_ZH_PATH_TIMING
+   ++work.expansions;
+#endif
 			count += examineNeighboringCellsWithMovement(parentCell, goalCell, movement, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
 		}
 	}
 
- return {parentCell,closesetCell,count,false};
+ return finishClosest(parentCell,closesetCell,false);
 }
 
 Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,

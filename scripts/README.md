@@ -105,6 +105,14 @@ Query-only dependency cases compile the production occupancy evaluator, reproduc
 the old redundant snapshot rejection, compare serial routes/budgets, exercise
 ordered production goal updates, preserve direct/cached allocation dependencies,
 and check nested/throwing scopes plus query overflow. Use `-k query_only`.
+Direct-index cases use `-k test_index` in both `test_search_record_pool.py` and
+`test_parallel_path_batch.py`: keyed equivalence, bounded fallback, generation
+wrap, failed growth, registered layers, actual getter probes, serial/parallel
+route/work/accounting matching and bounded closest diagnostics.
+Run `python3 scripts/qa/benchmark_path_index.py` for an optional production-getter
+host microbenchmark with equal checksums, medians and ranges. It compares indexed
+and keyed resolution without changing record capacity; it is not device FPS or
+a CI timing threshold. See `--help` for workload settings.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

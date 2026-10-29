@@ -31,6 +31,8 @@ public:
  BoundedKeyedPool& operator=(const BoundedKeyedPool&)=delete;
  static constexpr std::size_t capacity() { return Capacity; }
  std::size_t size() const { return m_size; }
+ // GeneralsX @performance Codex 29/10/2026 Context-owned direct indexes resolve stable arena slots without repeating a key probe.
+ Value* atSlot(unsigned slot){assert(slot<Capacity);return &m_values[slot];}
  unsigned index(const Value* value) const { assert(value>=m_values.data() && value<m_values.data()+Capacity); return static_cast<unsigned>(value-m_values.data()); }
  Value* find(const Key& key) {
   auto b=hash(key);

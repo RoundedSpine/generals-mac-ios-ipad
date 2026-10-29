@@ -250,3 +250,20 @@ work. Preserve the current allocation allowance and per-request scheduling durin
 that comparison. There is no source-supported reason here to copy a more
 aggressive pruning rule or raise search limits. No runtime changes or additional
 regression runs were made for this source-only comparison.
+
+## Subsequent bounded direct-lookup implementation
+
+The [direct-index stage](IOS_PATH_DIRECT_INDEX_2026-10-29.md) removes repeated
+key probes for registered map-cell getters by mapping cell IDs to existing stable
+record slots. The existing allocator/state storage, 30,000-record allowance and
+allocation-decision policy remain. Tables are bounded to 1 MiB/context; uncovered
+or unregistered cells use the original keyed path. This adopts indexed access
+without adopting the reference's map-sized compact-node arrays or its capacity
+policy. Search-only node compaction remains a separate difference.
+
+The same stage adds bounded serial closest candidate/pruning work and an optional
+host getter benchmark. Controlled route/work/accounting traces match keyed
+resolution. Pinned host microbench medians improve for its sequential/random
+getter mixes, with noisy unpinned results also documented. Native/device results
+remain pending; those measurements do not establish iPhone speedup or explain the
+earlier closest kernels without their new work counters.

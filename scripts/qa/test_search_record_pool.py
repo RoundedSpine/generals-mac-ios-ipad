@@ -11,6 +11,9 @@ def engine_fixture(enabled=True):
     source = source.replace('struct PathfindCell{};', 'class PathfindCell; class Object;\nusing UnsignedByte=unsigned char;using zoneStorageType=unsigned short;using PathfindLayerEnum=int;')
     cell = HEADER[HEADER.index('class PathfindCell\n'):HEADER.index('typedef PathfindCell *PathfindCellP;')].replace('private:', 'public:')
     source = source.replace('unsigned PathfindCellInfo::s_recordsInUse=0;', cell + '\nunsigned PathfindCellInfo::s_recordsInUse=0;')
+    source=source.replace('inline unsigned pathfindCellSearchIndex(const PathfindCell*){return SearchCellIndices::invalid;}','')
+    source=source.replace('unsigned PathfindCellInfo::s_recordsInUse=0;',
+        '#ifdef GENERALS_ZH_SEARCH_CONTEXT\ninline unsigned pathfindCellSearchIndex(const PathfindCell* cell){return cell->searchIndex();}\n#endif\nunsigned PathfindCellInfo::s_recordsInUse=0;')
     source += r'''
 #include <cmath>
 #include <climits>
@@ -35,10 +38,78 @@ bool s_useFixedPathfinding=true,s_forceCleanCells=false;
                'inline Bool PathfindCell::isBlockedByAlly()', 'inline void PathfindCell::setBlockedByAlly(']
     methods = SOURCE[SOURCE.index('Bool PathfindCellList::before('):SOURCE.index('//-----------------------------------------------------------------------------------', SOURCE.index('Bool PathfindCellList::before('))]
     operations = SOURCE[SOURCE.index('#if RETAIL_COMPATIBLE_PATHFINDING\n// Retail compatible insertion sort'):SOURCE.index('inline Bool PathfindCell::isObstaclePresent')]
+    if enabled:markers.append('void PathfindCell::registerSearchCells(')
     return source + '\n'.join(function(marker) for marker in markers) + methods + operations
 
 
 class SearchRecordPoolTest(unittest.TestCase):
+    # GeneralsX @test Codex 29/10/2026 Direct lookup changes identity resolution, never allocation order, credit or lifetime.
+    def test_index_randomized_pool_equivalence_and_rollover(self):
+        run_cpp(r'''
+#include "boundedrecordindex.h"
+#include "boundedkeyedpool.h"
+#include <random>
+struct Node{unsigned key=0;};
+int main(){BoundedKeyedPool<unsigned,Node,32>pool;BoundedRecordIndex<32,64,unsigned char>index;
+ std::mt19937 random(147);for(unsigned generation=0;generation<600;++generation){
+  pool.beginGeneration();assert(index.beginSearch(128)&&index.size()==64&&index.bytes()==256);
+  for(unsigned n=0;n<100;++n){unsigned key=random()%128;
+   if(random()%3==0){pool.release(key);index.erase(key);}
+   else if(auto*node=pool.acquire(key)){node->key=key;if(index.covers(key))index.publish(key,pool.index(node));}
+   for(unsigned k=0;k<128;++k){auto*expected=pool.find(k);Node*actual=nullptr;
+    if(!index.covers(k))actual=pool.find(k);
+    else {auto slot=index.find(k);if(slot!=index.missing)actual=pool.atSlot(slot);}
+    assert(actual==expected);if(actual)assert(actual->key==k);
+   }
+  }
+ }
+ index.releaseStorage();assert(!index.size()&&!index.bytes()&&!index.covers(0));
+ BoundedRecordIndex<30000>maximum;assert(maximum.beginSearch(SearchCellIndices::invalid));
+ assert(maximum.size()==262144&&maximum.bytes()==1048576);
+}
+''',timeout=30)
+
+    def test_index_growth_failure_keeps_bounded_prefix_and_invalidates_old_slots(self):
+        run_cpp(r'''
+#include "boundedrecordindex.h"
+#include <cstdlib>
+bool failArray=false;
+void*operator new[](std::size_t bytes){if(failArray)throw std::bad_alloc();if(auto*p=std::malloc(bytes))return p;throw std::bad_alloc();}
+void operator delete[](void*p)noexcept{std::free(p);}
+void operator delete[](void*p,std::size_t)noexcept{std::free(p);}
+int main(){BoundedRecordIndex<32,128>index;assert(index.beginSearch(8));index.publish(3,7);assert(index.find(3)==7);
+ failArray=true;assert(!index.beginSearch(64));failArray=false;
+ assert(index.size()==8&&index.find(3)==index.missing&&!index.covers(8));
+ index.publish(3,4);assert(index.find(3)==4);assert(index.beginSearch(64));
+ assert(index.size()==64&&index.find(3)==index.missing);index.publish(63,31);assert(index.find(63)==31);
+ SearchCellIndices ids;assert(ids.reserve(3)==0&&ids.reserve(2)==3&&ids.size()==5);
+ assert(ids.reserve(SearchCellIndices::invalid)==SearchCellIndices::invalid&&ids.size()==5);
+ ids.reset();assert(ids.reserve(2)==0&&ids.size()==2);
+}
+''')
+
+    def test_index_registered_layers_recycling_admission_and_fallback(self):
+        source=engine_fixture().replace('BoundedRecordIndex<PATHFIND_RECORD_CAPACITY> m_recordIndex;',
+                                         'BoundedRecordIndex<PATHFIND_RECORD_CAPACITY,4> m_recordIndex;')
+        run_cpp(source+r'''
+int main(){PathfindCellInfo::allocateCellInfos();{
+ PathfindCell ground[4],bridge[4],outside;PathfindCell::registerSearchCells(ground,4);PathfindCell::registerSearchCells(bridge,4);
+ assert(ground[0].searchIndex()!=bridge[0].searchIndex());const auto id=ground[0].searchIndex();
+ ground[0].reset();assert(ground[0].searchIndex()==id&&outside.searchIndex()==SearchCellIndices::invalid);
+ auto&c=mainPathfindSearchContext();c.beginSearch();assert(c.m_recordIndex.size()==4);
+ for(auto*cell:{ground,bridge,&outside}){auto*r=c.allocateRecord(cell,{3,4},false);assert(r);r->search().m_totalCost=cell==ground?11:22;}
+ assert(ground[0].getTotalCost()==11&&bridge[0].getTotalCost()==22&&outside.getTotalCost()==22);
+ auto*recycled=c.findRecord(ground);c.releaseRecord(ground);assert(!c.findRecord(ground));
+ auto*next=c.allocateRecord(&ground[1],{5,6},false);assert(next==recycled&&!next->search().m_totalCost);
+ assert(c.m_transientRecords==3);c.beginSearch();assert(!c.findRecord(&ground[1])&&!c.findRecord(bridge)&&!c.findRecord(&outside));
+ ground[0].setGoalUnit(17,{3,4});assert(ground[0].allocateSearchInfo({3,4}));assert(!c.m_transientRecords);
+ const auto*permanent=ground[0].m_info;assert(c.findRecord(ground)!=permanent&&ground[0].getGoalUnit()==17);
+ ground[0].setGoalUnit(0,{3,4});c.releaseRecord(ground);
+ c.releaseStorage();assert(!c.m_recordIndex.size()&&!c.m_recordIndex.bytes());
+ }pathfindSearchCellIndices().reset();mainPathfindSearchContext().beginSearch();PathfindCellInfo::releaseCellInfos();
+}
+''')
+
     # GeneralsX @test Codex 28/10/2026 Direct state binding saves metadata without moving arenas or merging permanent ownership.
     def test_direct_binding_compacts_records_and_context_stays_immovable(self):
         run_cpp(engine_fixture() + r'''

@@ -36,6 +36,7 @@
 #include <array>
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
+#include "boundedrecordindex.h"
 #include "searchcontextbinding.h"
 #include "searchadmissionwindow.h"
 
@@ -240,6 +241,11 @@ enum {MAX_WALL_PIECES = 128};
 
 // GeneralsX @feature Codex 26/10/2026 Search-only state is isolated from permanent unit/obstacle records.
 class PathfindCellInfo;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ // GeneralsX @performance Codex 29/10/2026 Map identities are shared read-only; record-slot indexes belong to each context.
+ inline SearchCellIndices& pathfindSearchCellIndices(){static SearchCellIndices indices;return indices;}
+ inline unsigned pathfindCellSearchIndex(const PathfindCell* cell);
+#endif
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  // GeneralsX @bugfix Codex 29/10/2026 Allocation through cached cell pointers must retain the permanent/persistent dependency too.
  void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* cell);
@@ -375,6 +381,7 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
  // GeneralsX @refactor Codex 26/10/2026 Searches own records and never attach them to permanent map cells.
  BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;
+ BoundedRecordIndex<PATHFIND_RECORD_CAPACITY> m_recordIndex;
  unsigned m_transientRecords = 0;
  SearchContextOwnership m_ownership;
  // GeneralsX @bugfix Codex 28/10/2026 Speculative main-side preparation must never perform live-world retail recovery.
@@ -429,7 +436,13 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   AdmissionScope& operator=(const AdmissionScope&)=delete;
  };
 
- PathfindCellInfo* findRecord(const PathfindCell* cell) { return m_records.find(cell); }
+ // GeneralsX @performance Codex 29/10/2026 Registered cells use one indexed slot read; unregistered/over-budget identities keep the original allocator lookup.
+ PathfindCellInfo* findRecord(const PathfindCell* cell) {
+  const unsigned index=pathfindCellSearchIndex(cell);
+  if(!m_recordIndex.covers(index))return m_records.find(cell);
+  const unsigned slot=m_recordIndex.find(index);
+  return slot==m_recordIndex.missing?nullptr:m_records.atSlot(slot);
+ }
  PathfindCellInfo* allocateRecord(PathfindCell* cell, const ICoord2D& pos, Bool persistent) {
   if (auto* record = findRecord(cell)) return record;
   // Occupied cells already consume permanent capacity; only other search cells consume extra credit.
@@ -449,6 +462,8 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   record->m_searchState = &resetSlot(m_records.index(record));
   record->m_searchCharged = !persistent;
   if (record->m_searchCharged) ++m_transientRecords;
+  const unsigned index=pathfindCellSearchIndex(cell);
+  if(m_recordIndex.covers(index))m_recordIndex.publish(index,m_records.index(record));
   return record;
  }
  void releaseRecord(const PathfindCell* cell) {
@@ -456,13 +471,15 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   if (!record) return;
   if (record->m_searchCharged) { assert(m_transientRecords); --m_transientRecords; }
   record->search() = PathfindSearchState{};
+  m_recordIndex.erase(pathfindCellSearchIndex(cell));
   m_records.release(cell);
  }
 #endif
- void beginSearch() {
+ void beginSearch(bool prepareIndex=true) {
   PathfindSearchNodes::beginSearch();
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
   m_records.beginGeneration(); m_transientRecords = 0;
+  m_recordIndex.beginSearch(prepareIndex?pathfindSearchCellIndices().size():0);
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
   m_admissionWindow.reset();
 #endif
@@ -475,10 +492,13 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   else m_corridor.assign(blocks, 1);
  }
  void releaseStorage() {
-  beginSearch();
+  beginSearch(false);
   m_openList.releaseStorage();
   m_closedList.releaseStorage();
   resizeCorridor(0);
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+  m_recordIndex.releaseStorage();
+#endif
   m_isTunneling = false;
   m_ignoreObstacleID = INVALID_ID;
   m_cumulativeCellsAllocated = 0;
@@ -539,6 +559,11 @@ public:
 
 	PathfindCell();
 	~PathfindCell();
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ // GeneralsX @performance Codex 29/10/2026 Register each ground/bridge/wall allocation once; reset() preserves its identity.
+ static void registerSearchCells(PathfindCell* cells,unsigned count);
+ unsigned searchIndex()const{return m_searchIndex;}
+#endif
 
 	Bool setTypeAsObstacle( Object *obstacle, Bool isFence, const ICoord2D &pos );				///< flag this cell as an obstacle, from the given one
 	Bool removeObstacle( Object *obstacle );				///< unflag this cell as an obstacle, from the given one
@@ -673,6 +698,9 @@ public:
 
 private:
 	PathfindCellInfo *m_info;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ unsigned m_searchIndex=SearchCellIndices::invalid;
+#endif
 	ObjectID m_obstacleID;	                  ///< the object ID who overlaps this cell
 	UnsignedInt m_blockedByAlly : 1;          ///< True if this cell is blocked by an allied unit.
 	UnsignedInt m_obstacleIsFence : 1;        ///< True if occupied by a fence.
@@ -689,6 +717,9 @@ private:
 };
 
 typedef PathfindCell *PathfindCellP;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ inline unsigned pathfindCellSearchIndex(const PathfindCell* cell){return cell->searchIndex();}
+#endif
 
 
 // how close a unit has to be in z to interact with the layer.

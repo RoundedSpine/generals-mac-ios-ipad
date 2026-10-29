@@ -22,6 +22,7 @@ def allocator_fixture(enabled=True):
     return ('#define GENERALS_ZH_SEARCH_CONTEXT 1\n' if enabled else '') + r'''
 #include "stampedsearchcontext.h"
 #include "boundedkeyedpool.h"
+#include "boundedrecordindex.h"
 #include "searchcontextbinding.h"
 #include "searchadmissionwindow.h"
 #include <cassert>
@@ -34,6 +35,9 @@ using Int=int;using Bool=bool;using UnsignedInt=unsigned;using UnsignedShort=uns
 constexpr ObjectID INVALID_ID=0;
 struct ICoord2D{int x,y;};struct PathfindCell{};
 ''' + declarations + r'''
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+inline unsigned pathfindCellSearchIndex(const PathfindCell*){return SearchCellIndices::invalid;}
+#endif
 unsigned PathfindCellInfo::s_recordsInUse=0;
 PathfindCellInfo*PathfindCellInfo::s_infoArray=nullptr;
 PathfindCellInfo*PathfindCellInfo::s_firstFree=nullptr;

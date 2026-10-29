@@ -71,6 +71,14 @@ public:
   std::array<std::uint64_t,PhaseCount> phaseNanoseconds{}, phaseCalls{};
   std::array<std::uint64_t,3> serialKinds{};
  };
+ // GeneralsX @feature Codex 29/10/2026 Retain bounded serial closest work, using the existing kernel timer and scalar counters only.
+ struct ClosestSample {
+  std::uint64_t nanoseconds=0,queue=0,pops=0,destinationChecks=0,candidates=0,improvements=0;
+  std::uint64_t farTests=0,farPrunes=0,noHierarchy=0,over2000=0,nearGoal=0,expansions=0;
+  unsigned examined=0,records=0,indexBytes=0,flags=0,outcome=0;
+  int startX=0,startY=0,goalX=0,goalY=0,radius=0;
+  float costMultiplier=0;
+ };
  struct Metric {
   std::uint64_t calls=0, totalNanoseconds=0, maxNanoseconds=0;
   std::array<std::uint64_t,6> thresholds{};
@@ -158,7 +166,23 @@ public:
     if(owner.m_activeQueue)++owner.m_activeQueue->serialKinds[static_cast<unsigned>(kind)];
    }
   }
+  std::uint64_t stop(){return m_timer.stop();}
  };
+ class ClosestScope {
+  BasicPathSearchTiming& m_owner;
+  SerialScope m_timer;
+  bool m_enabled;
+ public:
+  ClosestSample sample;
+  ClosestScope(BasicPathSearchTiming& owner,bool enabled):m_owner(owner),m_timer(owner,enabled,Kind::Closest),m_enabled(enabled){
+   if(enabled)sample.queue=owner.m_activeQueue?owner.m_activeQueue->id:0;
+  }
+  ~ClosestScope(){if(m_enabled){sample.nanoseconds=m_timer.stop();retain(m_owner.m_slowClosest,m_owner.m_slowClosestCount,sample);}}
+  ClosestScope(const ClosestScope&)=delete;
+  ClosestScope& operator=(const ClosestScope&)=delete;
+ };
+ const std::array<ClosestSample,retainedSamples>& slowClosest()const{return m_slowClosest;}
+ unsigned slowClosestCount()const{return m_slowClosestCount;}
  void captureFailure(unsigned slot,Kind kind,bool immobile,bool oldPath){
   ++m_capture[slot][static_cast<unsigned>(kind)];
   if(immobile)++m_captureImmobile[slot];
@@ -310,6 +334,13 @@ public:
     s.phaseNanoseconds[Preparation]/1000000.0,s.phaseNanoseconds[Pair]/1000000.0,s.phaseNanoseconds[SerialKernel]/1000000.0,
     s.phaseNanoseconds[Validation]/1000000.0,s.phaseNanoseconds[Hierarchy]/1000000.0,s.phaseNanoseconds[Finalization]/1000000.0);
   }
+  for(unsigned i=0;i<m_slowClosestCount;++i){
+   const auto&s=m_slowClosest[i];
+   std::fprintf(output,"[PATH_CLOSEST_SLOW] rank=%u queue=%llu ms=%.3f start_x=%d start_y=%d goal_x=%d goal_y=%d radius=%d cost_multiplier=%.3f flags=%u outcome=%u pops=%llu destination_checks=%llu candidates=%llu improvements=%llu far_tests=%llu far_prunes=%llu no_hierarchy=%llu over_2000=%llu near_goal=%llu expansions=%llu examined=%u records=%u index_bytes=%u\n",
+    i+1,u(s.queue),s.nanoseconds/1000000.0,s.startX,s.startY,s.goalX,s.goalY,s.radius,double(s.costMultiplier),s.flags,s.outcome,
+    u(s.pops),u(s.destinationChecks),u(s.candidates),u(s.improvements),u(s.farTests),u(s.farPrunes),
+    u(s.noHierarchy),u(s.over2000),u(s.nearGoal),u(s.expansions),s.examined,s.records,s.indexBytes);
+  }
   for(unsigned i=0;i<m_slowPairCount;++i){
    const auto&s=m_slowPairs[i];
    std::fprintf(output,"[PATH_PAIR_SLOW] rank=%u pair=%llu queue=%llu ms=%.3f",i+1,u(s.id),u(s.queue),s.nanoseconds/1000000.0);
@@ -367,7 +398,8 @@ private:
  std::array<CellRejections,2> m_cellRejections{};
  std::array<QueueSample,retainedSamples> m_slowQueues{};
  std::array<PairSample,retainedSamples> m_slowPairs{};
- unsigned m_slowQueueCount=0,m_slowPairCount=0;
+ std::array<ClosestSample,retainedSamples> m_slowClosest{};
+ unsigned m_slowQueueCount=0,m_slowPairCount=0,m_slowClosestCount=0;
  std::uint64_t m_queueId=0;
  QueueSample* m_activeQueue=nullptr;
 };

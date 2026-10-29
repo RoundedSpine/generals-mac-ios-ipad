@@ -109,6 +109,11 @@ direct cell and allocation dependencies still use exact snapshots. Some changed
 decisions can therefore reach the existing `occupancy` rejection instead of an
 earlier raw `cell_dependencies` rejection. No output field changes. See
 [query-only dependency semantics](../WORKDIR/audit/IOS_PATH_QUERY_DEPENDENCIES_2026-10-29.md).
+`[PATH_CLOSEST_SLOW]` retains at most four serial closest fine kernels with
+candidate/expansion/pruning counts, initial cell settings and index-array bytes.
+It uses the existing kernel timer and has no per-cell clocks. See
+[direct indexing and closest work fields](../WORKDIR/audit/IOS_PATH_DIRECT_INDEX_2026-10-29.md)
+for flags, outcomes, overlapping pruning reasons and interpretation limits.
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

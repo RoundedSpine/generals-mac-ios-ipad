@@ -218,7 +218,8 @@ void AIUpdateInterface::doPathfind(Pathfinder*p){assert(std::this_thread::get_id
  else if(closest)p->findClosestPath(obj,locomotor,&from,&to,blocked,pathCostMultiplier,false);
  else p->internalFindPath(obj,locomotor,&from,&to);}
 Pathfinder::Pathfinder(){mainPathfindSearchContext().resizeCorridor(9);
- for(int x=0;x<12;++x){m_map[x]=storage[x];for(int y=0;y<12;++y){storage[x][y].setLayer(1);storage[x][y].setZone(1);}}
+ for(int x=0;x<12;++x){m_map[x]=storage[x];PathfindCell::registerSearchCells(storage[x],sizeof(storage[x])/sizeof(storage[x][0]));
+  for(int y=0;y<12;++y){storage[x][y].setLayer(1);storage[x][y].setZone(1);}}
 }
 Pathfinder::~Pathfinder(){clearParallelBatch();delete m_parallelBatch;delete m_exclusiveWorker;mainPathfindSearchContext().releaseStorage();}
 bool Pathfinder::checkDestination(const Object*obj,int x,int y,int layer,int radius,bool center){
@@ -453,6 +454,102 @@ void AIUpdateInterface::doPathfind(Pathfinder*p){assert(std::this_thread::get_id
 
 
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @test Codex 29/10/2026 Compare indexed and original keyed resolution through complete kernels and ordered reuse.
+    def test_index_routes_expansion_and_accounting_match_keyed_lookup(self):
+        main=r'''
+int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radius:{0,1})for(int kind=0;kind<4;++kind)for(int seed=0;seed<4;++seed){
+ World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;p.testCenter=center;p.testRadius=radius;
+ w.a.ai.safe=w.b.ai.safe=kind==1;w.a.ai.closest=w.b.ai.closest=kind==2;p.quickAllowed=kind!=3;
+ for(int x=0;x<12;++x)for(int y=0;y<12;++y)if((x*31+y*17+seed*13)%13==0)p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.storage[2][2].setType(PathfindCell::CELL_CLEAR);p.storage[2][8].setType(PathfindCell::CELL_CLEAR);
+ p.prepareParallelBatch();mainPathfindSearchContext().m_cumulativeCellsAllocated=0;
+ for(auto*object:{&w.a,&w.b}){p.m_queuePRHead=int(object->id)-1;Path*path=nullptr;
+  if(kind==3){p.confirmParallelFallback(object,object->ai.locomotor,object->ai.from,object->ai.to,false);
+   path=p.findClosestPath(object,object->ai.locomotor,&object->ai.from,&object->ai.to,false,0,false);
+  }else path=w.consume(p,*object);
+  printf("%d%d%d%d%d:%u ",fixed,center,radius,kind,seed,unsigned(object->id));
+  if(!path)printf("null");else {printf("%d,%d ",path->blocked,path->requestedBlocked);for(auto cell:path->route)printf("%d,%d;",cell.x,cell.y);}
+  printf(" D %.2f,%.2f,%.2f B %d\n",object->ai.to.x,object->ai.to.y,object->ai.to.z,mainPathfindSearchContext().m_cumulativeCellsAllocated);
+  if(object==&w.a&&seed%2==0)p.storage[5][5].setGoalUnit(w.a.id,{5,5});
+ }
+ printf("A %llu R %llu FA %llu FR %llu E ",p.m_parallelBatch->accepted,p.m_parallelBatch->rejected,p.m_parallelBatch->fallbackAccepted,p.m_parallelBatch->fallbackRejected);
+ for(auto cell:p.serialExpansion)printf("%d,%d;",cell.x,cell.y);puts("");p.storage[5][5].setGoalUnit(0,{5,5});
+}}
+'''
+        indexed=fixture()
+        keyed=indexed.replace('if(!m_recordIndex.covers(index))return m_records.find(cell);','return m_records.find(cell);')
+        self.assertNotEqual(indexed,keyed)
+        a=run_cpp(keyed+main,timeout=45)
+        b=run_cpp(indexed+main,timeout=45)
+        self.assertEqual(a.stdout,b.stdout)
+
+    def test_index_getters_bypass_key_probes_and_fallback_remains_available(self):
+        from test_search_record_pool import engine_fixture
+        source=r'''
+#include "boundedkeyedpool.h"
+#include <atomic>
+std::atomic<unsigned> keyFinds{0};
+template<class K,class V,std::size_t N>struct CountingPool:BoundedKeyedPool<K,V,N>{
+ V*find(const K&key){++keyFinds;return BoundedKeyedPool<K,V,N>::find(key);}
+};
+''' + engine_fixture()
+        source=source.replace('BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;',
+                              'CountingPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;')
+        run_cpp(source+r'''
+int main(){PathfindCellInfo::allocateCellInfos();{PathfindCell cells[16],outside;
+ PathfindCell::registerSearchCells(cells,16);auto&c=mainPathfindSearchContext();c.beginSearch();
+ for(unsigned i=0;i<16;++i){assert(cells[i].allocateSearchInfo({int(i),3}));cells[i].setCostSoFar(i+7);}
+ keyFinds=0;unsigned sum=0;for(unsigned n=0;n<20000;++n){auto&cell=cells[n%16];sum+=cell.getXIndex()+cell.getYIndex()+cell.getCostSoFar();}
+ assert(sum&&keyFinds==0);c.releaseRecord(&cells[3]);keyFinds=0;assert(!c.findRecord(&cells[3])&&keyFinds==0);
+ assert(outside.allocateSearchInfo({2,4}));keyFinds=0;assert(outside.getXIndex()==2&&keyFinds==1);
+ c.releaseStorage();assert(!c.m_recordIndex.bytes());}
+ pathfindSearchCellIndices().reset();PathfindCellInfo::releaseCellInfos();
+}
+''')
+
+    def test_index_closest_work_matches_existing_large_search_and_stays_serial(self):
+        run_cpp(large_closest_fixture()+r'''
+int main(){for(bool fixed:{false,true})for(bool hierarchy:{false,true}){World w;Pathfinder p;s_useFixedPathfinding=fixed;
+ p.hierarchical=hierarchy;w.a.ai.closest=true;w.a.ai.from={25,645,0};w.a.ai.to={645,645,9};w.a.ai.pathCostMultiplier=0;
+ p.storage[64][64].setType(PathfindCell::CELL_OBSTACLE);farPrunes=limitPrunes=0;
+ assert(w.consume(p,w.a));assert(farPrunes>0&&limitPrunes>0);
+ assert(p.m_pathTiming.slowClosestCount()==1);const auto&s=p.m_pathTiming.slowClosest()[0];
+ assert(s.outcome==2&&s.examined>2000&&s.pops>=s.expansions&&s.destinationChecks>=s.candidates&&s.candidates>=s.improvements);
+ assert(s.farTests==unsigned(farPrunes)&&s.over2000==unsigned(limitPrunes)&&s.farPrunes<=s.farTests);
+ assert(s.startX==2&&s.startY==64&&s.goalX==64&&s.goalY==64&&s.radius==0&&s.costMultiplier==0);
+ assert(bool(s.flags&1)==hierarchy&&s.indexBytes<=1048576&&s.indexBytes>0);
+ assert(p.m_pathTiming[PathSearchTiming::SerialKernel].calls==1);
+ }
+ {World w;Pathfinder p;w.queue(p);w.a.ai.closest=w.b.ai.closest=true;p.prepareParallelBatch();
+  assert(p.m_parallelBatch->closestSearches==2&&!p.m_pathTiming.slowClosestCount());
+  assert(w.consume(p,w.a)&&w.consume(p,w.b));assert(!p.m_pathTiming.slowClosestCount());
+ }
+}
+''',timeout=45)
+
+    def test_index_closest_sample_retention_uses_two_clock_reads_per_serial_kernel(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <string>
+struct Clock {
+ using time_point=std::chrono::steady_clock::time_point;static unsigned calls;static long long ns;
+ static time_point now(){++calls;return time_point(std::chrono::nanoseconds(ns));}
+};unsigned Clock::calls=0;long long Clock::ns=0;
+int main(){using T=BasicPathSearchTiming<Clock>;T timing;unsigned long long total=0;
+ for(unsigned i=1;i<=9;++i){const unsigned before=Clock::calls;
+  {T::ClosestScope scope(timing,true);scope.sample.pops=i;scope.sample.examined=i*2;scope.sample.outcome=2;
+   Clock::ns+=i*100;total+=i*100;}
+  assert(Clock::calls==before+2);
+ }
+ const auto before=Clock::calls;{T::ClosestScope worker(timing,false);worker.sample.pops=900;Clock::ns+=5000;}
+ assert(Clock::calls==before&&timing.slowClosestCount()==4&&timing[T::SerialKernel].calls==9&&timing[T::SerialKernel].totalNanoseconds==total);
+ for(unsigned i=0;i<4;++i){const auto&s=timing.slowClosest()[i];assert(s.pops==9-i&&s.nanoseconds==(9-i)*100&&s.examined==(9-i)*2);}
+ FILE*f=tmpfile();assert(f);timing.report(f);rewind(f);std::string out;char line[2048];unsigned rows=0;
+ while(fgets(line,sizeof(line),f)){out+=line;if(std::string(line).find("[PATH_CLOSEST_SLOW]")==0)++rows;}fclose(f);
+ assert(rows==4&&out.find("outcome=2 pops=9")!=std::string::npos&&out.find("index_bytes=0")!=std::string::npos);
+}
+''')
+
     def test_query_only_reproduces_old_rejection_without_route_or_budget_change(self):
         main=r'''
 int main(){using T=PathSearchTiming;for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;
