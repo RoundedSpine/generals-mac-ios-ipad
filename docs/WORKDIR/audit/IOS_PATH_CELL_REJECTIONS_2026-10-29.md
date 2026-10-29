@@ -99,9 +99,13 @@ Existing whole-validator traces and route/accounting checks remain enabled.
 All 219 local workflow QA cases pass, including all 98 batch cases. All 98 batch
 cases pass ThreadSanitizer, and all five new cases pass ASan/UBSan. Existing
 whole-validator query traces, serial route/accounting matrices and lifecycle
-checks remain passing. Diff checks pass. Native SDK and device verification
-remain pending for this diagnostic change. Controlled fixtures do not establish
-full engine replay parity or explain a device failure without its new log.
+checks remain passing. Diff checks pass. Native run
+[40798412913](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40798412913)
+now passes Mac QA/race checks, iOS SDK compilation, unsigned packaging and
+artifact upload. Dependency save is skipped after the cache restore. Device
+verification remains pending for this diagnostic change. Controlled fixtures do
+not establish full engine replay parity or explain a device failure without its
+new log.
 
 Repeat the same saved mission, include crowded/blocked movement and exit normally.
 Compare calls with cell_dependencies, then inspect values versus log_full and
