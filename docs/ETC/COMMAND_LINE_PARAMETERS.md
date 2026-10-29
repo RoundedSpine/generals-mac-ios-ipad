@@ -100,6 +100,10 @@ See [closest preparation and mismatch definitions](../WORKDIR/audit/IOS_PATH_CLO
 See [allocation-decision window semantics](../WORKDIR/audit/IOS_PATH_ADMISSION_WINDOW_2026-10-29.md)
 for the subsequent replacement of exact-count equality with exact allocation
 decision equivalence; search limits and scheduling stay unchanged.
+`[PATH_CELL_REJECTIONS]` separates the first cell failure into changed snapshot
+values, a full dependency log or failed capture. Per-field counts describe the
+first differing cell of each rejected phase; they do not count every changed cell.
+See [cell-rejection classifications and fields](../WORKDIR/audit/IOS_PATH_CELL_REJECTIONS_2026-10-29.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

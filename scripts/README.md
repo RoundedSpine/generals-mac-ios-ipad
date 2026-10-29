@@ -97,6 +97,10 @@ routes/budgets across count changes, reject boundary/dependency changes and veri
 that completion uses the caller's frozen allowance. They also check cached-pointer
 allocation observations, invalid windows, bounded reuse counters and unfinished
 results. Use `-k admission_window` for these cases.
+Cell-rejection cases check invalid-log causes, duplicate-at-capacity behavior,
+single-read first-failure callbacks, every snapshot field in primary/fallback
+validation, bounded reports and enabled/disabled live/snapshot read counts.
+Use `-k cell_rejection` for these diagnostic regressions.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

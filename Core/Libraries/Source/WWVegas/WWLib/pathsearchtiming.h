@@ -44,6 +44,14 @@ public:
   std::uint64_t calls=0;
   std::array<std::uint64_t,ClosestFieldCount> fields{};
  };
+ // GeneralsX @feature Codex 29/10/2026 Count only the first rejected cell/log per phase; snapshots contain no pointers or requests.
+ enum CellField { Metadata, Obstacle, Fence, Transparent, Zone, AircraftGoal, Pinched, CellType, UnitFlags,
+  ConnectsLayer, CellLayer, GoalUnit, GoalAircraft, PosUnit, InfoX, InfoY, EffectiveFence, EffectiveTransparent, EffectiveObstacle, CellFieldCount };
+ struct CellRejections {
+  std::uint64_t calls=0,values=0,logFull=0,captureFailed=0;
+  unsigned entriesMin=0,entriesMax=0;
+  std::array<std::uint64_t,CellFieldCount> fields{};
+ };
  struct TaskSample {
   Kind kind=Kind::Ordinary;
   bool primary=false, fallback=false;
@@ -202,6 +210,24 @@ private:
   ++s.calls;if(current>captured)++s.higher;else if(current<captured)++s.lower;else ++s.equal;
  }
 public:
+ void cellLogRejected(bool fallback,unsigned entries,bool full){
+  auto& s=beginCellRejection(fallback,entries);if(full)++s.logFull;else ++s.captureFailed;
+ }
+ void cellValuesRejected(bool fallback,unsigned entries,const std::array<unsigned,CellFieldCount>& before,
+                         const std::array<unsigned,CellFieldCount>& current){
+  auto& s=beginCellRejection(fallback,entries);++s.values;
+  for(unsigned i=0;i<CellFieldCount;++i)if(before[i]!=current[i])++s.fields[i];
+ }
+ const CellRejections& cellRejections(bool fallback)const{return m_cellRejections[unsigned(fallback)];}
+private:
+ CellRejections& beginCellRejection(bool fallback,unsigned entries){
+  auto& s=m_cellRejections[unsigned(fallback)];
+  if(!s.calls)s.entriesMin=s.entriesMax=entries;
+  if(entries<s.entriesMin)s.entriesMin=entries;
+  if(entries>s.entriesMax)s.entriesMax=entries;
+  ++s.calls;return s;
+ }
+public:
  template<class Settings> bool closestMatches(bool fallback,const Settings& captured,const Settings& current){
   if(captured==current)return true;
   auto& s=m_closestMismatch[unsigned(fallback)];++s.calls;
@@ -267,6 +293,14 @@ public:
    std::fprintf(output,"[PATH_CLOSEST_MISMATCH] phase=%s calls=%llu",phase?"fallback":"primary",u(c.calls));
    for(unsigned i=0;i<ClosestFieldCount;++i)std::fprintf(output," %s=%llu",closestFields[i],u(c.fields[i]));
    std::fprintf(output,"\n");
+   const auto& cells=m_cellRejections[phase];
+   const char* cellFields[]={"metadata","obstacle","fence","transparent","zone","aircraft_goal","pinched","type","unit_flags",
+    "connects_layer","layer","goal_unit","goal_aircraft","pos_unit","info_x","info_y","effective_fence","effective_transparent","effective_obstacle"};
+   static_assert(sizeof(cellFields)/sizeof(*cellFields)==CellFieldCount,"cell names must match snapshot fields");
+   std::fprintf(output,"[PATH_CELL_REJECTIONS] phase=%s calls=%llu values=%llu log_full=%llu capture_failed=%llu entries_min=%u entries_max=%u",
+    phase?"fallback":"primary",u(cells.calls),u(cells.values),u(cells.logFull),u(cells.captureFailed),cells.entriesMin,cells.entriesMax);
+   for(unsigned i=0;i<CellFieldCount;++i)std::fprintf(output," %s=%llu",cellFields[i],u(cells.fields[i]));
+   std::fprintf(output,"\n");
   }
   for(unsigned i=0;i<m_slowQueueCount;++i){
    const auto&s=m_slowQueues[i];
@@ -330,6 +364,7 @@ private:
  std::array<AdmissionMismatch,2> m_admissionMismatch{};
  std::array<AdmissionMismatch,2> m_admissionReuse{};
  std::array<ClosestMismatch,2> m_closestMismatch{};
+ std::array<CellRejections,2> m_cellRejections{};
  std::array<QueueSample,retainedSamples> m_slowQueues{};
  std::array<PairSample,retainedSamples> m_slowPairs{};
  unsigned m_slowQueueCount=0,m_slowPairCount=0;

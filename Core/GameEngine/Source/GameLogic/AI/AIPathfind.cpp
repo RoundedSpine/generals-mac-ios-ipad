@@ -5726,7 +5726,23 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 #if RETAIL_COMPATIBLE_PATHFINDING
    valid=valid && GENERALS_PATH_RESULT_CHECK(job.fixed==s_useFixedPathfinding,FixedMode) && GENERALS_PATH_RESULT_CHECK(!s_forceCleanCells,Recovery);
 #endif
-   if (valid) valid=GENERALS_PATH_RESULT_CHECK(job.reads.cells.matches([](PathfindCell* cell){return cell->permanentSearchValues();}),Cells) &&
+   // GeneralsX @feature Codex 29/10/2026 Explain the reached cell failure using stored snapshots and the original single live read.
+   const auto cellsMatch=[&]{
+    const auto& cells=job.reads.cells;
+    const auto read=[](PathfindCell* cell){return cell->permanentSearchValues();};
+#ifdef GENERALS_ZH_PATH_TIMING
+    const auto entries=static_cast<unsigned>(cells.size());
+    if(cells.overflow()){
+     m_pathTiming.cellLogRejected(job.fallbackResult,entries,cells.full());return false;
+    }
+    return cells.matches(read,[&](const auto& before,const auto& now){
+     m_pathTiming.cellValuesRejected(job.fallbackResult,entries,before,now);
+    });
+#else
+    return cells.matches(read);
+#endif
+   };
+   if (valid) valid=GENERALS_PATH_RESULT_CHECK(cellsMatch(),Cells) &&
     GENERALS_PATH_RESULT_CHECK(job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);}),Corridor);
    if (valid) for (const auto& query:job.reads.queries) {
     LiveOccupancyReader live={this,obj};

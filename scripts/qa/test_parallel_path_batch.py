@@ -417,6 +417,122 @@ int main(){using T=PathSearchTiming;using R=T::Rejection;using S=T::Result;
 
 
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @test Codex 29/10/2026 Cell diagnostics must classify the existing first failure without changing reads or acceptance.
+    def test_cell_rejection_observer_keeps_first_failure_and_log_cause(self):
+        run_cpp(r'''
+#include "boundedsearchreads.h"
+#include <cassert>
+#include <vector>
+#include <stdexcept>
+int comparisons=0;
+struct Value{int n=0;bool operator==(const Value&other)const{++comparisons;return n==other.n;}};
+int main(){BoundedSearchReads<int,Value,4>log;for(int i=0;i<4;++i)log.observe(i,{i+10});
+ for(int bad=-1;bad<4;++bad){std::vector<int>plain,diagnostic;int callbacks=0,oldComparisons=0;
+  comparisons=0;bool expected=log.matches([&](int key){plain.push_back(key);return Value{key==bad?-1:key+10};});oldComparisons=comparisons;
+  comparisons=0;bool actual=log.matches([&](int key){diagnostic.push_back(key);return Value{key==bad?-1:key+10};},
+   [&](const Value&before,const Value&now){++callbacks;assert(before.n==bad+10&&now.n==-1);});
+  assert(actual==expected&&plain==diagnostic&&callbacks==int(bad>=0)&&comparisons==oldComparisons);
+ }
+ // Duplicate at capacity is valid and never reruns capture; only a new key makes the log full.
+ log.observeWith(0,[]{assert(false);return Value{};});assert(log.size()==4&&!log.full()&&!log.captureFailed());
+ log.observe(4,{14});assert(log.overflow()&&log.full()&&!log.captureFailed());
+ assert(!log.matches([](int){assert(false);return Value{};},[](const Value&,const Value&){assert(false);}));
+ log.reset();assert(!log.overflow()&&!log.full()&&!log.captureFailed()&&!log.size());
+ bool caught=false;try{log.observeWith(0,[]{throw std::runtime_error("capture");return Value{};});}catch(const std::runtime_error&){caught=true;}
+ assert(caught&&log.overflow()&&!log.full()&&log.captureFailed()&&log.size()==1);
+ assert(!log.matches([](int){assert(false);return Value{};},[](const Value&,const Value&){assert(false);}));
+ log.reset();log.observe(0,{1});assert(log.matches([](int){return Value{1};},[](const Value&,const Value&){assert(false);}));
+ int callbacks=0;caught=false;
+ try{log.matches([](int)->Value{throw std::runtime_error("validation");},[&](const Value&,const Value&){++callbacks;});}
+ catch(const std::runtime_error&){caught=true;}
+ assert(caught&&!callbacks&&!log.overflow());
+}
+''')
+
+    def test_cell_rejection_summary_maps_every_snapshot_field_and_bounded_ranges(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <cassert>
+#include <string>
+int main(){using T=PathSearchTiming;T timing;std::array<unsigned,T::CellFieldCount>before{};
+ static_assert(T::CellFieldCount==19,"production snapshot field count");
+ for(bool fallback:{false,true}){
+  for(unsigned i=0;i<T::CellFieldCount;++i){auto current=before;current[i]=1;timing.cellValuesRejected(fallback,3,before,current);}
+  auto current=before;current[T::Metadata]=current[T::UnitFlags]=1;timing.cellValuesRejected(fallback,4,before,current);
+  timing.cellLogRejected(fallback,8192,true);timing.cellLogRejected(fallback,5,false);
+  const auto&s=timing.cellRejections(fallback);assert(s.calls==22&&s.values==20&&s.logFull==1&&s.captureFailed==1&&s.entriesMin==3&&s.entriesMax==8192);
+  for(unsigned i=0;i<T::CellFieldCount;++i)assert(s.fields[i]==unsigned(i==T::Metadata||i==T::UnitFlags?2:1));
+ }
+ FILE*f=tmpfile();assert(f);timing.report(f);rewind(f);std::string out;char buffer[1024];while(fgets(buffer,sizeof(buffer),f))out+=buffer;fclose(f);
+ for(const char*phase:{"primary","fallback"}){
+  const auto row=std::string("[PATH_CELL_REJECTIONS] phase=")+phase+" calls=22 values=20 log_full=1 capture_failed=1 entries_min=3 entries_max=8192";
+  assert(out.find(row)!=std::string::npos);
+ }
+ assert(out.find("metadata=2 obstacle=1 fence=1 transparent=1 zone=1 aircraft_goal=1 pinched=1 type=1 unit_flags=2 connects_layer=1 layer=1 goal_unit=1 goal_aircraft=1 pos_unit=1 info_x=1 info_y=1 effective_fence=1 effective_transparent=1 effective_obstacle=1")!=std::string::npos);
+}
+''')
+
+    def test_cell_rejection_validator_classifies_all_fields_once_in_each_phase(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;
+ for(bool fallback:{false,true})for(unsigned field=0;field<T::CellFieldCount;++field){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;p.prepareParallelBatch();
+  if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];
+  PathfindCell cell;auto before=cell.permanentSearchValues();before[field]^=1;job.reads.cells.reset();job.reads.cells.observe(&cell,before);
+  auto take=[&]{return p.takeParallelResult(&w.a,w.a.ai.locomotor,job.from,job.to,nullptr,0,job.start,job.goal,job.startIndex,job.settings,fallback?&job.closestSettings:nullptr);};
+  assert(!take()&&!take());const auto&s=p.m_pathTiming.cellRejections(fallback);
+  assert(s.calls==1&&s.values==1&&!s.logFull&&!s.captureFailed&&s.entriesMin==1&&s.entriesMax==1);
+  for(unsigned i=0;i<T::CellFieldCount;++i)assert(s.fields[i]==unsigned(i==field));
+  assert(p.m_pathTiming.rejections(fallback,T::Rejection::Cells)==1&&!p.m_pathTiming.cellRejections(!fallback).calls);
+ }
+}
+''',timeout=45)
+
+    def test_cell_rejection_validator_distinguishes_full_capture_failure_and_prior_guard(self):
+        run_cpp(fixture()+r'''
+int main(){using T=PathSearchTiming;
+ for(bool fallback:{false,true})for(int scenario=0;scenario<3;++scenario){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;p.prepareParallelBatch();
+  if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+  auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];job.reads.cells.reset();
+  if(scenario==1){bool caught=false;try{job.reads.cells.observeWith(job.start,[]{throw std::runtime_error("capture");return std::array<unsigned,19>{};});}
+   catch(const std::runtime_error&){caught=true;}assert(caught);
+  }else for(unsigned i=0;i<8193;++i)job.reads.cells.observe(reinterpret_cast<PathfindCell*>(std::uintptr_t(i+1)),{});
+  if(scenario==2)++p.m_parallelWorldEpoch;
+  assert(!p.takeParallelResult(&w.a,w.a.ai.locomotor,job.from,job.to,nullptr,0,job.start,job.goal,job.startIndex,job.settings,fallback?&job.closestSettings:nullptr));
+  const auto&s=p.m_pathTiming.cellRejections(fallback);
+  assert(s.calls==unsigned(scenario!=2)&&!s.values&&s.logFull==unsigned(scenario==0)&&s.captureFailed==unsigned(scenario==1));
+  assert(p.m_pathTiming.rejections(fallback,scenario==2?T::Rejection::WorldEpoch:T::Rejection::Cells)==1);
+  for(auto count:s.fields)assert(!count);
+ }
+}
+''')
+
+    def test_cell_rejection_diagnostics_preserve_actual_snapshot_and_live_query_counts(self):
+        def traced(timing):
+            source='#include <atomic>\nstd::atomic<unsigned> validationCellReads{0};\n'+validation_outcome_fixture(timing)
+            marker='std::array<unsigned, 19> permanentSearchValues() const {'
+            self.assertIn(marker,source)
+            return source.replace(marker,marker+'++validationCellReads;',1)
+        cases=r'''
+int main(){for(bool fallback:{false,true})for(int scenario=0;scenario<6;++scenario){World w;Pathfinder p;w.queue(p);p.quickAllowed=!fallback;p.prepareParallelBatch();
+ if(fallback)p.confirmParallelFallback(&w.a,w.a.ai.locomotor,w.a.ai.from,w.a.ai.to,false);
+ auto&job=fallback?*p.m_parallelBatch->jobs[0].fallback:p.m_parallelBatch->jobs[0];
+ if(scenario==1){auto before=job.start->permanentSearchValues();before[6]^=1;job.reads.cells.reset();job.reads.cells.observe(job.start,before);}
+ if(scenario==2||scenario==4){for(unsigned i=0;i<8193;++i)job.reads.cells.observe(reinterpret_cast<PathfindCell*>(std::uintptr_t(i+1)),{});}
+ if(scenario==3){job.reads.cells.reset();bool caught=false;try{job.reads.cells.observeWith(job.start,[]{throw std::runtime_error("capture");return std::array<unsigned,19>{};});}catch(const std::runtime_error&){caught=true;}assert(caught);}
+ if(scenario==4)++p.m_parallelWorldEpoch;
+ if(scenario==5){job.reads.corridor.reset();job.reads.corridor.observe(0,!mainPathfindSearchContext().corridorPassable(0));}
+ validationCellReads=validationAiReads=validationHeightReads=0;
+ const auto*result=p.takeParallelResult(&w.a,w.a.ai.locomotor,job.from,job.to,nullptr,0,job.start,job.goal,job.startIndex,job.settings,fallback?&job.closestSettings:nullptr);
+ assert(bool(result)==(scenario==0));
+ if(scenario==1)assert(validationCellReads==1);
+ if(scenario>=2&&scenario<=4)assert(!validationCellReads);
+ if(scenario==0||scenario==5)assert(validationCellReads==job.reads.cells.size());
+ printf("%u %d %u %u %u %u\n",unsigned(fallback),scenario,unsigned(result!=nullptr),validationCellReads.load(),validationAiReads.load(),validationHeightReads.load());
+}}
+'''
+        self.assertEqual(run_cpp(traced(False)+cases).stdout,run_cpp(traced(True)+cases).stdout)
+
     # GeneralsX @test Codex 29/10/2026 Validate allocation decisions rather than treating every permanent-count change as stale.
     def test_admission_window_exhaustive_predicate_traces_and_invalid_capture(self):
         run_cpp(r'''
