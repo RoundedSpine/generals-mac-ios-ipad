@@ -77,30 +77,37 @@ capacity policy change, not a consequence of simply separating scratch state.
 The latest diagnostic stage separates a changed cell snapshot from a full or
 failed cell-read log. It identifies differing fields in the first unequal cell
 using the existing single read. This adds visibility, not a faster search or a
-larger off-thread scope. It does not yet identify which cause explains the 26
-cell first rejections in the preceding device session.
+larger off-thread scope. Its new device session identifies goal-owner changes
+in all 22 cell first rejections, 20 also with metadata presence changes, and no
+full or failed cell logs. It cannot
+retroactively classify the preceding session's 26 cell failures.
 
 ## Device evidence and performance limits
 
-The newest supplied device log is still ~ec6c40d, preceding the new diagnostics.
-It completes 967 pairs, reuses 1,876/1,906 primary phases (98.43%) and all 28 closest
-fallback phases. Five primary and two fallback phases complete despite changed
-permanent usage, with zero admission rejection. All fallback executions in this
-session are early fallbacks. Queued closest runs 42 primary phases and reuses 22;
-safe and ordinary fine-loop-failure fallback are not exercised here. The remaining
-30 primary first rejections are cells 26, kind three and world epoch one. Counts
-and finalizations balance, and the game exits zero. The diagnostic build has no
-new device result yet; do not attribute these figures to 32ccf4e30.
+The newest supplied device log is ~32ccf4e. It completes 748 pairs, reuses
+1,426/1,464 primary phases (97.40%) and 31/32 closest fallback phases. Nine primary
+and two fallback phases complete despite changed permanent usage, with zero
+admission rejection. All fallback executions in this session are early fallbacks.
+Queued closest runs 24 primary phases and reuses 15; safe and ordinary
+fine-loop-failure fallback are not exercised here. The 38 primary first rejections
+are cells 21, kind 12 and world epoch five; the one fallback rejection is cells.
+All 22 cell first rejections contain changed goal-owner values, 20 also metadata
+presence changes, with no full or failed cell logs. Ordered main-side goal updates
+provide a source-supported explanation, not an identified per-request device trace.
+Metadata presence still determines allocation kind; do not drop the guard.
+Counts and finalizations balance, and the game exits zero.
 
-The longest measured queue update is 39.318 ms. Its 36.435 ms pair already reuses
-both results; avoiding rejected work cannot remove that whole wait. Three other
-retained slow updates are synchronous zone rebuilding at 30.6–35.7 ms. The
-reference keeps that zone-rebuild boundary too. More workers cannot guarantee a
+The longest measured queue update is 49.733 ms, including 30.373 ms of serial
+ordinary search and 11.418 ms across two pairs. The log does not identify why the
+serial search was needed. The maximum pair is 22.494 ms and already reuses both
+results. Three other retained slow updates are synchronous zone rebuilding at
+32.5–36.2 ms. The reference keeps that zone-rebuild boundary too. More workers cannot guarantee a
 shorter single search, and broader groups still have a synchronous completion
-barrier. Our latest queue mean is 0.344 ms versus the preceding 0.330 ms in a
-different workload; preparation totals are nearly unchanged. Higher reuse is
-not proof of net speedup. All eight retained task samples were reused and cannot
-explain the 26 rejected cell phases elsewhere in the session.
+barrier. Our latest queue mean is 0.265 ms versus the preceding 0.344 ms in a
+different workload, while the maximum increases. Neither this mixed timing result
+nor acceptance percentages establish speedup or regression. All eight retained
+task samples were reused and cannot explain the rejected cell phases elsewhere
+in the session.
 
 No matched replay benchmark or device-memory comparison with Reimagined exists.
 Dense storage scales with map size and participating threads; our bounded storage
@@ -111,11 +118,13 @@ percentage is justified.
 
 ## Useful next steps
 
-The allocation-decision stage is implemented and exercised on device. First use
-the new PATH_CELL_REJECTIONS rows to classify the remaining cell failures as
-changed values, full logs or failed capture, then audit the corresponding
-dependencies. Do not remove fields or raise bounds without that evidence. This
-targets rejected work, not the already-reused longest pair or zone rebuilds.
+The allocation-decision and cell-classification stages are exercised on device.
+The next dependency audit can focus on ordered goal updates: separate actual
+allocation-kind uses from query-only cell observations and prove whether any
+unchanged decisions permit reuse. Existing basic setter/metadata mutation checks
+do not replace a realistic two-request callback trace. Do not remove fields or
+raise bounds without equivalence evidence. This targets rejected work, not the
+already-reused longest pair or zone rebuilds.
 Compact bounded search-only records remain a separate useful storage step toward
 the reference's layout without adopting dense map-sized capacity.
 
@@ -142,9 +151,9 @@ and five new diagnostic ASan/UBSan cases. Native run
 [40798412913](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40798412913)
 also passes Mac QA/race checks, iOS SDK compilation, unsigned packaging and
 artifact upload for 32ccf4e30; dependency save is skipped after the cache restore.
-Its device test remains pending. Those fixtures and the earlier device session
-do not prove full engine race freedom, reference replay equivalence or all
-lifecycle stress cases.
+Its new device session confirms the diagnostic classifications and balanced
+outcomes. Those fixtures and this session do not prove full engine race freedom,
+reference replay equivalence or all lifecycle stress cases.
 This comparison changes documentation only; unchanged tests are not rerun.
 
 ## Implementation reports

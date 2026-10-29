@@ -113,3 +113,100 @@ capture_failed. Value fields identify the next live-state dependency to audit;
 full logs instead motivate examining the bounded observation footprint. Neither
 outcome justifies dropping validation or raising limits without further evidence.
 This change measures cause and does not itself optimize a search or zone rebuild.
+
+## Device result — 29 October 2026
+
+The supplied generals-stderr.log identifies ~32ccf4e, enables parallel mode with
+one worker plus main, reaches ScoreScreen and exits zero. The new counters are
+present and balance against the existing first-rejection summaries. There is no
+logged fatal/assertion or primitive-restart warning. Known platform/browser stub
+warnings and one WAV wrong-sample-count message remain. Normal completion does
+not establish movement correctness, full engine race freedom or lifecycle coverage.
+
+| Measurement | Previous ~ec6c40d | Current ~32ccf4e |
+| --- | ---: | ---: |
+| Completed pairs | 967 | 748 |
+| Primary reused / executed | 1,876 / 1,906 | 1,426 / 1,464 |
+| Primary reuse rate | 98.43% | 97.40% |
+| Fallback reused / executed | 28 / 28 | 31 / 32 |
+| Primary cell first rejections | 26, cause unavailable | 21, unequal values |
+| Fallback cell first rejections | 0 | 1, unequal values |
+| Changed-count reuse, primary / fallback | 5 / 2 | 9 / 2 |
+| Admission first rejections, either phase | 0 | 0 |
+| Queue mean / maximum, ms | 0.344 / 39.318 | 0.265 / 49.733 |
+| Queue updates at least 5 / 20 / 50 ms | 94 / 22 / 0 | 49 / 15 / 0 |
+| Pair total / maximum, ms | 221.970 / 36.435 | 164.888 / 22.494 |
+| Serial kernel total / maximum, ms | 626.081 / 23.991 | 508.065 / 30.373 |
+| Validation total / maximum, ms | 18.593 / 0.268 | 13.864 / 0.267 |
+
+These are different workloads. Lower mean and pair times, lower acceptance and a
+higher queue maximum do not establish either a speedup or a diagnostic regression.
+The diagnostic change does not alter the search or acceptance rules.
+
+The new classifications are specific:
+
+| First unequal cell field | Primary phases | Fallback phases |
+| --- | ---: | ---: |
+| goal_unit | 21 | 1 |
+| unit_flags | 20 | 1 |
+| metadata | 19 | 1 |
+| info_x / info_y, each | 19 | 1 |
+| All other snapshot fields | 0 | 0 |
+| Full cell logs / capture failures | 0 / 0 | 0 / 0 |
+| Acquired entries in rejected cell logs, min–max | 110–634 | 304–304 |
+
+Thus every cell first rejection here includes a ground-unit goal-owner change.
+Twenty of the 22 also change permanent metadata presence. Coordinates in this
+snapshot become zero without metadata; their differences do not establish that
+map cells or units physically moved. These are first-unequal-cell counts only,
+not all changed cells, directions or previous/current object IDs. Later guards
+are short-circuited, so zero occupancy/height rejection does not establish that
+those later checks would pass for the rejected phases. This log also does not
+retroactively identify the causes of the preceding session's 26 cell rejections.
+
+Source tracing explains a normal way to produce this signature. AIUpdate.cpp's
+doPathfind updates a successful ordinary/approach request's goal before the next
+queued request is consumed. Pathfinder::updateGoal calls removeGoal and then
+setGoalUnit; setGoalUnit changes the goal ID and occupancy flags, allocating or
+releasing permanent metadata as needed. No simulation advancement while workers
+are running is required: applying the first request after the join can stale the
+next request's prediction. The aggregates do not identify which particular
+callback or object caused these device failures.
+
+The current allocation policy makes metadata presence relevant independently of
+goal occupancy: searchInfo and allocateSearchInfo use it to choose persistent
+versus charged transient records. Ground goals/flags also affect destination and
+movement decisions. Therefore these fields cannot simply be ignored, even though
+query-result revalidation covers some of the same occupancy information. A useful
+next audit is to distinguish cells actually used for allocation from cells only
+observed by a query and determine whether any complete dependency can be validated
+more precisely. Existing setter/metadata rejection fixtures already cover basic
+mutations; a realistic ordered two-request goal-update case would extend that
+evidence. Keep the existing guard and capacity until equivalence is demonstrated.
+
+Other primary first reasons are kind 12 and world epoch five; together with cells
+21 they account for all 38 primary rejections. Fallback has only the one cell
+rejection. The 1,464 primary plus 32 fallback-only slots equal 2 * 748 pairs.
+Reused results 1,426 + 31 plus 6,823 serial kernels equal 8,280 finalizations.
+There are no discarded or validated-unfinished results. Queued closest executes
+24 primary phases and reuses 15. All 32 fallback executions are early fallback;
+safe and ordinary-fine-loop-failure fallback are still unexercised here.
+
+The slowest queue update is 49.733 ms: two pairs total 11.418 ms and one serial
+ordinary kernel costs 30.373 ms, with preparation 3.900 ms and finalization
+2.398 ms. It charges 8,655 cells; overshoot by the last completed request remains
+permitted by the unchanged per-request budget. The summary does not identify why
+that serial kernel was required. One retained pair from that queue, pair 168,
+reuses both results; the other pair is not retained. The next three slow queue
+updates are synchronous zone rebuilding at 36.225, 32.734 and 32.542 ms.
+
+All eight retained slow-pair tasks reuse their results, including the maximum
+22.494 ms pair. Their query/height flags are zero; they contain 13,402 distinct
+query entries from 173,432 observations in total. These retained samples cannot
+explain cell-rejected phases elsewhere in the session. Faster acceptance alone
+does not address the already-reused searches or synchronous zone rebuilding.
+
+Summary arithmetic and source paths were checked for this review. No runtime
+change or new test was needed; the existing regression/sanitizer results above
+remain the implementation checks. This is the first device confirmation that
+the new classification executes, rather than proof of all unexercised branches.
