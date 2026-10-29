@@ -136,3 +136,13 @@ changes without adopting the reference's independent map-sized node capacity.
 Local regression/sanitizer checks pass; native SDK and device confirmation for
 this subsequent stage remain pending. Compact search-only storage, full worker
 APIs, wider dispatch and grouped scheduling remain separate differences.
+
+The ~ec6c40d device follow-up and successful native build now verify this stage
+executes: five primary and two fallback phases complete despite changed counts,
+with no admission rejection. Primary reuse is 98.43%, fallback reuse 28/28. The
+remaining 26 cell-dependency first failures need classification as changed values
+versus invalid/overflowed logs; prior strict-count checks could mask later cell
+failures. The longest retained pair already reuses both results, and synchronous
+zone rebuilding remains among the slowest queue updates. See the allocation-window
+report for evidence and timing limits; these results do not establish performance
+parity with Reimagined.

@@ -136,3 +136,84 @@ cell rejections, balanced result counts, paths/destinations and queue/preparatio
 tails. A positive reuse count proves some changed-count phases completed without
 serial recomputation; it does not establish net speedup. The prior longest reused
 pair and synchronous zone rebuilds remain separate measured costs.
+
+## Native build and device result — 29 October 2026
+
+GitHub Actions [40784895491](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40784895491)
+for ec6c40d9e completes successfully on macos-15 ARM64. The fresh Mac workflow
+QA and copied-query ThreadSanitizer steps pass, followed by iOS device compilation,
+unsigned packaging and artifact upload. Dependency-cache restoration succeeds;
+the separate dependency-save step is skipped. This also confirms the corrected
+fixtures pass together in the actual workflow.
+
+The supplied device log identifies ~ec6c40d, reaches ScoreScreen and exits zero.
+There is no logged fatal/assertion or primitive-restart warning. Existing
+platform/browser stubs and one WAV wrong-sample-count message remain. Normal
+completion does not replace movement feedback, lifecycle stress or replay checks.
+
+| Measurement | Previous ~81d5a83 | Current ~ec6c40d |
+| --- | ---: | ---: |
+| Completed pairs | 946 | 967 |
+| Primary reused / executed | 1,811 / 1,852 | 1,876 / 1,906 |
+| Primary reuse rate | 97.79% | 98.43% |
+| Fallback reused / executed | 38 / 40 | 28 / 28 |
+| Fallback reuse rate | 95.00% | 100.00% |
+| Permanent-admission first rejections, primary / fallback | 33 / 2 | 0 / 0 |
+| Cell-dependency first rejections, primary / fallback | 0 / 0 | 26 / 0 |
+| Primary / fallback completed changed-count reuse | Not recorded | 5 / 2 |
+| Maximum measured queue update | 41.130 ms | 39.318 ms |
+| Queue updates at least 5 / 20 / 50 ms | 112 / 15 / 0 | 94 / 22 / 0 |
+
+The new counters demonstrate actual completed reuse across count changes: five
+primary phases (three higher and two lower) and two fallback phases (one higher
+and one lower). Primary captured counts span 13,362–15,670 and validated counts
+13,360–15,667; fallback spans are 15,637–15,643 and 15,638–15,640. These independent
+ranges do not specify per-request deltas or rejected-search headroom. Both
+admission-mismatch rows are zero, including equal/invalid-capture counts.
+
+All 28 executed fallbacks are early fallbacks. Queued closest runs 42 primary
+phases, with 22 reused; these are subsets of the primary totals. Safe and
+ordinary fine-loop-failure fallback remain unexercised in this device session.
+There is no discarded or validated-unfinished work. Counts balance: 1,906 primary
+plus 28 fallback-only slots equal two times 967 pairs; 1,876 primary and 28 fallback
+reuse plus 7,125 serial kernels equal 9,029 finalizations.
+
+## Remaining cell rejections and timing interpretation
+
+The 30 primary first failures are cell dependencies (26), search kind (three)
+and world epoch (one). All fallback phases are reused. Closest policy, corridor,
+explicit query/height overflow and the other first-reason groups remain zero.
+This does not mean every later check executes after an earlier failure.
+
+Source review confirms BoundedSearchReads::matches returns false for either an
+unusable/overflowed log or a differing exact cell snapshot. The current device
+summary combines both under cell_dependencies. The eight retained slow pairs'
+task samples all end Reused and therefore cannot identify the 26 rejected
+phases. Their PATH_READS_SLOW flags describe query/height logs, not cell-log
+capacity. They do not rule out cell-log overflow elsewhere in the session.
+
+The old permanent-count guard ran before cell validation and could hide a later
+cell mismatch. The new allocator observation also explicitly covers cached cell
+allocation kinds. Either can contribute to the shift in reported first reasons.
+These unmatched logs cannot establish that the same 26 candidates failed before,
+or distinguish changed values from invalid cell logs. Keep cell validation;
+the next focused investigation should separate those causes before changing
+dependency policy or interpreting the count as a new correctness failure.
+
+The slowest queue update is 39.318 ms with a 36.435 ms pair, no serial kernel and
+both results reused. Three other retained queue updates are synchronous zone
+rebuilds at 35.727, 32.849 and 30.624 ms with no callbacks or pairs. All eight
+retained task read samples have zero query/height flags, with 16,717 unique
+queries from 352,724 actual observations. The largest worker still makes 138,969
+observations using 3,501 entries and reuses its result.
+
+Queue mean is 0.344 ms versus 0.330 ms previously. Serial kernel total/max rise
+to 626.081/23.991 ms from 506.072/14.257 ms; pair total rises to 221.970 ms from
+196.667 ms while its maximum falls to 36.435 ms from 38.380 ms. Preparation totals
+are almost equal, 142.604 versus 142.645 ms, over different attempt counts. No
+measured queue update reaches 50/100/500 ms, but more reach 20 ms. Workloads and
+run duration differ and totals overlap, so this is evidence of useful reuse and
+remaining tail costs, not a controlled overall speedup or regression measurement.
+
+This follow-up changes documentation only. Source/log counter consistency and
+diff checks pass; unchanged tests are not rerun and no new IPA build is started.
