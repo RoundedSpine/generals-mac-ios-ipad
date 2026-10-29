@@ -264,6 +264,13 @@ policy. Search-only node compaction remains a separate difference.
 The same stage adds bounded serial closest candidate/pruning work and an optional
 host getter benchmark. Controlled route/work/accounting traces match keyed
 resolution. Pinned host microbench medians improve for its sequential/random
-getter mixes, with noisy unpinned results also documented. Native/device results
-remain pending; those measurements do not establish iPhone speedup or explain the
-earlier closest kernels without their new work counters.
+getter mixes, with noisy unpinned results also documented. Native run 40843223256
+now passes Mac QA/race checks, iOS SDK compilation, packaging and upload. The
+~26be01d device session exits zero: 622/624 primary phases and all six fallbacks
+reuse, with balanced finalizations. The main index table retains 180,024 bytes.
+Its slowest closest kernel is 1.459 ms and maximum queue 11.573 ms, but the session
+has fewer requests and does not reproduce the older long searches. The four
+closest samples show exact-goal and near-goal-pruned outcomes without over-2000
+pruning. These are device execution/counter checks, not a matched speed comparison.
+The larger compact-node layout, full worker APIs and broader dispatch remain
+differences from the reference.

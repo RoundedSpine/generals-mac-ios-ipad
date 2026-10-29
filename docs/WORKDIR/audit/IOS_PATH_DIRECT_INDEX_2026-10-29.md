@@ -132,9 +132,9 @@ semantics.
 
 All 232 local workflow regression cases pass, including all 108 batch cases.
 All 108 batch cases pass ThreadSanitizer and all seven added cases pass ASan/UBSan.
-Diff checks pass. Native iOS SDK and device validation remain pending. Controlled
-services do not establish full-engine replay parity, all lifecycle safety or
-device speedup.
+Diff checks pass. Native iOS SDK and device follow-up are recorded below.
+Controlled services do not establish full-engine replay parity, all lifecycle
+safety or device speedup.
 
 Run the reproducible host probe with:
 
@@ -171,3 +171,87 @@ and finalization totals. Compare serial-kernel tails with the earlier 54.110,
 38.832 and 36.886 ms cases without treating unmatched sessions as a controlled
 benchmark. Use the work counts to guide compact-node and lookup improvements;
 retain current allocation limits and scheduling.
+
+## Native build and first device result — 29 October 2026
+
+GitHub Actions [40843223256](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40843223256)
+passes Mac QA/race checks, native iOS SDK compilation, unsigned packaging and
+artifact upload on macos-15 ARM64. Dependency save is skipped after cache restore.
+The supplied log identifies ~26be01d, reaches ScoreScreen and exits zero. No
+fatal/assertion or primitive-restart warning is logged. Known platform/browser
+stubs and the WAV sample-count message remain. No new runtime fix is indicated.
+
+| Measurement | Previous ~9117f78 | Current ~26be01d |
+| --- | ---: | ---: |
+| Queue calls | 7,211 | 3,803 |
+| Completed pairs | 945 | 315 |
+| Primary reused / executed | 1,831 / 1,854 | 622 / 624 |
+| Primary reuse rate | 98.76% | 99.68% |
+| Fallback reused / executed | 36 / 36 | 6 / 6 |
+| Cell / occupancy first rejections | 15 / 1 | 1 / 0 |
+| Queue mean / maximum, ms | 0.377 / 59.558 | 0.204 / 11.573 |
+| Queue updates at least 5 / 20 / 50 ms | 82 / 24 / 1 | 45 / 0 / 0 |
+| Pair maximum, ms | 33.468 | 1.135 |
+| Serial kernel maximum, ms | 54.110 | 9.309 |
+| Serial kernels, ordinary / closest | 6,490 / 248 | 3,588 / 82 |
+
+The current session contains substantially fewer requests and does not reproduce
+the earlier 36–54 ms closest searches. These lower timings are encouraging device
+evidence, not a controlled speedup measurement attributable to direct indexing.
+It also reports neither input latency nor GPU/frame timing.
+
+All four retained closest samples report index_bytes=180024: 45,006 prepared
+lookup entries, approximately 175.8 KiB in the serial main context, below its
+1 MiB bound. This confirms native index storage is prepared, not a per-getter
+hit count, all-context allocation total or engine RSS measurement. The retained
+table can reflect an earlier high-water size, not only currently live cells.
+
+| Rank / queue | Kernel ms | Flags / outcome | Pops / expansions | Candidates / improvements | Far tests / prunes | Final records |
+| --- | ---: | --- | --- | --- | --- | ---: |
+| 1 / 3371 | 1.459 | 6 / exact goal | 580 / 579 | 442 / 8 | 0 / 0 | 669 |
+| 2 / 3518 | 1.092 | 6 / exact goal | 364 / 363 | 274 / 5 | 0 / 0 | 405 |
+| 3 / 3261 | 1.079 | 1 / closest | 404 / 318 | 264 / 8 | 73 / 73 | 388 |
+| 4 / 3409 | 1.018 | 1 / closest | 383 / 291 | 287 / 4 | 91 / 91 | 338 |
+
+Flags six means started stuck plus initial tunneling, with no hierarchy available;
+one means hierarchy available without those initial flags. The first two reach
+the exact goal. The latter two return a closest candidate and prune every reached
+far case through the near-goal rule. No over-2000 or failed-hierarchy pruning
+reason occurs in these four retained samples. Their existing examined counts are
+410, 309, 242 and 214; these differ legitimately from pops/expansions. Counters
+are internally consistent and show both tunneling and pruning paths. They do not
+identify the old long searches' cause or prove what all unretained searches did.
+
+All outcome totals balance: 624 primary + six fallback-only slots = 2 * 315 pairs;
+622 primary + six fallback reuse + 3,670 serial kernels = 4,298 finalizations.
+There are no discarded, validated-unfinished or admission-rejected phases. One
+primary completes reuse despite permanent usage changing from 4,244 to 4,252.
+The two primary first rejections are kind one and cells one. The cell failure
+includes metadata, unit flags, ground goal and metadata coordinates, with no
+full/failed log; it occurs in retained pair 230. The kind failure occurs in pair
+231. Both are small tasks in queue 3199, not the session's largest queue call.
+Safe and queued-closest primary parallel work remain zero. All six parallel
+fallbacks are early fallbacks; ordinary-fine-failure fallback remains unexercised.
+
+The maximum queue call is 11.573 ms for 29 callbacks: 14 pairs, one ordinary
+serial kernel and 3,250 charged cells. Pair preparation totals 4.776 ms, barriers
+2.429 ms and validation 0.702 ms. This is multi-request queue work rather than a
+single expensive closest loop. The next three retained calls include callbacks
+that never enter these fine kernels; the current subphase rows are not an
+exhaustive callback profiler. Their 6,066–8,077 charges remain allowed final-request
+overshoot, not evidence of changed limits.
+
+The slowest pair's 1.135 ms barrier contains only 0.046/0.114 ms caller/worker
+kernels. Dispatch, wake/wait and scheduling are included in pair wall time; this
+is not evidence of a 1.1 ms search or of a specifically identified wait cause.
+Six of the eight retained task outcomes are reused and two rejected as above;
+their 626 query entries represent 1,749 observations, with query/height flags
+zero. These also indicate a different workload from the preceding session's
+much larger retained searches.
+
+For the next controlled comparison, reuse the earlier heavy save/commands if
+available and inspect these new closest counters. The compact-node and lookup
+plan can continue independently; this session supplies no justification to alter
+pruning, allocation limits or scheduling. Summary arithmetic, native job state
+and counter interpretation were checked. This review updates documentation only
+and does not rerun unchanged implementation checks.
