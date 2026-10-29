@@ -51,6 +51,10 @@
 #include "Common/LatchRestore.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+#include "Common/CriticalSection.h"
+#include "Common/Errors.h"
+#endif
 
 #include "GameClient/Line2D.h"
 
@@ -4328,7 +4332,7 @@ struct PathfindOccupancyValidation {
 #endif
 
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
-// GeneralsX @feature Codex 27/10/2026 Ordinary fine-search loop worker; no queued results survive the exclusive call.
+// GeneralsX @feature Codex 29/10/2026 Persistent joined worker for exclusive loops or independently validated queued APIs.
 struct PathfindExclusiveWorker {
 	ExclusiveSearchWorker worker;
 	unsigned long long searches = 0;
@@ -4367,8 +4371,28 @@ struct PathfindParallelReads {
  struct HeightValue {bool operator()(const Height&a,const Height&b)const{return a.z==b.z;}};
  BoundedObservationLog<Query,capacity,QueryKey,QueryValue> queries;
  BoundedObservationLog<Height,capacity,HeightKey,HeightValue> heights;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ // GeneralsX @feature Codex 29/10/2026 Replay terrain service results and the ignored-obstacle properties read outside occupancy queries.
+ struct TerrainRead {unsigned operation;Coord3D position;PathfindLayerEnum layer;Real value;};
+ struct TerrainKey {
+  std::array<unsigned,5> operator()(const TerrainRead& r)const{
+   std::array<unsigned,5> key{{r.operation,0,0,0,static_cast<unsigned>(r.layer)}};
+   static_assert(sizeof(Real)==sizeof(unsigned),"terrain observation keys require 32-bit Real");
+   std::memcpy(key.data()+1,&r.position.x,sizeof(Real));
+   std::memcpy(key.data()+2,&r.position.y,sizeof(Real));
+   std::memcpy(key.data()+3,&r.position.z,sizeof(Real));return key;
+  }
+ };
+ struct TerrainValue {bool operator()(const TerrainRead&a,const TerrainRead&b)const{return a.value==b.value;}};
+ BoundedObservationLog<TerrainRead,capacity,TerrainKey,TerrainValue> terrain;
+ BoundedSearchReads<ObjectID,std::array<unsigned,6>,64> objects;
+#endif
  Bool overflow = false;
- void reset() {cells.reset();corridor.reset();queries.clear();heights.clear();overflow=false;}
+ void reset() {cells.reset();corridor.reset();queries.clear();heights.clear();overflow=false;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  terrain.clear();objects.reset();
+#endif
+ }
  void query(const PathOccupancy::Input& input, const PathOccupancy::Result& result) {
   if(!queries.observe({input,result}))overflow=true;
  }
@@ -4383,6 +4407,18 @@ void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* ce
 struct PathfindParallelJob {
  PathfindSearchContext context;
  PathfindParallelReads reads;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ // GeneralsX @feature Codex 29/10/2026 A joined result owns its completed engine Path until accepted or discarded exactly once.
+ struct DisposePath {void operator()(Path* path)const{if(path)deleteInstance(path);}};
+ std::unique_ptr<Path,DisposePath> completedPath;
+ SearchAdmissionWindow<PATHFIND_RECORD_CAPACITY> requestAdmission;
+ Coord3D adjustedTo{},safePosition{};
+ Bool complete=false;
+ unsigned completeRecords=0;
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming stageTiming;
+#endif
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Each task writes only its own metric; main merges after the join.
  PathSearchTiming::Metric kernelTime;
@@ -4420,7 +4456,16 @@ struct PathfindParallelJob {
  Bool fallbackResult=false, fallbackAllowed=false, earlyFallback=false;
  void reset() {
   if (fallback) fallback->reset();
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  completedPath.reset();requestAdmission.reset();complete=false;completeRecords=0;
+  context.m_requestAdmission=nullptr;context.m_completeJob=nullptr;context.m_completeExecuting=false;
+  context.m_completeBegan=context.m_completeCorridorWritten=false;
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  context.m_privateTiming=nullptr;
+  for(unsigned i=0;i<PathSearchTiming::PhaseCount;++i)stageTiming[static_cast<PathSearchTiming::Phase>(i)]={};
+#endif
   kernelTime={};
   timingPair=0;timingRole=0;timingResult=PathSearchTiming::Result::NotRun;
 #endif
@@ -4466,6 +4511,52 @@ Real Pathfinder::searchGroundHeight(Real x, Real y) {
  }
  return height;
 }
+
+#ifdef GENERALS_ZH_PATH_TIMING
+// GeneralsX @bugfix Codex 29/10/2026 Complete participants never update the shared caller's timing aggregates concurrently.
+PathSearchTiming& Pathfinder::searchTiming(){
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ if(auto* timing=activePathfindSearchContext().m_privateTiming)return *timing;
+#endif
+ return m_pathTiming;
+}
+#endif
+
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+// GeneralsX @feature Codex 29/10/2026 These object properties are consumed by closest preparation outside the occupancy evaluator.
+static std::array<unsigned,6> completePathObjectValues(ObjectID id){
+ auto* obj=TheGameLogic->findObjectByID(id);
+ std::array<unsigned,6> result{};
+ if(!obj)return result;
+ result[0]=1;result[1]=static_cast<unsigned>(obj->getLayer());
+ const auto&pos=*obj->getPosition();
+ std::memcpy(result.data()+2,&pos.x,sizeof(Real));
+ std::memcpy(result.data()+3,&pos.y,sizeof(Real));
+ std::memcpy(result.data()+4,&pos.z,sizeof(Real));
+#if RTS_GENERALS
+ result[5]=obj->isKindOf(KINDOF_AIRFIELD);
+#else
+ result[5]=obj->isKindOf(KINDOF_FS_AIRFIELD);
+#endif
+ return result;
+}
+void Pathfinder::observeParallelObject(ObjectID id){
+ if(auto*reads=activePathfindSearchContext().m_parallelReads)
+  reads->objects.observeWith(id,[id]{return completePathObjectValues(id);});
+}
+PathfindLayerEnum Pathfinder::searchDestinationLayer(const Coord3D* pos){
+ const auto layer=TheTerrainLogic->getLayerForDestination(pos);
+ if(auto*reads=activePathfindSearchContext().m_parallelReads)
+  if(!reads->terrain.observe({0,*pos,LAYER_GROUND,static_cast<Real>(layer)}))reads->overflow=true;
+ return layer;
+}
+Real Pathfinder::searchLayerHeight(Real x,Real y,PathfindLayerEnum layer){
+ const Real height=TheTerrainLogic->getLayerHeight(x,y,layer);
+ if(auto*reads=activePathfindSearchContext().m_parallelReads)
+  if(!reads->terrain.observe({1,{x,y,0},layer,height}))reads->overflow=true;
+ return height;
+}
+#endif
 
 void Pathfinder::clearParallelBatch() {
  if (!m_parallelBatch) return;
@@ -5687,7 +5778,7 @@ void Pathfinder::confirmParallelFallback(const Object* obj, const LocomotorSet& 
 PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
  const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
  PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings,
- const PathfindClosestSettings* closest)
+ const PathfindClosestSettings* closest, Bool complete)
 {
  if (!obj || !m_parallelBatch || !m_parallelBatch->active) return nullptr;
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -5697,6 +5788,11 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
  for (auto& primary:m_parallelBatch->jobs) {
   // GeneralsX @feature Codex 27/10/2026 Fallback requires accepted ordinary failure or confirmation from the actual AI no-path branch.
   auto& job=closest && !primary.closest && primary.fallbackAllowed && primary.fallback ? *primary.fallback : primary;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(job.complete!=complete)continue;
+#else
+  if(complete)continue;
+#endif
   if (!job.ready || job.used || job.id!=obj->getID() || job.queueIndex!=m_queuePRHead) continue;
   job.used=true;
   auto& current=activePathfindSearchContext();
@@ -5706,7 +5802,11 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
    // GeneralsX @performance Codex 29/10/2026 Reuse only if every recorded allocation success/denial remains identical under the actual caller's frozen allowance.
    const auto admissionMatches=[&]{
     admissionNow=current.admissionUse();
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+    const bool same=(complete?job.requestAdmission:job.context.m_admissionWindow).matches(job.permanent,admissionNow);
+#else
     const bool same=job.context.m_admissionWindow.matches(job.permanent,admissionNow);
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
     return m_pathTiming.admissionMatches(job.fallbackResult,job.permanent,admissionNow,same);
 #else
@@ -5721,18 +5821,31 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 #else
 #define GENERALS_PATH_RESULT_CHECK(condition,reason) (condition)
 #endif
+   const auto closestMatches=[&]{
+    if(!closest)return true;
+    // Complete calls validate input policy here; derived obstacle/hierarchy settings are covered by their observed inputs.
+    if(complete){
+     auto policy=job.closestSettings;
+     policy.blocked=closest->blocked;policy.pathCostMultiplier=closest->pathCostMultiplier;policy.moveAllies=closest->moveAllies;
+#ifdef GENERALS_ZH_PATH_TIMING
+     return m_pathTiming.closestMatches(job.fallbackResult,job.closestSettings,policy);
+#else
+     return job.closestSettings==policy;
+#endif
+    }
+#ifdef GENERALS_ZH_PATH_TIMING
+    return m_pathTiming.closestMatches(job.fallbackResult,job.closestSettings,*closest);
+#else
+    return job.closestSettings==*closest;
+#endif
+   };
    Bool valid=GENERALS_PATH_RESULT_CHECK(job.obj==obj,Object) &&
     GENERALS_PATH_RESULT_CHECK(job.locomotor==&locomotorSet,Locomotor) &&
     GENERALS_PATH_RESULT_CHECK(samePoint(job.from,from),From) && GENERALS_PATH_RESULT_CHECK(samePoint(job.to,to),To) &&
     GENERALS_PATH_RESULT_CHECK(job.safe==(repulsor2!=nullptr),Kind) &&
     GENERALS_PATH_RESULT_CHECK(!job.safe || (samePoint(job.repulsor2,*repulsor2) && job.repulsorRadius==repulsorRadius),Repulsors) &&
     GENERALS_PATH_RESULT_CHECK(job.closest==(closest!=nullptr),Kind) &&
-#ifdef GENERALS_ZH_PATH_TIMING
-    // GeneralsX @feature Codex 28/10/2026 Classify scalar mismatches at the original reached check, without repeating live reads.
-    GENERALS_PATH_RESULT_CHECK(!closest || m_pathTiming.closestMatches(job.fallbackResult,job.closestSettings,*closest),ClosestPolicy) &&
-#else
-    GENERALS_PATH_RESULT_CHECK(!closest || job.closestSettings==*closest,ClosestPolicy) &&
-#endif
+    GENERALS_PATH_RESULT_CHECK(closestMatches(),ClosestPolicy) &&
     GENERALS_PATH_RESULT_CHECK(!job.fallbackResult || (obj->getAIUpdateInterface() && obj->getAIUpdateInterface()->getPath()==nullptr),FallbackPath) &&
     GENERALS_PATH_RESULT_CHECK(job.epoch==m_parallelWorldEpoch,WorldEpoch) &&
     GENERALS_PATH_RESULT_CHECK(job.lifecycle==PathOccupancy::validationLifecycleEpoch().load(),Lifecycle) &&
@@ -5740,8 +5853,8 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
     GENERALS_PATH_RESULT_CHECK(admissionMatches(),Admission) &&
     GENERALS_PATH_RESULT_CHECK(job.ignored==searchState().m_ignoreObstacleID,IgnoredObstacle) &&
     GENERALS_PATH_RESULT_CHECK(job.tunneling==searchState().m_isTunneling,Tunneling) &&
-    GENERALS_PATH_RESULT_CHECK(job.start==start,StartCell) && GENERALS_PATH_RESULT_CHECK(job.goal==goal,GoalCell) &&
-    GENERALS_PATH_RESULT_CHECK(job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y,StartIndex) &&
+    GENERALS_PATH_RESULT_CHECK(complete || job.start==start,StartCell) && GENERALS_PATH_RESULT_CHECK(complete || job.goal==goal,GoalCell) &&
+    GENERALS_PATH_RESULT_CHECK(complete || (job.startIndex.x==startIndex.x && job.startIndex.y==startIndex.y),StartIndex) &&
     GENERALS_PATH_RESULT_CHECK(before.surfaces==settings.surfaces && before.downhillOnly==settings.downhillOnly && before.layer==settings.layer &&
     before.crusher==settings.crusher && before.throughUnits==settings.throughUnits && before.dozer==settings.dozer &&
     before.vehicle==settings.vehicle && before.radius==settings.radius && before.centerInCell==settings.centerInCell &&
@@ -5767,7 +5880,7 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 #endif
    };
    if (valid) valid=GENERALS_PATH_RESULT_CHECK(cellsMatch(),Cells) &&
-    GENERALS_PATH_RESULT_CHECK(job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);}),Corridor);
+    GENERALS_PATH_RESULT_CHECK(complete || job.reads.corridor.matches([&](std::size_t block){return block<current.m_corridor.size() && current.corridorPassable(block);}),Corridor);
    if (valid) for (const auto& query:job.reads.queries) {
     LiveOccupancyReader live={this,obj};
     if (!GENERALS_PATH_RESULT_CHECK(PathOccupancy::evaluate(query.input,live)==query.result,Occupancy)) {valid=false;break;}
@@ -5775,8 +5888,23 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
    if (valid) for (const auto& height:job.reads.heights) {
     if (!GENERALS_PATH_RESULT_CHECK(TheTerrainLogic->getGroundHeight(height.x,height.y)==height.z,Height)) {valid=false;break;}
    }
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+   if(valid && complete){
+    valid=GENERALS_PATH_RESULT_CHECK(job.reads.objects.matches(completePathObjectValues),Cells) &&
+     GENERALS_PATH_RESULT_CHECK(!job.reads.terrain.invalid(),Overflow) &&
+     GENERALS_PATH_RESULT_CHECK(!job.safe || samePoint(job.safePosition,*obj->getPosition()),From);
+    if(valid)for(const auto&read:job.reads.terrain){
+     const Real now=read.operation==0?static_cast<Real>(TheTerrainLogic->getLayerForDestination(&read.position)):
+      TheTerrainLogic->getLayerHeight(read.position.x,read.position.y,read.layer);
+     if(!GENERALS_PATH_RESULT_CHECK(now==read.value,Height)){valid=false;break;}
+    }
+   }
+#endif
 #undef GENERALS_PATH_RESULT_CHECK
    if (!valid) {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+    if(complete)job.completedPath.reset();
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
     job.resolveTiming(m_pathTiming,PathSearchTiming::Result::Rejected,rejection);
 #endif
@@ -5791,6 +5919,66 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
   return &job;
  }
  return nullptr;
+}
+#endif
+
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+// GeneralsX @feature Codex 29/10/2026 Execute the original API through hierarchy, fine search, optimization and cleanup under one private owner.
+void Pathfinder::executeCompletePath(PathfindParallelJob& job){
+ auto&context=job.context;
+ SearchContextBinding<PathfindSearchContext> binding(context);
+ PathfindSearchContext::AdmissionScope allowance(context,job.permanent);
+ PathfindSearchContext::PreparationScope recoveryGuard(context);
+ context.m_completeExecuting=true;context.m_requestAdmission=&job.requestAdmission;context.m_completeJob=&job;
+#ifdef GENERALS_ZH_PATH_TIMING
+ context.m_privateTiming=&job.stageTiming;
+ PathSearchTiming::Scope taskTiming(&job.kernelTime);
+#endif
+ // Restore all per-execution pointers even when pooled allocation or retail recovery throws.
+ struct Restore {
+  PathfindSearchContext& context;
+  ~Restore(){context.m_completeExecuting=false;context.m_requestAdmission=nullptr;context.m_completeJob=nullptr;
+#ifdef GENERALS_ZH_PATH_TIMING
+   context.m_privateTiming=nullptr;
+#endif
+  }
+ }restore{context};
+ job.adjustedTo=job.to;
+ if(job.safe)job.completedPath.reset(findSafePath(job.obj,*job.locomotor,&job.from,&job.to,&job.repulsor2,job.repulsorRadius));
+ else if(job.closest)job.completedPath.reset(findClosestPath(job.obj,*job.locomotor,&job.from,&job.adjustedTo,
+  job.closestSettings.blocked,job.closestSettings.pathCostMultiplier,job.closestSettings.moveAllies));
+ else job.completedPath.reset(findPathWithInputs(job.obj,*job.locomotor,&job.from,&job.to));
+ job.complete=true;job.captured=true;
+}
+
+// GeneralsX @feature Codex 29/10/2026 Transfer completed ownership before repeating coarse/fine preparation on the consuming caller.
+Bool Pathfinder::takeCompletePath(const Object* obj,const LocomotorSet& locomotorSet,const Coord3D& from,const Coord3D& to,
+ const Coord3D* repulsor2,Real repulsorRadius,const PathfindClosestSettings* closest,Path*& path,Coord3D* adjustedTo){
+ if(!obj || !m_parallelBatch || !m_parallelBatch->active || !m_isMapReady || TheGlobalData->m_debugAI!=0 ||
+  SearchContextBinding<PathfindSearchContext>::current())return false;
+ auto&current=mainPathfindSearchContext();
+ if(!current.m_openList.empty() || !current.m_closedList.empty())return false;
+ Bool center;Int radius;getRadiusAndCenter(obj,radius,center);
+ const Bool human=!(obj->getControllingPlayer() && obj->getControllingPlayer()->getPlayerType()==PLAYER_COMPUTER);
+ const auto settings=captureMovementSettings(obj,locomotorSet,radius,center,human);
+ auto*job=takeParallelResult(obj,locomotorSet,from,to,repulsor2,repulsorRadius,nullptr,nullptr,{},settings,closest,true);
+ if(!job)return false;
+ if(job->context.m_completeBegan)current.beginSearch();
+ current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
+ current.m_isTunneling=job->context.m_isTunneling;current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
+ if(job->context.m_completeCorridorWritten)current.m_corridor.swap(job->context.m_corridor);
+ path=job->completedPath.release();
+ if(adjustedTo)*adjustedTo=job->adjustedTo;
+ job->fallbackAllowed=!path && job->fallback && job->fallback->ready;
+ if(job->fallbackResult){++m_parallelBatch->fallbackAccepted;if(job->earlyFallback)++m_parallelBatch->earlyFallbackAccepted;}
+ else {++m_parallelBatch->accepted;if(job->safe)++m_parallelBatch->safeAccepted;if(job->closest)++m_parallelBatch->closestAccepted;}
+#ifdef GENERALS_ZH_PATH_TIMING
+ // These stage times were measured privately on the participant; publish only after validation and ownership transfer.
+ for(auto phase:{PathSearchTiming::Hierarchy,PathSearchTiming::CallerPreparation,PathSearchTiming::Finalization})
+  m_pathTiming[phase].merge(job->stageTiming[phase]);
+ job->resolveTiming(m_pathTiming,PathSearchTiming::Result::Reused);
+#endif
+ return true;
 }
 #endif
 
@@ -7513,6 +7701,26 @@ void Pathfinder::prepareParallelBatch()
   }
  }
  try {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  // WorldBuilder and single-threaded tools may intentionally omit these locks.
+  if(!m_isMapReady || !TheMemoryPoolCriticalSection || !TheDmaCriticalSection ||
+     !mainPathfindSearchContext().m_openList.empty() || !mainPathfindSearchContext().m_closedList.empty()){
+#ifdef GENERALS_ZH_PATH_TIMING
+   admission.reason=PathSearchTiming::Admission::Unavailable;
+#endif
+   return;
+  }
+#if RETAIL_COMPATIBLE_PATHFINDING
+  if(s_forceCleanCells){
+#ifdef GENERALS_ZH_PATH_TIMING
+   admission.reason=PathSearchTiming::Admission::Capture;
+#endif
+   return;
+  }
+#endif
+  // GeneralsX @bugfix Codex 29/10/2026 Resolve lazy class pools on main before any participant can allocate engine paths.
+  Path::getClassMemoryPool();PathNode::getClassMemoryPool();
+#endif
   if (!m_parallelBatch) m_parallelBatch=new PathfindParallelBatch;
   if (!m_exclusiveWorker) {
    m_exclusiveWorker=new PathfindExclusiveWorker;
@@ -7530,6 +7738,19 @@ void Pathfinder::prepareParallelBatch()
    job.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
    job.context.m_ignoreObstacleID=ignored[i];job.context.m_parallelReads=&job.reads;
    if (job.safe) job.context.m_isTunneling=mainPathfindSearchContext().m_isTunneling;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+   // Input capture stays on main. Neither hierarchy nor engine Path construction runs during this preparation.
+   job.context.m_corridor=mainPathfindSearchContext().m_corridor;
+   job.tunneling=mainPathfindSearchContext().m_isTunneling;job.context.m_isTunneling=job.tunneling;
+   job.permanent=PathfindSearchContext::permanentRecordsInUse();
+   Bool center;Int radius;getRadiusAndCenter(job.obj,radius,center);
+   const Bool human=!(job.obj->getControllingPlayer() && job.obj->getControllingPlayer()->getPlayerType()==PLAYER_COMPUTER);
+   job.settings=captureMovementSettings(job.obj,*job.locomotor,radius,center,human);
+   job.safePosition=*job.obj->getPosition();job.captured=job.settings.surfaces!=0;
+#if RETAIL_COMPATIBLE_PATHFINDING
+   job.fixed=s_useFixedPathfinding;
+#endif
+#else
    batch.preparing=&job;
    {SearchContextBinding<PathfindSearchContext> binding(job.context);
     // GeneralsX @bugfix Codex 28/10/2026 All private preparation, including closest hierarchy, must abort before shared recovery.
@@ -7542,6 +7763,7 @@ void Pathfinder::prepareParallelBatch()
      findPathWithInputs(job.obj,*job.locomotor,&job.from,&job.to);
     }}
    batch.preparing=nullptr;
+#endif
   }
   batch.active=true;
   Bool canPair=true;
@@ -7564,11 +7786,18 @@ void Pathfinder::prepareParallelBatch()
      fallback.epoch=job.epoch;fallback.lifecycle=job.lifecycle;
      fallback.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
      fallback.context.m_ignoreObstacleID=job.ignored;fallback.context.m_parallelReads=&fallback.reads;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+     fallback.context.m_corridor=mainPathfindSearchContext().m_corridor;
+     fallback.settings=job.settings;fallback.permanent=job.permanent;fallback.fixed=job.fixed;
+     fallback.safePosition=job.safePosition;fallback.captured=true;
+     fallback.closestSettings={false,0,false,false,false,false,job.ignored};
+#else
      batch.preparing=&fallback;
      {SearchContextBinding<PathfindSearchContext> binding(fallback.context);
       PathfindSearchContext::PreparationScope preparation(fallback.context);
       findClosestPath(fallback.obj,*fallback.locomotor,&fallback.from,&fallback.to,false,0,false);}
      batch.preparing=nullptr;
+#endif
     }
    }
   }
@@ -7580,6 +7809,9 @@ void Pathfinder::prepareParallelBatch()
    auto execute=[&](Int index) {
     auto& job=batch.jobs[index];
     if (job.captured) {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+     executeCompletePath(job);
+#else
 #ifdef GENERALS_ZH_PATH_TIMING
      PathSearchTiming::Scope kernelTiming(&job.kernelTime);
 #endif
@@ -7591,9 +7823,22 @@ void Pathfinder::prepareParallelBatch()
        job.settings.centerInCell,job.settings.radius,job.startIndex,job.closestSettings);
      else job.outcome=runOrdinarySearchLoop(job.start,job.goal,movement,job.settings.human,
        job.settings.centerInCell,job.settings.radius,job.startIndex,job.obj);
+#endif
     }
-    if (!job.safe && !job.closest && !job.outcome.found && job.fallback && job.fallback->captured) {
+    if (!job.safe && !job.closest &&
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+        !job.completedPath &&
+#else
+        !job.outcome.found &&
+#endif
+        job.fallback && job.fallback->captured) {
      auto& fallback=*job.fallback;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+     fallback.tunneling=job.context.m_isTunneling;fallback.context.m_isTunneling=fallback.tunneling;
+     fallback.ignored=job.context.m_ignoreObstacleID;fallback.context.m_ignoreObstacleID=fallback.ignored;
+     fallback.earlyFallback=job.outcome.lastCell==nullptr;
+     executeCompletePath(fallback);
+#else
 #ifdef GENERALS_ZH_PATH_TIMING
      PathSearchTiming::Scope kernelTiming(&fallback.kernelTime);
 #endif
@@ -7602,6 +7847,7 @@ void Pathfinder::prepareParallelBatch()
      const PathfindMovementInput fallbackMovement={fallback.obj,*fallback.locomotor,&fallback.settings};
      fallback.closestOutcome=runClosestSearchLoop(fallback.start,fallback.goal,fallbackMovement,fallback.settings.human,
        fallback.settings.centerInCell,fallback.settings.radius,fallback.startIndex,fallback.closestSettings);
+#endif
      fallback.ready=true;
     }
    };
@@ -7627,8 +7873,20 @@ void Pathfinder::prepareParallelBatch()
     task.kind=job.safe?PathSearchTiming::Kind::Safe:job.closest?PathSearchTiming::Kind::Closest:PathSearchTiming::Kind::Ordinary;
     task.primary=job.kernelTime.calls!=0;task.fallback=job.fallback&&job.fallback->kernelTime.calls!=0;
     task.nanoseconds=job.kernelTime.totalNanoseconds+(task.fallback?job.fallback->kernelTime.totalNanoseconds:0);
-    if(task.primary){task.examined=job.closest?job.closestOutcome.cellsExamined:job.outcome.cellsExamined;task.records=job.context.m_records.size();}
-    if(task.fallback){task.fallbackExamined=job.fallback->closestOutcome.cellsExamined;task.fallbackRecords=job.fallback->context.m_records.size();}
+    if(task.primary){task.examined=job.closest?job.closestOutcome.cellsExamined:job.outcome.cellsExamined;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+     task.records=job.completeRecords;
+#else
+     task.records=job.context.m_records.size();
+#endif
+    }
+    if(task.fallback){task.fallbackExamined=job.fallback->closestOutcome.cellsExamined;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+     task.fallbackRecords=job.fallback->completeRecords;
+#else
+     task.fallbackRecords=job.fallback->context.m_records.size();
+#endif
+    }
     // GeneralsX @feature Codex 28/10/2026 Copy bounded observation counts after join to distinguish deduplication, capacity and conflict.
     const auto copyReads=[](const PathfindParallelReads& reads,PathSearchTiming::ReadSample& sample){
      sample.queries=reads.queries.size();sample.queryObservations=reads.queries.observations();
@@ -7661,6 +7919,9 @@ void Pathfinder::prepareParallelBatch()
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) {
     fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+    fprintf(stderr,"[PATH_COMPLETE_WORKER] enabled hierarchy=true path_construction=true optimization=true reuse=before_preparation\n");
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
     // GeneralsX @feature Codex 29/10/2026 Report the native compact layout once; these are sizes, not live process-memory measurements.
     fprintf(stderr,"[PATH_SEARCH_STORAGE] node_bytes=%zu permanent_bytes=%zu context_bytes=%zu capacity=%u max_index_cells=%u\n",
@@ -7707,6 +7968,16 @@ void Pathfinder::prepareParallelBatch()
 #endif
   clearParallelBatch();m_exclusiveWorkerUnavailable=true;
   fprintf(stderr,"[PATH_PARALLEL_BATCH] allocation unavailable; using ordinary dispatch\n");
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ } catch (ErrorCode error) {
+  clearParallelBatch();
+  if(error!=ERROR_OUT_OF_MEMORY)throw;
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=PathSearchTiming::Admission::AllocationFailure;
+#endif
+  m_exclusiveWorkerUnavailable=true;
+  fprintf(stderr,"[PATH_COMPLETE_WORKER] pooled allocation unavailable; using ordinary dispatch\n");
+#endif
  } catch (...) {
   clearParallelBatch();throw;
  }
@@ -7730,10 +8001,14 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 #endif
 }
 
-// GeneralsX @refactor Codex 27/10/2026 Live object and locomotor dependencies remain explicit and serial.
+// GeneralsX @feature Codex 29/10/2026 The complete API may run in an explicitly owned frozen-world participant.
 Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorSet,
 		const Coord3D *from, const Coord3D *rawTo)
 {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ Path* completed=nullptr;
+ if(takeCompletePath(obj,locomotorSet,*from,*rawTo,nullptr,0,nullptr,completed))return completed;
+#endif
 	if (!clientSafeQuickDoesPathExist(locomotorSet, from, rawTo)) {
 		return nullptr;
 	}
@@ -7746,8 +8021,8 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
 	Path *hPat;
  {
 #ifdef GENERALS_ZH_PATH_TIMING
-  // GeneralsX @feature Codex 28/10/2026 Hierarchy remains a separately measured main-thread phase.
-  PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::Hierarchy]);
+  // GeneralsX @feature Codex 29/10/2026 Attribute hierarchy to the executing owner's private or caller timing.
+  PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::Hierarchy]);
 #endif
   hPat=findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
  }
@@ -7768,7 +8043,7 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
  * Find a short, valid path between given locations.
  * Uses A* algorithm.
  */
-// GeneralsX @refactor Codex 27/10/2026 Search execution returns a phase-local completion; caller owns engine path creation and cleanup.
+// GeneralsX @refactor Codex 29/10/2026 Search execution returns a phase-local completion to its owning API.
 Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell *parentCell, PathfindCell *goalCell,
 		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
 		const ICoord2D& startCellNdx, const Object *obj)
@@ -7776,7 +8051,7 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Speculative kernels have private metrics; only caller fallback writes the serial aggregate.
  // GeneralsX @bugfix Codex 28/10/2026 Read context-only metadata through the context accessor, not its bookkeeping base.
- PathSearchTiming::SerialScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Ordinary);
+ PathSearchTiming::SerialScope serialTiming(searchTiming(),!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Ordinary);
 #endif
 	Int cellCount = 0;
 
@@ -7810,7 +8085,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Time authoritative fine preparation, including early exits, separately from speculative preparation.
- PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::CallerPreparation]);
+ PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::CallerPreparation]);
 #endif
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
 	// GeneralsX @refactor Codex 27/10/2026 Serial phase owns its selected scratch until route construction and cleanup finish.
@@ -7873,7 +8148,11 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 	searchState().m_isTunneling = false;
 
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	PathfindLayerEnum destinationLayer = searchDestinationLayer(to);
+#else
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
+#endif
 	// determine goal cell
 	PathfindCell *goalCell = getCell( destinationLayer, to );
 	if (goalCell == nullptr) {
@@ -7997,14 +8276,21 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
   return nullptr;
  }
 #endif
- // GeneralsX @refactor Codex 27/10/2026 Finalize only in the consuming request, after both searches have joined.
+ // GeneralsX @refactor Codex 29/10/2026 Finalize under the same scratch owner; complete dispatch retains an owned Path for validation.
 #ifdef GENERALS_ZH_PATH_TIMING
  callerPreparationTiming.stop();
 #endif
  auto finish = [&](OrdinarySearchOutcome outcome) -> Path* {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  // GeneralsX @bugfix Codex 29/10/2026 Recovery after construction must also dispose the completed fine Path.
+  std::unique_ptr<Path,PathfindParallelJob::DisposePath> completedOwner;
+#endif
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=job->context.m_records.size();}
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
   // GeneralsX @feature Codex 28/10/2026 Include main-thread Path construction, optimization and original cleanup on success or failure.
-  PathSearchTiming::Scope finalizationTiming(&m_pathTiming[PathSearchTiming::Finalization]);
+  PathSearchTiming::Scope finalizationTiming(&searchTiming()[PathSearchTiming::Finalization]);
 #endif
 	parentCell = outcome.lastCell;
 	const Int cellCount = outcome.cellsExamined;
@@ -8033,6 +8319,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		searchState().m_isTunneling = false;
 		// construct and return path
 		Path *path =  buildActualPath( obj, movement.getValidSurfaces(), from, goalCell, centerInCell, false );
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  completedOwner.reset(path);
+#endif
 #if RETAIL_COMPATIBLE_PATHFINDING
 		if (!s_useFixedPathfinding)
 		{
@@ -8045,7 +8334,11 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 			cleanOpenAndClosedLists();
 			parentCell->releaseSearchInfo();
 		}
-		return path;
+		#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  return completedOwner.release();
+#else
+  return path;
+#endif
 	}
 
 	// failure - goal cannot be reached
@@ -9060,7 +9353,11 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 
 	searchState().m_isTunneling = false;
 
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	PathfindLayerEnum destinationLayer = searchDestinationLayer(to);
+#else
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
+#endif
 
 	ICoord2D cell;
 	worldToCell( to, &cell );
@@ -9077,7 +9374,11 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 
 	// determine start cell
 	ICoord2D startCellNdx;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	PathfindLayerEnum layer = searchDestinationLayer(from);
+#else
 	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(from);
+#endif
 	PathfindCell *parentCell = getClippedCell( layer,&clipFrom );
 	if (!parentCell) {
 		return nullptr;
@@ -9694,11 +9995,19 @@ Bool Pathfinder::clientSafeQuickDoesPathExist( const LocomotorSet& locomotorSet,
 																const Coord3D *to )
 {
 	// See if terrain or building is blocking the destination.
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	PathfindLayerEnum destinationLayer = searchDestinationLayer(to);
+#else
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
+#endif
 	if (!validMovementPosition(false, destinationLayer, locomotorSet, to)) {
 		return false;
 	}
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	PathfindLayerEnum fromLayer = searchDestinationLayer(from);
+#else
 	PathfindLayerEnum fromLayer = TheTerrainLogic->getLayerForDestination(from);
+#endif
 	Int zone1, zone2;
 
 	PathfindCell *parentCell = getClippedCell(fromLayer, from);
@@ -10178,7 +10487,7 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Caller closest recomputation has separate timing from speculative tasks.
- PathSearchTiming::ClosestScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads);
+ PathSearchTiming::ClosestScope serialTiming(searchTiming(),!activePathfindSearchContext().m_parallelReads);
  auto& work=serialTiming.sample;work.startX=startCellNdx.x;work.startY=startCellNdx.y;
  work.goalX=goalCell->getXIndex();work.goalY=goalCell->getYIndex();work.radius=radius;
  work.costMultiplier=closest.pathCostMultiplier;
@@ -10310,8 +10619,13 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
 Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 																	Coord3D *rawTo, Bool blocked, Real pathCostMultiplier, Bool moveAllies)
 {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ Path* completed=nullptr;
+ const PathfindClosestSettings inputPolicy={blocked,pathCostMultiplier,moveAllies,false,false,false,searchState().m_ignoreObstacleID};
+ if(takeCompletePath(obj,locomotorSet,*from,*rawTo,nullptr,0,&inputPolicy,completed,rawTo))return completed;
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
- PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::CallerPreparation]);
+ PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::CallerPreparation]);
 #endif
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
  SearchContextBinding<PathfindSearchContext> contextBinding(activePathfindSearchContext());
@@ -10366,7 +10680,11 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	Coord3D clipFrom = *from;
 	clip(&clipFrom, &adjustTo);
 
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	PathfindLayerEnum destinationLayer = searchDestinationLayer(to);
+#else
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
+#endif
 	// determine goal cell
 	PathfindCell *goalCell = getClippedCell( destinationLayer,  to );
 	if (goalCell == nullptr)
@@ -10383,10 +10701,16 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		// that are "parked" on the airfield, but not for things hovering over an obstacle
 		// (eg, a chinook over a supply dock).
 		Object *goalObj = TheGameLogic->findObjectByID(searchState().m_ignoreObstacleID);
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  observeParallelObject(searchState().m_ignoreObstacleID);
+#endif
 		if (goalObj) {
 			PathfindCell *ignoreCell = getClippedCell(goalObj->getLayer(), goalObj->getPosition());
 			if ( (goalCell->getObstacleID()==ignoreCell->getObstacleID()) && (goalCell->getObstacleID() != INVALID_ID) ) {
 				Object* newObstacle = TheGameLogic->findObjectByID(goalCell->getObstacleID());
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+    observeParallelObject(goalCell->getObstacleID());
+#endif
 #if RTS_GENERALS
 				if (newObstacle != nullptr && newObstacle->isKindOf(KINDOF_AIRFIELD))
 #else
@@ -10436,7 +10760,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		Path *hPat;
   {
 #ifdef GENERALS_ZH_PATH_TIMING
-   PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::Hierarchy]);
+   PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::Hierarchy]);
 #endif
    hPat=findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
   }
@@ -10507,8 +10831,15 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
  callerPreparationTiming.stop();
 #endif
  auto finish=[&](const ClosestSearchOutcome& outcome)->Path* {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  // GeneralsX @bugfix Codex 29/10/2026 Recovery after construction must also dispose the completed fine Path.
+  std::unique_ptr<Path,PathfindParallelJob::DisposePath> completedOwner;
+#endif
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(auto*job=activePathfindSearchContext().m_completeJob){job->closestOutcome=outcome;job->completeRecords=job->context.m_records.size();}
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
-  PathSearchTiming::Scope finalizationTiming(&m_pathTiming[PathSearchTiming::Finalization]);
+  PathSearchTiming::Scope finalizationTiming(&searchTiming()[PathSearchTiming::Finalization]);
 #endif
   parentCell=outcome.lastCell;
   PathfindCell* closesetCell=outcome.closestCell;
@@ -10538,6 +10869,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			searchState().m_isTunneling = false;
 			// construct and return path
 			Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), from, goalCell, centerInCell, blocked);
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  completedOwner.reset(path);
+#endif
 #if RETAIL_COMPATIBLE_PATHFINDING
 			if (!s_useFixedPathfinding) {
 				parentCell->releaseSearchInfo();
@@ -10552,7 +10886,11 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 				goalCell->releaseSearchInfo();
 			}
 
-			return path;
+			#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  return completedOwner.release();
+#else
+  return path;
+#endif
   }
 
 	if (closesetCell) {
@@ -10586,6 +10924,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		rawTo->y = closesetCell->getYIndex()*PATHFIND_CELL_SIZE_F + PATHFIND_CELL_SIZE_F/2.0f;
 		// construct and return path
 		Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), from, closesetCell, centerInCell, blocked );
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  completedOwner.reset(path);
+#endif
 #if RETAIL_COMPATIBLE_PATHFINDING
 		if (!s_useFixedPathfinding) {
 			goalCell->releaseSearchInfo();
@@ -10598,7 +10939,11 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			parentCell->releaseSearchInfo();
 			goalCell->releaseSearchInfo();
 		}
-		return path;
+		#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  return completedOwner.release();
+#else
+  return path;
+#endif
 	}
 
 	// failure - goal cannot be reached
@@ -10676,7 +11021,11 @@ static void pathfindCellXY(Int cellX, Int cellY, Bool centerInCell, Coord3D& pos
 void Pathfinder::adjustCoordToCell(Int cellX, Int cellY, Bool centerInCell, Coord3D &pos, PathfindLayerEnum layer)
 {
 	pathfindCellXY(cellX, cellY, centerInCell, pos);
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+	pos.z = searchLayerHeight( pos.x, pos.y, layer );
+#else
 	pos.z = TheTerrainLogic->getLayerHeight( pos.x, pos.y, layer );
+#endif
 }
 
 
@@ -10688,7 +11037,13 @@ Path *Pathfinder::buildActualPath( const Object *obj, LocomotorSurfaceTypeMask a
 {
 	DEBUG_ASSERTCRASH( goalCell, ("Pathfinder::buildActualPath: goalCell == nullptr") );
 
-	Path *path = newInstance(Path);
+	// GeneralsX @bugfix Codex 29/10/2026 Own partial fine Paths through optimizer failure or recovery abort.
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ std::unique_ptr<Path,PathfindParallelJob::DisposePath> owner(newInstance(Path));
+ Path*path=owner.get();
+#else
+ Path *path = newInstance(Path);
+#endif
 
 	if (goalCell->getPinched() && goalCell->getParentCell() && !goalCell->getParentCell()->getPinched()) {
 		goalCell = goalCell->getParentCell();
@@ -10730,7 +11085,11 @@ Path *Pathfinder::buildActualPath( const Object *obj, LocomotorSurfaceTypeMask a
 		setDebugPath(path);
 	}
 #endif
-	return path;
+	#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ return owner.release();
+#else
+ return path;
+#endif
 }
 
 /**
@@ -10828,7 +11187,7 @@ void Pathfinder::prependRouteCells( RouteSink *path, const Coord3D *fromPos,
 
 }
 
-// GeneralsX @performance Codex 27/10/2026 Finalization already owns its context on main; route copying is optional.
+// GeneralsX @performance Codex 29/10/2026 Finalization owns its execution context; the value-route prototype remains optional.
 void Pathfinder::prependCells(Path* path, const Coord3D* fromPos, PathfindCell* goalCell, Bool center)
 {
 #if defined(GENERALS_ZH_SEARCH_CONTEXT) && defined(GENERALS_OWNED_PATH_ROUTE)
@@ -12760,7 +13119,7 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
 {
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Time caller escape recomputation only when no private speculative read log is installed.
- PathSearchTiming::SerialScope serialTiming(m_pathTiming,!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Safe);
+ PathSearchTiming::SerialScope serialTiming(searchTiming(),!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Safe);
 #endif
  const Real repulsorDistSqr=repulsorRadius*repulsorRadius;
  const Int MAX_CELLS=MAX_SAFE_PATH_CELL_COUNT;
@@ -12797,8 +13156,12 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
 Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet,
   const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius)
 {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ Path* completed=nullptr;
+ if(takeCompletePath(obj,locomotorSet,*from,*repulsorPos1,repulsorPos2,repulsorRadius,nullptr,completed))return completed;
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
- PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&m_pathTiming[PathSearchTiming::CallerPreparation]);
+ PathSearchTiming::Scope callerPreparationTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::CallerPreparation]);
 #endif
  if (m_isMapReady == false) return nullptr;
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
@@ -12851,8 +13214,15 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
  callerPreparationTiming.stop();
 #endif
  auto finish=[&](const OrdinarySearchOutcome& outcome)->Path* {
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  // GeneralsX @bugfix Codex 29/10/2026 Recovery after construction must also dispose the completed fine Path.
+  std::unique_ptr<Path,PathfindParallelJob::DisposePath> completedOwner;
+#endif
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=job->context.m_records.size();}
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
-  PathSearchTiming::Scope finalizationTiming(&m_pathTiming[PathSearchTiming::Finalization]);
+  PathSearchTiming::Scope finalizationTiming(&searchTiming()[PathSearchTiming::Finalization]);
 #endif
   parentCell=outcome.lastCell;
   const Int cellCount=outcome.cellsExamined;
@@ -12883,6 +13253,9 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 #endif
 			// construct and return path
 			Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), obj->getPosition(), parentCell, centerInCell, false);
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  completedOwner.reset(path);
+#endif
 #if RETAIL_COMPATIBLE_PATHFINDING
 			if (!s_useFixedPathfinding) {
 				parentCell->releaseSearchInfo();
@@ -12894,7 +13267,11 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 				cleanOpenAndClosedLists();
 				parentCell->releaseSearchInfo();
 			}
-			return path;
+			#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  return completedOwner.release();
+#else
+  return path;
+#endif
   }
 
 #ifdef INTENSE_DEBUG

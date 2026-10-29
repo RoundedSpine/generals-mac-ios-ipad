@@ -101,6 +101,7 @@ struct Pathfinder {
  PathfindParallelBatch* m_parallelBatch=nullptr;unsigned long long m_parallelWorldEpoch=0;
 #ifdef GENERALS_ZH_PATH_TIMING
  PathSearchTiming m_pathTiming;
+ PathSearchTiming& searchTiming();
 #endif
  std::thread::id owner=std::this_thread::get_id();bool m_isMapReady=true;
  IRegion2D m_extent,m_logicalExtent;
@@ -142,7 +143,7 @@ struct Pathfinder {
   m_zoneManager.setAllPassable();return new Path;
  }
  PathfindParallelJob*takeParallelResult(const Object*,const LocomotorSet&,const Coord3D&,const Coord3D&,const Coord3D*,Real,
-  PathfindCell*,PathfindCell*,const ICoord2D&,const PathfindMovementSettings&,const PathfindClosestSettings* =nullptr);
+  PathfindCell*,PathfindCell*,const ICoord2D&,const PathfindMovementSettings&,const PathfindClosestSettings* =nullptr,Bool complete=false);
  void beginSearchState();void cleanOpenAndClosedLists();
  void forceCleanCells(){++m_parallelWorldEpoch;searchState().m_openList.reset();searchState().m_closedList.reset();activePathfindSearchContext().beginSearch();}
  void debugShowSearch(bool){}
@@ -192,6 +193,7 @@ struct Pathfinder {
     a=HEADER.index('inline PathfindCell *Pathfinder::getCell( PathfindLayerEnum layer, Int x, Int y )')
     source += HEADER[a:HEADER.index('\n}',a)+2]
     source += '\n#define PROFILER_PLOT(a,b) ((void)0)\n'
+    source += '\n#ifdef GENERALS_ZH_PATH_TIMING\n'+function('PathSearchTiming& Pathfinder::searchTiming(')+'\n#endif\n'
     # Preserve production declaration order: a fixture must not silently predeclare the reader for the validator.
     reader=block(SOURCE,'struct LiveOccupancyReader {')
     validator=function('PathfindParallelJob* Pathfinder::takeParallelResult(')

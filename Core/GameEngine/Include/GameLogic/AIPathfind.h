@@ -60,6 +60,10 @@ struct PathfindParallelJob;
 struct PathfindParallelReads;
 void observeParallelCorridor(std::size_t block, Bool passable);
 #endif
+// GeneralsX @feature Codex 29/10/2026 Whole requests use the same joined two-participant dispatcher and bounded allocation policy.
+#if defined(GENERALS_COMPLETE_PATH_WORKER) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)
+#define GENERALS_ZH_COMPLETE_PATH_WORKER 1
+#endif
 // GeneralsX @feature Codex 28/10/2026 Timing storage exists only in the optional experimental profiler.
 #if defined(GENERALS_PATH_TIMING) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)
 #define GENERALS_ZH_PATH_TIMING 1
@@ -398,7 +402,7 @@ struct PathfindSearchContext :
  BoundedRecordIndex<PATHFIND_RECORD_CAPACITY> m_recordIndex;
  unsigned m_transientRecords = 0;
  SearchContextOwnership m_ownership;
- // GeneralsX @bugfix Codex 28/10/2026 Speculative main-side preparation must never perform live-world retail recovery.
+ // GeneralsX @bugfix Codex 29/10/2026 Speculative preparation and complete participants must never perform live-world retail recovery.
  struct SpeculativeRecovery {};
  bool m_speculativePreparation=false;
  void abortSpeculativeRecovery() const {if(m_speculativePreparation)throw SpeculativeRecovery{};}
@@ -414,6 +418,16 @@ struct PathfindSearchContext :
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  PathfindParallelReads* m_parallelReads = nullptr;
  SearchAdmissionWindow<PATHFIND_RECORD_CAPACITY> m_admissionWindow;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ // GeneralsX @feature Codex 29/10/2026 Accumulate admission across hierarchy/fine generations without changing either phase's predicate.
+ SearchAdmissionWindow<PATHFIND_RECORD_CAPACITY>* m_requestAdmission=nullptr;
+ PathfindParallelJob* m_completeJob=nullptr;
+ bool m_completeExecuting=false,m_completeBegan=false,m_completeCorridorWritten=false;
+#ifdef GENERALS_ZH_PATH_TIMING
+ // Each executing complete request owns its phase metrics; the caller merges after joining.
+ PathSearchTiming* m_privateTiming=nullptr;
+#endif
+#endif
  // GeneralsX @performance Codex 29/10/2026 Query-only cell reads are validated by their complete returned occupancy result.
  bool m_occupancyQueryReads=false;
  struct OccupancyReadScope {
@@ -465,6 +479,9 @@ struct PathfindSearchContext :
   // GeneralsX @performance Codex 29/10/2026 Only speculative phases record an interval; serial/finalizer admission retains its original predicate.
   if(m_parallelReads){
    observeParallelAllocationCell(m_parallelReads,cell);
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+   if(!persistent && m_requestAdmission)m_requestAdmission->allows(permanentUse,m_transientRecords);
+#endif
    if(!persistent && !m_admissionWindow.allows(permanentUse,m_transientRecords))return nullptr;
   }else
 #endif
@@ -491,6 +508,9 @@ struct PathfindSearchContext :
 #endif
  void beginSearch(bool prepareIndex=true) {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(m_completeExecuting)m_completeBegan=true;
+#endif
   m_records.beginGeneration(); m_transientRecords = 0;
   m_recordIndex.beginSearch(prepareIndex?pathfindSearchCellIndices().size():0);
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
@@ -520,6 +540,9 @@ struct PathfindSearchContext :
  }
  void setCorridorPassable(std::size_t block, Bool passable) {
   assert(block < m_corridor.size());
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(m_completeExecuting)m_completeCorridorWritten=true;
+#endif
   m_corridor[block] = passable ? 1 : 0;
  }
  Bool corridorPassable(std::size_t block) const {
@@ -1161,6 +1184,7 @@ protected:
  PathfindParallelBatch* m_parallelBatch;
 #ifdef GENERALS_ZH_PATH_TIMING
  PathSearchTiming m_pathTiming;
+ PathSearchTiming& searchTiming();
 #endif
  unsigned long long m_parallelWorldEpoch;
  void prepareParallelBatch();
@@ -1170,7 +1194,15 @@ protected:
  PathfindParallelJob* takeParallelResult(const Object* obj, const LocomotorSet& locomotorSet,
   const Coord3D& from, const Coord3D& to, const Coord3D* repulsor2, Real repulsorRadius,
   PathfindCell* start, PathfindCell* goal, const ICoord2D& startIndex, const PathfindMovementSettings& settings,
-  const PathfindClosestSettings* closest=nullptr);
+  const PathfindClosestSettings* closest=nullptr, Bool complete=false);
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+ Bool takeCompletePath(const Object* obj,const LocomotorSet& locomotorSet,const Coord3D& from,const Coord3D& to,
+  const Coord3D* repulsor2,Real repulsorRadius,const PathfindClosestSettings* closest,Path*& path,Coord3D* adjustedTo=nullptr);
+ void executeCompletePath(PathfindParallelJob& job);
+ PathfindLayerEnum searchDestinationLayer(const Coord3D* pos);
+ Real searchLayerHeight(Real x,Real y,PathfindLayerEnum layer);
+ void observeParallelObject(ObjectID id);
+#endif
  void invalidateParallelResults() {++m_parallelWorldEpoch;}
 #endif
 	PathfindExclusiveWorker *m_exclusiveWorker;
@@ -1179,11 +1211,11 @@ protected:
 	OrdinarySearchOutcome runOrdinarySearchLoop(PathfindCell *parentCell, PathfindCell *goalCell,
 		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
 		const ICoord2D& startCellNdx, const Object *obj);
- // GeneralsX @feature Codex 27/10/2026 Escape loop owns only scratch; final path creation and cleanup remain on the caller.
+ // GeneralsX @feature Codex 29/10/2026 Escape loops return to their owning API; complete participants also finalize privately.
  OrdinarySearchOutcome runSafeSearchLoop(PathfindCell* parentCell, const PathfindMovementInput& movement,
   Bool isHuman, Bool centerInCell, Int radius, const ICoord2D& startIndex,
   const Coord3D& repulsor1, const Coord3D& repulsor2, Real repulsorRadius);
- // GeneralsX @feature Codex 27/10/2026 Only closest scoring/expansion runs off-thread; finalization retains the original effects.
+ // GeneralsX @feature Codex 29/10/2026 Closest scoring is shared by fine-only dispatch and complete API execution.
  ClosestSearchOutcome runClosestSearchLoop(PathfindCell* parentCell, PathfindCell* goalCell,
   const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
   const ICoord2D& startIndex, const PathfindClosestSettings& closest);

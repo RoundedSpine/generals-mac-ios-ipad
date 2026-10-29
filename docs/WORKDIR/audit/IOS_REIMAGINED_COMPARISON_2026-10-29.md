@@ -2,20 +2,21 @@
 
 ## Scope and conclusion
 
-Compare experiment/ios-mod-testing, including the subsequent compact-node stage, with
+Compare experiment/ios-mod-testing, including compact nodes and complete-worker APIs, with
 the supplied ZeroHourReimagined_1.0.0_source. This is a pathfinding comparison;
 Reimagined graphics and gameplay content remain outside this integration. This
 supersedes the runtime snapshot in the 28 October comparison, while retaining
 its historical evidence.
-The latest device runtime remains 26be01d4a; compact-node native/device testing
-is pending. Historical stage descriptions below retain their original scope.
+The latest supplied device runtime remains 26be01d4a; compact-node and complete-API
+device testing are pending. Historical stage descriptions below retain their original scope.
 
 Our implementation has the reference's core speculative model: predict queued
 requests, run independent searches concurrently with main participation, join,
 validate, and consume once in queue order or recompute. Ordinary, safe, queued
-closest and conditional closest-fallback kernels exist. The latest changes match
-real ordinary/closest coarse preparation on main and deduplicate exact query and
-height observations. They improve our preparation fidelity and result reuse.
+closest and conditional closest-fallback APIs execute on participants. Hierarchy,
+Path construction, optimization and private cleanup are included; accepted Paths
+return before main repeats preparation. Terrain-layer and ignored-object inputs
+join the existing bounded validation. Live retail recovery remains on main.
 
 The allocation-window change now accepts permanent-count differences only when
 every reached allocation decision stays equivalent. Cell diagnostics explain
@@ -26,8 +27,8 @@ private nodes then embed search state and discard permanent-only fields and the
 separate state arena. The original allocator/admission policy remains. The
 reference indexes a complete compact search node directly by cell ID.
 
-The largest remaining differences are full off-thread API execution, dense
-map-sized node storage, broader dispatch, and different capacity/budget policies.
+The largest remaining differences are dense map-sized node storage, broader
+dispatch, context reuse, and different capacity/budget policies.
 The reference is not simply our implementation with additional workers enabled.
 
 ## Current comparison
@@ -37,15 +38,15 @@ The reference is not simply our implementation with additional workers enabled.
 | Candidate ordering | Stable binary heap, 64-bit insertion sequence, retained retail list fallback | Stable binary heap, 32-bit insertion sequence |
 | Search state | Compact private nodes with embedded state, private lists/corridor, allocator/index generation stamps | Private search-only nodes/lists/corridor and per-node generation stamps |
 | Search kinds | Ordinary, safe, queued closest and conditional closest fallback; stricter prediction gates | Same API categories, broader ordinary prediction |
-| Preparation | Real ordinary and closest hierarchy in private main-side contexts; authoritative caller repeats its own preparation | Whole search API runs in the participant's context; accepted completed Path returns before hierarchy is repeated |
-| Off-thread scope | Fine loops; Path construction, optimization, hierarchy and recovery stay on main | Complete findPath/findClosestPath/findSafePath calls, including hierarchy and Path construction/optimization |
+| Preparation | Main captures inputs; participant runs hierarchy; accepted completed Path returns before preparation repeats | Whole search API runs in the participant's context; accepted completed Path returns before hierarchy is repeated |
+| Off-thread scope | Complete ordinary/safe/closest APIs, including hierarchy, Path construction/optimization and private cleanup; attempted live recovery aborts to caller | Complete findPath/findClosestPath/findSafePath calls, including hierarchy and Path construction/optimization |
 | Dispatch | Two adjacent eligible requests, one worker plus main | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
 | Worker count | One gameplay search worker | Automatic clamp(cores - 3, 0, 8), explicit override capped at 32 |
-| Result storage | Separate retained primary/fallback phase contexts, up to four, holding loop outcomes and parent records until main finishes | Thread-local search context reused between jobs/phases; each result already owns a completed engine Path |
+| Result storage | Results own completed engine Paths; separate primary/fallback context buffers remain retained, up to four | Thread-local search context reused between jobs/phases; each result owns a completed engine Path |
 | Node lookup | Bounded cell-ID to record-slot table, complete compact node; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
 | Lookup/node memory | Index capped at 1 MiB/context plus bounded complete-node pool; local fixed context shrinks about 1.37 MiB; preceding device main index about 176 KiB | Node/read-mark arrays scale with registered map cells per participating context |
 | Capacity | 30,000 records/context; allocation windows preserve every reached permanent/transient admission success and denial | Nonlegacy search nodes independent of permanent metadata; default node allowance is all registered cells, with testing override |
-| Dependency checks | Explicit request, movement, preparation, admission, epochs/lifecycle, cells, corridor, live occupancy, height and bounded-log checks | Request/ignore/tunnel matching plus intersection between read-cell set and subsequent cell-write log |
+| Dependency checks | Explicit request/movement, all-generation admission, epochs/lifecycle, exact cells, occupancy, ground/layer height, destination layers, ignored-object snapshots and bounded logs; complete corridor is private output | Request/ignore/tunnel matching plus intersection between read-cell set and subsequent cell-write log |
 | Read tracking | Bounded exact direct/allocation cell snapshots and complete query results; query-only lookups avoid redundant raw snapshots; query/height duplicates removed while actual reads still execute | Per-cell read marks deduplicate cell observations into a sorted cell-index set |
 | Queue budget | Check the existing 5,000-cell budget after each actual request | In nonlegacy mode, check between groups of eight, even with runtime prefetch disabled |
 | Wait behavior | Main runs one task then waits on a condition variable; joined exception/lifecycle handling and FP environment capture | Main shares dynamic chunks then yields until all finish; workers spin for 500 microseconds before sleeping, with x86 pause intrinsic |
@@ -146,11 +147,13 @@ step is matched device verification, not a speedup claim. The reference's
 independent map-sized capacity and complete dense layout remain separate
 policy/memory decisions.
 
-Full hierarchy and Path completion on workers is the larger execution milestone.
-It requires auditing transitive reads, allocations, ownership, recovery and
-application before removing main-side work. Broader scanning and additional
-workers remain separate dispatch steps requiring measured benefit and bounded
-memory. Retain per-request scheduling unless a deliberate policy change is made.
+Full hierarchy and Path completion on workers are now implemented behind the
+branch-enabled complete option. Verify the native build and the same heavier save
+on device. Context reuse is now possible without retaining parent records for
+later construction, but requires preserving each completed result's observations
+and final control/corridor state. Broader scanning and additional workers remain
+separate dispatch steps requiring measured benefit and bounded memory. Retain
+per-request scheduling unless a deliberate policy change is made.
 
 ## Source anchors and verification
 
@@ -184,8 +187,9 @@ alone, and passes again with both new compact cases after its bound increases to
 - [Query-only dependency audit and device result](IOS_PATH_QUERY_DEPENDENCIES_2026-10-29.md)
 - [Direct indexing, work counters and device result](IOS_PATH_DIRECT_INDEX_2026-10-29.md)
 - [Compact private nodes, layout savings and mixed host timings](IOS_PATH_COMPACT_NODES_2026-10-29.md)
+- [Complete participant APIs, ownership, validation and verification](IOS_PATH_COMPLETE_WORKER_2026-10-29.md)
 
-Dense map-sized storage, full worker APIs, wider dispatch and grouped
+Dense map-sized storage, context reuse, wider dispatch and grouped
 scheduling remain separate differences. The current evidence does not establish
 performance parity with Reimagined.
 
@@ -309,3 +313,27 @@ match. Host getter benchmarks regress around 8–11%, while complete closest
 timings change direction between runs. This stage has a verified fixed-memory
 benefit, not a demonstrated speed benefit or device/reference performance parity.
 Test the new IPA in a matched heavier scenario before drawing that conclusion.
+
+## Subsequent complete-worker API implementation
+
+The [complete-worker stage](IOS_PATH_COMPLETE_WORKER_2026-10-29.md) closes the
+fine-loop-only execution gap described in the historical sections. Both
+participants now run hierarchy, fine search, engine Path construction, optimization
+and private cleanup. Main validates the completed result at API entry and transfers
+ownership before repeating preparation. Fallback hierarchy executes only when
+ordinary completion fails. Global retail recovery still aborts speculation and
+remains the caller's responsibility.
+
+Warm Path pools on main, use existing recursive allocation locks, retain partial
+and completed Paths through throwing cleanup, accumulate admission across phase
+generations, add bounded terrain-layer/height and ignored-object validation, and
+keep participant timing private. The tests compile actual hierarchy, Paths and
+optimizer with controlled surrounding services, including bridge/cliff cases.
+The preceding 235 regressions and eleven new cases pass; the new cases pass TSan
+and targeted ASan/UBSan, including a reproduced and fixed cleanup ownership leak.
+
+Dense lookup/capacity, wider scanning/dynamic worker dispatch, context reuse and
+eight-request scheduling remain distinct from the reference. Main still joins
+the pair, so there is no asynchronous simulation overlap. New task timings cover
+complete APIs and cannot be ranked directly against old fine-only kernel times.
+Native/device verification and a matched speed comparison are still required.

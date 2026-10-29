@@ -83,6 +83,13 @@ validation and queue-budget tests. Its result-diagnostic cases check every first
 rejection group, enabled/disabled live-query counts, bounded sample correlation,
 primary/fallback dispositions and exactly-once cleanup across job reuse.
 Use `--tsan` for the batch race checks.
+Run `python3 scripts/qa/test_complete_path_worker.py` (or add `--tsan`) for complete
+joined APIs using production hierarchy, engine Path/node methods, optimization
+and Bresenham traversal with controlled world/allocation services. Cases cover
+concurrent hierarchy, reuse before preparation, serial route/optimized-link/
+destination/budget equivalence, bridges/cliffs, stale terrain/object/policy inputs,
+admission, early null/fallback, ownership transfer, pooled failures and recovery
+after construction. See [complete-worker scope and limits](../docs/WORKDIR/audit/IOS_PATH_COMPLETE_WORKER_2026-10-29.md).
 The bounded-preparation cases also cover restricted ordinary corridors, unchanged
 authoritative accounting, recovery abort/Path cleanup, exact query/height identity,
 collision/rollover/conflict handling and large searches exceeding 8,192 repeated

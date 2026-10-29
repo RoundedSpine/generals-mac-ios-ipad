@@ -91,6 +91,15 @@ if(GENERALS_PARALLEL_PATH_BATCH)
     add_compile_definitions(GENERALS_PARALLEL_PATH_BATCH=1)
 endif()
 
+# GeneralsX @feature Codex 29/10/2026 Complete speculative APIs own hierarchy, engine Paths and optimization through joined validation.
+option(GENERALS_COMPLETE_PATH_WORKER "Run complete queued search APIs on parallel participants" OFF)
+if(GENERALS_COMPLETE_PATH_WORKER)
+    if(NOT GENERALS_PARALLEL_PATH_BATCH)
+        message(FATAL_ERROR "GENERALS_COMPLETE_PATH_WORKER requires GENERALS_PARALLEL_PATH_BATCH")
+    endif()
+    add_compile_definitions(GENERALS_COMPLETE_PATH_WORKER=1)
+endif()
+
 # GeneralsX @build Codex 28/10/2026 Optional phase-boundary timing for the experimental search batch.
 option(GENERALS_PATH_TIMING "Summarize experimental pathfinding phase wall times at shutdown" OFF)
 if(GENERALS_PATH_TIMING)

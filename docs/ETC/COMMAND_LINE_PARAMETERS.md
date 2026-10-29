@@ -119,6 +119,13 @@ the timing option is enabled. It reports native `sizeof` values for the compact
 node, permanent record and fixed context, plus record capacity and the index-cell
 cap. These are layout sizes, not resident memory or live allocation counts. See
 [compact-node storage and verification](../WORKDIR/audit/IOS_PATH_COMPACT_NODES_2026-10-29.md).
+The experimental branch also enables `GENERALS_COMPLETE_PATH_WORKER` (default OFF;
+requires parallel batches). Its first pair prints `[PATH_COMPLETE_WORKER]`.
+`worker_kernel`/`caller_kernel` now measure complete APIs, including hierarchy,
+construction and optimization. Accepted stage times may come from either thread;
+primary reuse can include early-null requests without a fine finalization. Avoid
+comparing these wider task times or old fine-phase balance equations directly with
+older logs. See [complete execution, validation and timing semantics](../WORKDIR/audit/IOS_PATH_COMPLETE_WORKER_2026-10-29.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 
