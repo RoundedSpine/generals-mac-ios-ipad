@@ -907,7 +907,12 @@ public:
 	Bool needToCalculateZones() const {return m_nextFrameToCalculateZones <= TheGameLogic->getFrame() ;} ///< Returns true if the zones need to be recalculated.
 	void markZonesDirty() ; ///< Called when the zones need to be recalculated.
 	void updateZonesForModify( PathfindCell **map,  PathfindLayer layers[], const IRegion2D &structureBounds, const IRegion2D &globalBounds ) ; ///< Called to recalculate an area when a structure has been removed.
-	void calculateZones(	PathfindCell **map, PathfindLayer layers[], const IRegion2D &bounds);	///< Does zone calculations.
+	// GeneralsX @feature Codex 29/10/2026 Optional main-owned profiling measures rebuild passes without changing zone calculation.
+	void calculateZones(	PathfindCell **map, PathfindLayer layers[], const IRegion2D &bounds
+#ifdef GENERALS_ZH_PATH_TIMING
+		, PathSearchTiming* timing = nullptr
+#endif
+	);	///< Does zone calculations.
 	zoneStorageType getEffectiveZone(LocomotorSurfaceTypeMask acceptableSurfaces, Bool crusher, zoneStorageType zone) const;
 	zoneStorageType getEffectiveTerrainZone(zoneStorageType zone) const;
 

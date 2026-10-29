@@ -154,6 +154,35 @@ struct Pathfinder {''')
 
 
 class CompletePathWorkerTests(unittest.TestCase):
+    # GeneralsX @feature Codex 29/10/2026 Attribute actual engine query calls to private fine/optimizer scopes after joining.
+    def test_complete_query_profile_preserves_live_evaluation_and_stage_counts(self):
+        run_cpp(complete_fixture()+r'''
+int main(){World w;Pathfinder p;w.queue(p);
+ for(auto*o:{&w.a,&w.b}){o->ai.from={15,15,0};o->ai.to={105,105,0};}
+ for(int x:{3,5,7,9})for(int y=0;y<12;++y)if(y!=((x==3||x==7)?10:1))p.storage[x][y].setType(PathfindCell::CELL_OBSTACLE);
+ p.prepareParallelBatch();
+ for(unsigned i=0;i<2;++i){auto&job=p.m_parallelBatch->jobs[i];auto&q=job.reads.queryProfile;
+  assert(job.completedPath&&q.samples>0&&q.calls>job.reads.queries.size());
+  assert(q.calls==job.reads.queries.observations()&&q.samples==q.calls/q.stride);
+  assert(q.stageCalls[2]>0&&q.stageCalls[3]>0&&job.stageTiming.queryStage()==0);
+  assert(q.calls==q.stageCalls[0]+q.stageCalls[1]+q.stageCalls[2]+q.stageCalls[3]);
+  auto sample=p.m_pathTiming.slowPairs()[0].tasks[i].primaryReads;
+  assert(sample.queryProfile.calls==q.calls&&sample.fineNanoseconds==job.stageTiming[PathSearchTiming::FineSearch].totalNanoseconds);
+  assert(sample.finalizationNanoseconds==job.stageTiming[PathSearchTiming::Finalization].totalNanoseconds);
+ }
+ p.clearParallelBatch();assert(liveEngineObjects==0);
+ for(auto&job:p.m_parallelBatch->jobs)assert(!job.reads.queryProfile.calls);
+ PathfindParallelReads reads;PathfindSearchContext context;context.m_parallelReads=&reads;
+ {SearchContextBinding<PathfindSearchContext> binding(context);
+  PathOccupancy::Input input;input.destination=true;input.center=true;input.x=2;input.y=2;input.layer=1;
+  auto before=p.evaluateOccupancyQuery(&w.a,input);assert(before.allowed);
+  p.storage[2][2].setGoalUnit(w.b.id,{2,2});w.a.relation=ALLIES;
+  auto after=p.evaluateOccupancyQuery(&w.a,input);assert(!after.allowed);
+  assert(reads.queryProfile.calls==2&&reads.queries.size()==1&&reads.queries.conflict());
+ }
+}
+''',timeout=30)
+
     # GeneralsX @bugfix Codex 29/10/2026 Compile warm-up against the real allocator macro, including private visibility.
     def test_complete_warm_up_uses_real_private_pool_macro(self):
         memory_header=(ROOT/'Core/GameEngine/Include/Common/GameMemory.h').read_text()

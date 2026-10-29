@@ -88,6 +88,14 @@ See [result correlation and status meanings](../WORKDIR/audit/IOS_PATH_RESULT_OU
 `[PATH_READS_SLOW]` adds bounded observation/unique-entry counts and capacity/
 conflict flags for each executed phase of those retained pairs. See
 [corridor preparation and observation-log definitions](../WORKDIR/audit/IOS_PATH_CORRIDOR_READS_2026-10-28.md).
+`[PATH_TASK_PROFILE]` and `[PATH_QUERY_STAGE]` split retained complete tasks into
+hierarchy/fine/finalization work and occupancy call origins. Every 128th query is
+timed separately for live evaluation and dependency logging; reported sampled
+wall times are not extrapolated totals, and stages with no samples have unknown
+cost. `[PATH_ZONE_SLOW]` separately retains four zone rebuilds with pass times.
+The `zone_*` session metrics include empty-queue rebuilds; initialization using
+the default null profiler remains unmeasured. See
+[query-cost investigation and sampling caveats](../WORKDIR/audit/IOS_PATH_OCCUPANCY_COST_2026-10-29.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
 and whether current usage increased, decreased or stayed equal at a rejected
 allocation-decision window check. `[PATH_ADMISSION_REUSE]` counts changed permanent

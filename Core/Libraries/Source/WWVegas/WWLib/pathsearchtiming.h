@@ -13,7 +13,9 @@ public:
  BasicPathSearchTiming()=default;
  BasicPathSearchTiming(const BasicPathSearchTiming&)=delete;
  BasicPathSearchTiming& operator=(const BasicPathSearchTiming&)=delete;
- enum Phase { Queue, Preparation, CallerPreparation, Pair, WorkerKernel, CallerKernel, SerialKernel, Validation, Hierarchy, Finalization, PhaseCount };
+ // GeneralsX @feature Codex 29/10/2026 Separate fine work and full-map zone passes while preserving existing metric indices.
+ enum Phase { Queue, Preparation, CallerPreparation, Pair, WorkerKernel, CallerKernel, SerialKernel, Validation, Hierarchy, Finalization,
+  FineSearch, ZoneRebuild, ZoneLabel, ZoneBlocks, ZoneEquivalence, ZoneFlatten, PhaseCount };
  enum class Kind { Ordinary, Safe, Closest, Count };
  // GeneralsX @feature Codex 28/10/2026 Main-thread terminal outcomes explain retained work without retaining engine handles.
  enum class Result { NotRun, Pending, Validated, Reused, Rejected, Discarded, Unfinished, Count };
@@ -30,8 +32,32 @@ public:
  };
  static constexpr unsigned retainedSamples=4;
  struct ResultSample {Result result=Result::NotRun;Rejection reason=Rejection::None;};
+ // GeneralsX @feature Codex 29/10/2026 Sample wall time at a fixed stride; never time every cell or extrapolate sampled totals.
+ struct QueryProfile {
+  static constexpr unsigned stride=128;
+  std::uint64_t calls=0,samples=0,evaluationNanoseconds=0,loggingNanoseconds=0;
+  std::array<std::uint64_t,4> stageCalls{},stageSamples{},stageEvaluation{},stageLogging{};
+  template<class Evaluate,class Log>auto evaluate(Evaluate evaluateLive,Log log,unsigned stage=0){
+   assert(stage<4);++stageCalls[stage];
+   if(++calls%stride){auto result=evaluateLive();log(result);return result;}
+   const auto start=Clock::now();
+   auto result=evaluateLive();const auto evaluated=Clock::now();
+   log(result);const auto logged=Clock::now();
+   const auto evaluation=elapsed(start,evaluated),logging=elapsed(evaluated,logged);
+   ++samples;evaluationNanoseconds+=evaluation;loggingNanoseconds+=logging;
+   ++stageSamples[stage];stageEvaluation[stage]+=evaluation;stageLogging[stage]+=logging;
+   return result;
+  }
+ private:
+  static std::uint64_t elapsed(typename Clock::time_point start,typename Clock::time_point end){
+   const auto ns=std::chrono::duration_cast<std::chrono::nanoseconds>(end-start).count();
+   return ns>0?static_cast<std::uint64_t>(ns):0;
+  }
+ };
  struct ReadSample {
   std::uint64_t queries=0,queryObservations=0,heights=0,heightObservations=0;
+  QueryProfile queryProfile;
+  std::uint64_t hierarchyNanoseconds=0,fineNanoseconds=0,finalizationNanoseconds=0;
   unsigned flags=0;
  };
  // GeneralsX @feature Codex 28/10/2026 Bounded scalar summaries explain reached admission/policy failures without storing requests.
@@ -79,6 +105,12 @@ public:
   int startX=0,startY=0,goalX=0,goalY=0,radius=0;
   float costMultiplier=0;
  };
+ // GeneralsX @feature Codex 29/10/2026 Retain zone rebuilds separately so slow joined searches cannot evict their evidence.
+ struct ZoneSample {
+  std::uint64_t nanoseconds=0,queue=0;
+  unsigned width=0,height=0,blocks=0,zones=0;
+  std::array<std::uint64_t,4> stages{};
+ };
  struct Metric {
   std::uint64_t calls=0, totalNanoseconds=0, maxNanoseconds=0;
   std::array<std::uint64_t,6> thresholds{};
@@ -112,6 +144,20 @@ public:
    return m_elapsed;
   }
  };
+ // GeneralsX @feature Codex 29/10/2026 Private stage ownership restores nested classification on exceptions.
+ class StageScope {
+  BasicPathSearchTiming* m_owner;
+  unsigned m_previous=0;
+  Scope m_timer;
+ public:
+  StageScope(BasicPathSearchTiming* owner,Phase phase):m_owner(owner),m_timer(owner?&(*owner)[phase]:nullptr){
+   if(owner){m_previous=owner->m_queryStage;owner->m_queryStage=phase==Hierarchy?1:phase==FineSearch?2:phase==Finalization?3:0;}
+  }
+  StageScope(const StageScope&)=delete;
+  StageScope& operator=(const StageScope&)=delete;
+  ~StageScope(){if(m_owner)m_owner->m_queryStage=m_previous;}
+ };
+ unsigned queryStage()const{return m_queryStage;}
  // One terminal outcome per preparation call. Slot details are supplementary, not extra attempts.
  class AdmissionScope {
   BasicPathSearchTiming& m_owner;
@@ -157,6 +203,31 @@ public:
    retain(m_owner.m_slowQueues,m_owner.m_slowQueueCount,sample);
   }
  };
+ // GeneralsX @feature Codex 29/10/2026 Profile empty-queue rebuilds independently of request execution.
+ class ZoneScope {
+  BasicPathSearchTiming* m_owner;
+  Scope m_timer;
+  std::array<std::uint64_t,4> m_before{};
+ public:
+  ZoneSample sample;
+  ZoneScope(BasicPathSearchTiming* owner,unsigned width,unsigned height):m_owner(owner),
+   m_timer(owner?&(*owner)[ZoneRebuild]:nullptr){
+   if(!owner)return;
+   sample.width=width;sample.height=height;sample.queue=owner->m_activeQueue?owner->m_activeQueue->id:0;
+   for(unsigned i=0;i<4;++i)m_before[i]=(*owner)[static_cast<Phase>(ZoneLabel+i)].totalNanoseconds;
+  }
+  ZoneScope(const ZoneScope&)=delete;
+  ZoneScope& operator=(const ZoneScope&)=delete;
+  Metric* metric(Phase phase){return m_owner?&(*m_owner)[phase]:nullptr;}
+  ~ZoneScope(){
+   if(!m_owner)return;
+   sample.nanoseconds=m_timer.stop();
+   for(unsigned i=0;i<4;++i)sample.stages[i]=(*m_owner)[static_cast<Phase>(ZoneLabel+i)].totalNanoseconds-m_before[i];
+   retain(m_owner->m_slowZones,m_owner->m_slowZoneCount,sample);
+  }
+ };
+ const std::array<ZoneSample,retainedSamples>& slowZones()const{return m_slowZones;}
+ unsigned slowZoneCount()const{return m_slowZoneCount;}
  class SerialScope {
   Scope m_timer;
  public:
@@ -274,7 +345,8 @@ public:
  Metric& operator[](Phase phase){return m_metrics[phase];}
  const Metric& operator[](Phase phase)const{return m_metrics[phase];}
  void report(FILE* output)const {
-  const char* names[PhaseCount]={"queue","prepare","caller_prepare","pair","worker_kernel","caller_kernel","serial_kernel","validate","hierarchy","finalize"};
+  const char* names[PhaseCount]={"queue","prepare","caller_prepare","pair","worker_kernel","caller_kernel","serial_kernel","validate","hierarchy","finalize",
+   "fine_search","zone_rebuild","zone_label","zone_blocks","zone_equivalence","zone_flatten"};
   std::fprintf(output,"[PATH_TIMING] clock=steady unit=ms totals=overlapping kernels=task_wall_time thresholds=cumulative\n");
   for(unsigned i=0;i<PhaseCount;++i) {
    const auto& metric=m_metrics[i];
@@ -341,6 +413,12 @@ public:
     u(s.pops),u(s.destinationChecks),u(s.candidates),u(s.improvements),u(s.farTests),u(s.farPrunes),
     u(s.noHierarchy),u(s.over2000),u(s.nearGoal),u(s.expansions),s.examined,s.records,s.indexBytes);
   }
+  for(unsigned i=0;i<m_slowZoneCount;++i){
+   const auto&s=m_slowZones[i];
+   std::fprintf(output,"[PATH_ZONE_SLOW] rank=%u queue=%llu ms=%.3f width=%u height=%u blocks=%u zones=%u label_ms=%.3f blocks_ms=%.3f equivalence_ms=%.3f flatten_ms=%.3f\n",
+    i+1,u(s.queue),s.nanoseconds/1000000.0,s.width,s.height,s.blocks,s.zones,
+    s.stages[0]/1000000.0,s.stages[1]/1000000.0,s.stages[2]/1000000.0,s.stages[3]/1000000.0);
+  }
   for(unsigned i=0;i<m_slowPairCount;++i){
    const auto&s=m_slowPairs[i];
    std::fprintf(output,"[PATH_PAIR_SLOW] rank=%u pair=%llu queue=%llu ms=%.3f",i+1,u(s.id),u(s.queue),s.nanoseconds/1000000.0);
@@ -363,6 +441,14 @@ private:
  static void reportReads(FILE* output,std::uint64_t pair,const char*role,const char*phase,const ReadSample& s){
   std::fprintf(output,"[PATH_READS_SLOW] pair=%llu role=%s phase=%s queries=%llu query_observations=%llu heights=%llu height_observations=%llu flags=%u\n",
    u(pair),role,phase,u(s.queries),u(s.queryObservations),u(s.heights),u(s.heightObservations),s.flags);
+  const auto&p=s.queryProfile;
+  std::fprintf(output,"[PATH_TASK_PROFILE] pair=%llu role=%s phase=%s hierarchy_ms=%.3f fine_ms=%.3f finalize_ms=%.3f query_calls=%llu query_stride=%u query_samples=%llu sampled_evaluate_ms=%.6f sampled_log_ms=%.6f\n",
+   u(pair),role,phase,s.hierarchyNanoseconds/1000000.0,s.fineNanoseconds/1000000.0,s.finalizationNanoseconds/1000000.0,
+   u(p.calls),QueryProfile::stride,u(p.samples),p.evaluationNanoseconds/1000000.0,p.loggingNanoseconds/1000000.0);
+  const char* stages[]={"prepare","hierarchy","fine","finalize"};
+  for(unsigned i=0;i<4;++i)if(p.stageCalls[i])
+   std::fprintf(output,"[PATH_QUERY_STAGE] pair=%llu role=%s phase=%s stage=%s calls=%llu samples=%llu sampled_evaluate_ms=%.6f sampled_log_ms=%.6f\n",
+    u(pair),role,phase,stages[i],u(p.stageCalls[i]),u(p.stageSamples[i]),p.stageEvaluation[i]/1000000.0,p.stageLogging[i]/1000000.0);
  }
  static unsigned long long u(std::uint64_t value){return static_cast<unsigned long long>(value);}
  static const char* kindName(Kind kind){return kind==Kind::Safe?"safe":kind==Kind::Closest?"closest":"ordinary";}
@@ -399,8 +485,11 @@ private:
  std::array<QueueSample,retainedSamples> m_slowQueues{};
  std::array<PairSample,retainedSamples> m_slowPairs{};
  std::array<ClosestSample,retainedSamples> m_slowClosest{};
+ std::array<ZoneSample,retainedSamples> m_slowZones{};
+ unsigned m_slowZoneCount=0;
  unsigned m_slowQueueCount=0,m_slowPairCount=0,m_slowClosestCount=0;
  std::uint64_t m_queueId=0;
  QueueSample* m_activeQueue=nullptr;
+ unsigned m_queryStage=0;
 };
 using PathSearchTiming=BasicPathSearchTiming<>;

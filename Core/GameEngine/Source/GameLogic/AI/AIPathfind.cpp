@@ -2922,8 +2922,17 @@ void PathfindZoneManager::markZonesDirty()  ///< Called when the zones need to b
  * If you are a multiple terrain vehicle, like amphibious transport, the lookup is a little more
  * complicated.
  */
-void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer layers[], const IRegion2D &globalBounds )
+void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer layers[], const IRegion2D &globalBounds
+#ifdef GENERALS_ZH_PATH_TIMING
+ , PathSearchTiming* timing
+#endif
+)
 {
+#ifdef GENERALS_ZH_PATH_TIMING
+ // GeneralsX @feature Codex 29/10/2026 Time whole rebuild passes, never individual cells; null owners perform no clock reads.
+ PathSearchTiming::ZoneScope zoneTiming(timing,globalBounds.hi.x-globalBounds.lo.x+1,globalBounds.hi.y-globalBounds.lo.y+1);
+ PathSearchTiming::Scope labelTiming(zoneTiming.metric(PathSearchTiming::ZoneLabel));
+#endif
 #ifdef DEBUG_QPF
 #if defined(DEBUG_LOGGING)
 	__int64 startTime64;
@@ -3051,6 +3060,10 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 	}
 
 	allocateZones();
+#ifdef GENERALS_ZH_PATH_TIMING
+ labelTiming.stop();zoneTiming.sample.blocks=xCount*yCount;
+ PathSearchTiming::Scope blocksTiming(zoneTiming.metric(PathSearchTiming::ZoneBlocks));
+#endif
 
 	for (xBlock=0; xBlock<xCount; xBlock++) {
 		for (yBlock=0; yBlock<yCount; yBlock++) {
@@ -3075,6 +3088,10 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 		}
 	}
 
+#ifdef GENERALS_ZH_PATH_TIMING
+ blocksTiming.stop();
+ PathSearchTiming::Scope equivalenceTiming(zoneTiming.metric(PathSearchTiming::ZoneEquivalence));
+#endif
 	// Determine water/ground equivalent zones, and ground/cliff equivalent zones.
 	for (i=0; i<m_zonesAllocated; i++) {
 		m_groundCliffZones[i] = i;
@@ -3204,6 +3221,10 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 		}
 	}
 
+#ifdef GENERALS_ZH_PATH_TIMING
+ equivalenceTiming.stop();
+ PathSearchTiming::Scope flattenTiming(zoneTiming.metric(PathSearchTiming::ZoneFlatten));
+#endif
 	//FLATTEN HIERARCHICAL ZONES
 	for (i=1; i<m_maxZone; i++) {
 		Int zone = m_hierarchicalZones[i];
@@ -3216,6 +3237,9 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 	flattenZones(m_groundRubbleZones, m_hierarchicalZones, m_maxZone);
 	flattenZones(m_terrainZones, m_hierarchicalZones, m_maxZone);
 	flattenZones(m_crusherZones, m_hierarchicalZones, m_maxZone);
+#ifdef GENERALS_ZH_PATH_TIMING
+ flattenTiming.stop();zoneTiming.sample.zones=m_maxZone;
+#endif
 
 #ifdef DEBUG_QPF
 #if defined(DEBUG_LOGGING)
@@ -4387,8 +4411,14 @@ struct PathfindParallelReads {
  BoundedObservationLog<TerrainRead,capacity,TerrainKey,TerrainValue> terrain;
  BoundedSearchReads<ObjectID,std::array<unsigned,6>,64> objects;
 #endif
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming::QueryProfile queryProfile;
+#endif
  Bool overflow = false;
  void reset() {cells.reset();corridor.reset();queries.clear();heights.clear();overflow=false;
+#ifdef GENERALS_ZH_PATH_TIMING
+  queryProfile={};
+#endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
   terrain.clear();objects.reset();
 #endif
@@ -5974,7 +6004,7 @@ Bool Pathfinder::takeCompletePath(const Object* obj,const LocomotorSet& locomoto
  else {++m_parallelBatch->accepted;if(job->safe)++m_parallelBatch->safeAccepted;if(job->closest)++m_parallelBatch->closestAccepted;}
 #ifdef GENERALS_ZH_PATH_TIMING
  // These stage times were measured privately on the participant; publish only after validation and ownership transfer.
- for(auto phase:{PathSearchTiming::Hierarchy,PathSearchTiming::CallerPreparation,PathSearchTiming::Finalization})
+ for(auto phase:{PathSearchTiming::Hierarchy,PathSearchTiming::CallerPreparation,PathSearchTiming::Finalization,PathSearchTiming::FineSearch})
   m_pathTiming[phase].merge(job->stageTiming[phase]);
  job->resolveTiming(m_pathTiming,PathSearchTiming::Result::Reused);
 #endif
@@ -5990,7 +6020,17 @@ PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, cons
   // GeneralsX @performance Codex 29/10/2026 Keep query-only snapshots out of the raw cell log; replay all five result fields before reuse.
   // Direct cell reads and allocation-kind observation retain their independent exact snapshots.
   PathfindSearchContext::OccupancyReadScope queryReads(activePathfindSearchContext());
+#ifdef GENERALS_ZH_PATH_TIMING
+  // GeneralsX @feature Codex 29/10/2026 Sample evaluation separately from dependency logging, with private stage classification.
+  unsigned stage=0;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+  if(auto* timing=activePathfindSearchContext().m_privateTiming)stage=timing->queryStage();
+#endif
+  return reads->queryProfile.evaluate([&]{return PathOccupancy::evaluate(input,live);},
+   [&](const PathOccupancy::Result& result){reads->query(input,result);},stage);
+#else
   const auto result=PathOccupancy::evaluate(input,live);reads->query(input,result);return result;
+#endif
  }
 #endif
 
@@ -7059,7 +7099,11 @@ void Pathfinder::processPathfindQueue()
 #ifdef GENERALS_ZH_PATH_TIMING
   queueTiming.sample.zones=true;
 #endif
-		m_zoneManager.calculateZones(m_map, m_layers, m_extent);
+		m_zoneManager.calculateZones(m_map, m_layers, m_extent
+#ifdef GENERALS_ZH_PATH_TIMING
+   , &m_pathTiming
+#endif
+  );
 #ifdef GENERALS_ZH_PATH_TIMING
   queueTiming.sample.completed=true;
 #endif
@@ -7888,15 +7932,21 @@ void Pathfinder::prepareParallelBatch()
 #endif
     }
     // GeneralsX @feature Codex 28/10/2026 Copy bounded observation counts after join to distinguish deduplication, capacity and conflict.
-    const auto copyReads=[](const PathfindParallelReads& reads,PathSearchTiming::ReadSample& sample){
+    const auto copyReads=[](const PathfindParallelJob& job,PathSearchTiming::ReadSample& sample){
+     const auto&reads=job.reads;sample.queryProfile=reads.queryProfile;
+#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+     sample.hierarchyNanoseconds=job.stageTiming[PathSearchTiming::Hierarchy].totalNanoseconds;
+     sample.fineNanoseconds=job.stageTiming[PathSearchTiming::FineSearch].totalNanoseconds;
+     sample.finalizationNanoseconds=job.stageTiming[PathSearchTiming::Finalization].totalNanoseconds;
+#endif
      sample.queries=reads.queries.size();sample.queryObservations=reads.queries.observations();
      sample.heights=reads.heights.size();sample.heightObservations=reads.heights.observations();
      sample.flags=(reads.queries.full()?1u:0u)|(reads.heights.full()?2u:0u)|
       (reads.queries.conflict()?4u:0u)|(reads.heights.conflict()?8u:0u)|
       (reads.queries.invalid()?16u:0u)|(reads.heights.invalid()?32u:0u);
     };
-    if(task.primary)copyReads(job.reads,task.primaryReads);
-    if(task.fallback)copyReads(job.fallback->reads,task.fallbackReads);
+    if(task.primary)copyReads(job,task.primaryReads);
+    if(task.fallback)copyReads(*job.fallback,task.fallbackReads);
    }
    const auto pairId=m_pathTiming.recordPair(pairSample);
    for(unsigned i=0;i<2;++i){
@@ -8022,7 +8072,7 @@ Path *Pathfinder::findPathWithInputs(Object *obj, const LocomotorSet& locomotorS
  {
 #ifdef GENERALS_ZH_PATH_TIMING
   // GeneralsX @feature Codex 29/10/2026 Attribute hierarchy to the executing owner's private or caller timing.
-  PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::Hierarchy]);
+  PathSearchTiming::StageScope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming(),PathSearchTiming::Hierarchy);
 #endif
   hPat=findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
  }
@@ -8048,6 +8098,12 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runOrdinarySearchLoop(PathfindCell
 		const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
 		const ICoord2D& startCellNdx, const Object *obj)
 {
+#if defined(GENERALS_ZH_PATH_TIMING) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
+ // GeneralsX @feature Codex 29/10/2026 A worker writes only its private profiler; unprofiled fine-only participants stay untouched.
+ auto& timingContext=activePathfindSearchContext();
+ PathSearchTiming::StageScope fineTiming(timingContext.m_privateTiming?timingContext.m_privateTiming:
+  !timingContext.m_parallelReads?&m_pathTiming:nullptr,PathSearchTiming::FineSearch);
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Speculative kernels have private metrics; only caller fallback writes the serial aggregate.
  // GeneralsX @bugfix Codex 28/10/2026 Read context-only metadata through the context accessor, not its bookkeeping base.
@@ -8290,7 +8346,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
   // GeneralsX @feature Codex 28/10/2026 Include main-thread Path construction, optimization and original cleanup on success or failure.
-  PathSearchTiming::Scope finalizationTiming(&searchTiming()[PathSearchTiming::Finalization]);
+  PathSearchTiming::StageScope finalizationTiming(&searchTiming(),PathSearchTiming::Finalization);
 #endif
 	parentCell = outcome.lastCell;
 	const Int cellCount = outcome.cellsExamined;
@@ -10485,6 +10541,12 @@ Pathfinder::ClosestSearchOutcome Pathfinder::runClosestSearchLoop(PathfindCell* 
  const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius,
  const ICoord2D& startCellNdx, const PathfindClosestSettings& closest)
 {
+#if defined(GENERALS_ZH_PATH_TIMING) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
+ // GeneralsX @feature Codex 29/10/2026 A worker writes only its private profiler; unprofiled fine-only participants stay untouched.
+ auto& timingContext=activePathfindSearchContext();
+ PathSearchTiming::StageScope fineTiming(timingContext.m_privateTiming?timingContext.m_privateTiming:
+  !timingContext.m_parallelReads?&m_pathTiming:nullptr,PathSearchTiming::FineSearch);
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Caller closest recomputation has separate timing from speculative tasks.
  PathSearchTiming::ClosestScope serialTiming(searchTiming(),!activePathfindSearchContext().m_parallelReads);
@@ -10760,7 +10822,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		Path *hPat;
   {
 #ifdef GENERALS_ZH_PATH_TIMING
-   PathSearchTiming::Scope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming()[PathSearchTiming::Hierarchy]);
+   PathSearchTiming::StageScope hierarchyTiming(m_parallelBatch&&m_parallelBatch->preparing?nullptr:&searchTiming(),PathSearchTiming::Hierarchy);
 #endif
    hPat=findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
   }
@@ -10839,7 +10901,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
   if(auto*job=activePathfindSearchContext().m_completeJob){job->closestOutcome=outcome;job->completeRecords=job->context.m_records.size();}
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
-  PathSearchTiming::Scope finalizationTiming(&searchTiming()[PathSearchTiming::Finalization]);
+  PathSearchTiming::StageScope finalizationTiming(&searchTiming(),PathSearchTiming::Finalization);
 #endif
   parentCell=outcome.lastCell;
   PathfindCell* closesetCell=outcome.closestCell;
@@ -13117,6 +13179,12 @@ Pathfinder::OrdinarySearchOutcome Pathfinder::runSafeSearchLoop(PathfindCell* pa
  const PathfindMovementInput& movement, Bool isHuman, Bool centerInCell, Int radius, const ICoord2D& startIndex,
  const Coord3D& repulsor1, const Coord3D& repulsor2, Real repulsorRadius)
 {
+#if defined(GENERALS_ZH_PATH_TIMING) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
+ // GeneralsX @feature Codex 29/10/2026 A worker writes only its private profiler; unprofiled fine-only participants stay untouched.
+ auto& timingContext=activePathfindSearchContext();
+ PathSearchTiming::StageScope fineTiming(timingContext.m_privateTiming?timingContext.m_privateTiming:
+  !timingContext.m_parallelReads?&m_pathTiming:nullptr,PathSearchTiming::FineSearch);
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Time caller escape recomputation only when no private speculative read log is installed.
  PathSearchTiming::SerialScope serialTiming(searchTiming(),!activePathfindSearchContext().m_parallelReads,PathSearchTiming::Kind::Safe);
@@ -13222,7 +13290,7 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
   if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=job->context.m_records.size();}
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
-  PathSearchTiming::Scope finalizationTiming(&searchTiming()[PathSearchTiming::Finalization]);
+  PathSearchTiming::StageScope finalizationTiming(&searchTiming(),PathSearchTiming::Finalization);
 #endif
   parentCell=outcome.lastCell;
   const Int cellCount=outcome.cellsExamined;

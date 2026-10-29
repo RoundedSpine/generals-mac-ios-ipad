@@ -480,6 +480,121 @@ int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radi
 
 
 class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @feature Codex 29/10/2026 Verify sparse clocks, exact stage attribution and exception restoration with deterministic time.
+    def test_sampled_query_profile_keeps_every_evaluation_and_bounds_clock_reads(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <cassert>
+#include <stdexcept>
+struct Clock {using duration=std::chrono::nanoseconds;using time_point=std::chrono::time_point<Clock>;
+ static long long ticks;static unsigned reads;static time_point now(){++reads;return time_point(duration(ticks));}};
+long long Clock::ticks=0;unsigned Clock::reads=0;
+int main(){using T=BasicPathSearchTiming<Clock>;T t;T::QueryProfile profile;
+ unsigned evaluations=0,logs=0;
+ for(unsigned i=0;i<256;++i){
+  auto result=profile.evaluate([&]{++evaluations;Clock::ticks+=19;return evaluations;},
+   [&](unsigned value){assert(value==evaluations);++logs;Clock::ticks+=7;},i<128?2:3);
+  assert(result==i+1);
+ }
+ assert(evaluations==256&&logs==256&&Clock::reads==6&&profile.calls==256&&profile.samples==2);
+ assert(profile.evaluationNanoseconds==38&&profile.loggingNanoseconds==14);
+ assert(profile.stageCalls[2]==128&&profile.stageCalls[3]==128&&profile.stageSamples[2]==1&&profile.stageSamples[3]==1);
+ {T::StageScope disabled(nullptr,T::FineSearch);}assert(Clock::reads==6&&t.queryStage()==0);
+ try{T::StageScope fine(&t,T::FineSearch);assert(t.queryStage()==2);
+  {T::StageScope final(&t,T::Finalization);assert(t.queryStage()==3);}assert(t.queryStage()==2);
+  throw std::runtime_error("restore");
+ }catch(const std::runtime_error&){}
+ assert(t.queryStage()==0&&t[T::FineSearch].calls==1&&t[T::Finalization].calls==1);
+ profile={};assert(!profile.calls&&!profile.samples&&!profile.stageCalls[2]);
+}
+''')
+
+    def test_zone_profile_keeps_empty_queue_rebuilds_and_separate_top_samples(self):
+        run_cpp(r'''
+#include "pathsearchtiming.h"
+#include <cassert>
+#include <string>
+struct Clock {using duration=std::chrono::nanoseconds;using time_point=std::chrono::time_point<Clock>;
+ static long long ticks;static unsigned reads;static time_point now(){++reads;return time_point(duration(ticks));}};
+long long Clock::ticks=0;unsigned Clock::reads=0;
+int main(){using T=BasicPathSearchTiming<Clock>;T t;
+ {T::ZoneScope ignored(nullptr,12,12);T::Scope stage(ignored.metric(T::ZoneLabel));}assert(!Clock::reads);
+ for(unsigned n=0;n<6;++n){T::QueueScope queue(t,n?2:0);
+  T::ZoneScope zones(&t,12,12);zones.sample.blocks=4;zones.sample.zones=8;
+  for(unsigned i=0;i<4;++i){T::Scope stage(zones.metric(static_cast<T::Phase>(T::ZoneLabel+i)));Clock::ticks+=(i+1)*1000000;}
+ }
+ assert(t[T::Queue].calls==5&&t[T::ZoneRebuild].calls==6&&t.slowZoneCount()==4);
+ assert(t.slowZones()[0].queue==0&&t.slowZones()[1].queue==1);
+ for(const auto&s:t.slowZones()){
+  assert(s.nanoseconds==10000000&&s.width==12&&s.height==12&&s.blocks==4&&s.zones==8);
+  for(unsigned i=0;i<4;++i)assert(s.stages[i]==(i+1)*1000000);
+ }
+ FILE*f=std::tmpfile();assert(f);t.report(f);std::rewind(f);std::string report;char buffer[2048];
+ while(std::fgets(buffer,sizeof buffer,f))report+=buffer;std::fclose(f);
+ assert(report.find("phase=zone_rebuild calls=6")!=std::string::npos);
+ assert(report.find("[PATH_ZONE_SLOW] rank=1 queue=0 ms=10.000 width=12 height=12 blocks=4 zones=8 label_ms=1.000 blocks_ms=2.000 equivalence_ms=3.000 flatten_ms=4.000")!=std::string::npos);
+}
+''')
+
+    def test_zone_pass_profiling_compiles_real_rebuild_and_preserves_zone_tables(self):
+        # Production relabel/merge/flatten code and predicates; layer/block services remain controlled.
+        header_start=HEADER.index('void calculateZones(')
+        declaration=HEADER[header_start:HEADER.index(';',header_start)+1]
+        source=r'''
+#include "pathsearchtiming.h"
+#include <cassert>
+#include <cstdio>
+using Int=int;using Bool=bool;using zoneStorageType=unsigned short;
+#define __fastcall
+#define DEBUG_ASSERTCRASH(condition, message) assert(condition)
+#define RTS_GENERALS 0
+constexpr int LAYER_GROUND=0,LAYER_LAST=3;
+constexpr bool TRUE=true,FALSE=false;
+struct ICoord2D{int x=0,y=0;};struct IRegion2D{ICoord2D lo{0,0},hi{4,4};};
+struct PathfindCell{
+ enum CellType {CELL_CLEAR=0,CELL_WATER=1,CELL_CLIFF=2,CELL_RUBBLE=3,CELL_OBSTACLE=4};
+ CellType type=CELL_CLEAR;int zone=0;
+ CellType getType()const{return type;}int getZone()const{return zone;}void setZone(int value){zone=value;}
+ int getConnectLayer()const{return LAYER_GROUND;}
+ bool isObstacleFence()const{return false;}
+};
+struct PathfindLayer{int zone=0;void setZone(int z){zone=z;}int getZone()const{return zone;}void applyZone(){}
+ bool isUnused()const{return true;}bool isDestroyed()const{return false;}
+ void getStartCellIndex(ICoord2D*){}void getEndCellIndex(ICoord2D*){}
+};
+struct PathfindZoneManager{
+ enum{ZONE_BLOCK_SIZE=2};int m_maxZone=0,m_zonesAllocated=256;unsigned m_nextFrameToCalculateZones=0;
+ zoneStorageType m_groundCliffZones[256]{},m_groundWaterZones[256]{},m_groundRubbleZones[256]{},
+  m_terrainZones[256]{},m_crusherZones[256]{},m_hierarchicalZones[256]{};
+ struct Block{void setInteractsWithBridge(bool){}void blockCalculateZones(PathfindCell**,PathfindLayer*,const IRegion2D&) {}}m_zoneBlocks[3][3];
+ void setBridge(int,int,bool){}void allocateZones(){}
+ DECLARATION
+};
+'''.replace('DECLARATION',declaration)
+        for marker in ['inline Bool waterGround(', 'inline Bool groundRubble(', 'inline Bool terrain(',
+                       'inline Bool crusherGround(', 'inline Bool groundCliff(', 'static void __fastcall resolveZones(',
+                       'static void flattenZones(', 'inline void applyZone(', 'void PathfindZoneManager::calculateZones(']:
+            source+='\n'+function(marker)
+        source+=r'''
+int main(){for(unsigned seed=0;seed<8;++seed){PathfindZoneManager zones;PathfindCell storage[5][5];PathfindCell*map[5];
+ PathfindLayer layers[4];IRegion2D bounds;
+ for(int x=0;x<5;++x){map[x]=storage[x];for(int y=0;y<5;++y)storage[x][y].type=static_cast<PathfindCell::CellType>((x*31+y*17+seed)%5);}
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathSearchTiming timing;zones.calculateZones(map,layers,bounds,&timing);
+ assert(timing.slowZoneCount()==1&&timing.slowZones()[0].width==5&&timing.slowZones()[0].height==5);
+ assert(timing.slowZones()[0].blocks==9&&timing.slowZones()[0].zones==unsigned(zones.m_maxZone));
+ for(unsigned i=PathSearchTiming::ZoneRebuild;i<=PathSearchTiming::ZoneFlatten;++i)assert(timing[static_cast<PathSearchTiming::Phase>(i)].calls==1);
+#else
+ zones.calculateZones(map,layers,bounds);
+#endif
+ assert(zones.m_nextFrameToCalculateZones==0xffffffff);
+ for(int x=0;x<5;++x)for(int y=0;y<5;++y)printf("%d,",storage[x][y].getZone());
+ for(int i=0;i<zones.m_maxZone;++i)printf("%d,%d,%d,%d,%d,%d;",zones.m_groundCliffZones[i],zones.m_groundWaterZones[i],
+  zones.m_groundRubbleZones[i],zones.m_terrainZones[i],zones.m_crusherZones[i],zones.m_hierarchicalZones[i]);puts("");
+}}
+'''
+        self.assertEqual(run_cpp(source).stdout,run_cpp('#define GENERALS_ZH_PATH_TIMING 1\n'+source).stdout)
+
     # GeneralsX @test Codex 29/10/2026 Storage-only changes preserve complete serial and both participants' expansion traces.
     def test_compact_nodes_match_split_routes_work_and_accounting(self):
         from test_search_record_pool import split_storage

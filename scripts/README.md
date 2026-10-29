@@ -90,6 +90,10 @@ concurrent hierarchy, reuse before preparation, serial route/optimized-link/
 destination/budget equivalence, bridges/cliffs, stale terrain/object/policy inputs,
 admission, early null/fallback, ownership transfer, pooled failures and recovery
 after construction. See [complete-worker scope and limits](../docs/WORKDIR/audit/IOS_PATH_COMPLETE_WORKER_2026-10-29.md).
+The same suites verify sparse query timing and stage restoration, unchanged live
+evaluation, winding-route optimizer counts, independent zone retention and actual
+zone-table equality with profiling OFF/ON. See
+[query-cost profiling scope](../docs/WORKDIR/audit/IOS_PATH_OCCUPANCY_COST_2026-10-29.md).
 The bounded-preparation cases also cover restricted ordinary corridors, unchanged
 authoritative accounting, recovery abort/Path cleanup, exact query/height identity,
 collision/rollover/conflict handling and large searches exceeding 8,192 repeated
