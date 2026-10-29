@@ -242,6 +242,12 @@ enum {MAX_WALL_PIECES = 128};
 // GeneralsX @feature Codex 26/10/2026 Search-only state is isolated from permanent unit/obstacle records.
 class PathfindCellInfo;
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
+ struct PathfindSearchNode;
+ using PathfindSearchRecord=PathfindSearchNode;
+#else
+ using PathfindSearchRecord=PathfindCellInfo;
+#endif
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
  // GeneralsX @performance Codex 29/10/2026 Map identities are shared read-only; record-slot indexes belong to each context.
  inline SearchCellIndices& pathfindSearchCellIndices(){static SearchCellIndices indices;return indices;}
  inline unsigned pathfindCellSearchIndex(const PathfindCell* cell);
@@ -251,16 +257,29 @@ class PathfindCellInfo;
  void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* cell);
 #endif
 struct PathfindSearchState {
- PathfindCellInfo *m_nextOpen = nullptr, *m_prevOpen = nullptr, *m_pathParent = nullptr;
+ PathfindSearchRecord *m_nextOpen = nullptr, *m_prevOpen = nullptr, *m_pathParent = nullptr;
  unsigned long long m_openSequence = 0;
  Int m_openIndex = -1;
  UnsignedShort m_totalCost = 0, m_costSoFar = 0;
  Bool m_open = false, m_closed = false, m_blockedByAlly = false;
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+ Bool m_searchCharged=false;
+#endif
 };
+#ifdef GENERALS_ZH_SEARCH_CONTEXT
+// GeneralsX @performance Codex 29/10/2026 Private nodes contain search state, cell/position and allocation credit, without permanent occupancy fields.
+struct PathfindSearchNode : PathfindSearchState {
+ PathfindCell* m_cell=nullptr;
+ ICoord2D m_pos{};
+ PathfindSearchState& search()const{return *const_cast<PathfindSearchNode*>(this);}
+};
+#endif
 constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;
 using PathfindSearchNodes = StampedSearchContext<PathfindSearchState, PATHFIND_RECORD_CAPACITY>;
-// Defined after the list type; records access only the node arena here.
+// Legacy arena access; compact contexts own complete nodes directly.
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
 inline PathfindSearchNodes& mainPathfindSearchNodes();
+#endif
 
 class PathfindCellInfo
 {
@@ -277,15 +296,12 @@ public:
 	static PathfindCellInfo * getACellInfo(PathfindCell *cell, const ICoord2D &pos);
 	static void releaseACellInfo(PathfindCellInfo *theInfo);
 
+	// GeneralsX @performance Codex 29/10/2026 Permanent records have no search-state pointer in the independent-context build.
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
 	PathfindSearchState& search() const {
-#ifdef GENERALS_ZH_SEARCH_CONTEXT
-  // GeneralsX @performance Codex 28/10/2026 Live private records bind directly to stable arena state at allocation.
-  assert(m_searchState);
-  return *m_searchState;
-#else
 		return const_cast<PathfindCellInfo*>(this)->m_search;
-#endif
 	}
+#endif
 	PathfindCellInfo*& freeLink() {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
 		return m_nextFree;
@@ -302,8 +318,6 @@ protected:
 
 	PathfindCell *m_cell;
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
- // GeneralsX @performance Codex 28/10/2026 Replace owner/slot lookup with one pointer; keep permanent free links separate.
- PathfindSearchState* m_searchState;
 	PathfindCellInfo* m_nextFree;
 #else
 	PathfindSearchState m_search;
@@ -319,10 +333,6 @@ protected:
 	ObjectID m_obstacleID;	///< the object ID who overlaps this cell
 
 	UnsignedInt m_isFree:1;
-#ifdef GENERALS_ZH_SEARCH_CONTEXT
- // GeneralsX @performance Codex 28/10/2026 Pack private admission accounting beside existing flags, outside pointer padding.
- UnsignedInt m_searchCharged:1;
-#endif
 	UnsignedInt m_obstacleIsFence:1;///< True if occupied by a fence.
 	UnsignedInt m_obstacleIsTransparent:1;///< True if obstacle is transparent (undefined if obstacleid is invalid)
 	/// @todo Do we need both mark values in this cell?  Can't store a single value and compare it?
@@ -347,7 +357,7 @@ public:
 	PathfindCell* getHead() const { return m_heapActive ? (m_heap.empty() ? nullptr : m_heap[0]->m_cell) : m_head; }
 	Bool empty() const { return getHead() == nullptr; }
  // GeneralsX @refactor Codex 26/10/2026 Release global context buffers before game memory shuts down.
- void releaseStorage() { reset(); std::vector<PathfindCellInfo*>().swap(m_heap); }
+ void releaseStorage() { reset(); std::vector<PathfindSearchRecord*>().swap(m_heap); }
 	PathfindCell* getNextForDisplay(PathfindCell* cell) const;
 
 	Bool canReverseSort(PathfindCell& currentCell) const;
@@ -358,11 +368,11 @@ private:
 	Bool m_heapEnabled;
 	Bool m_heapActive;
 	unsigned long long m_sequence;
-	std::vector<PathfindCellInfo*> m_heap;
+	std::vector<PathfindSearchRecord*> m_heap;
 
-	static Bool before(const PathfindCellInfo* a, const PathfindCellInfo* b);
-	void pushHeap(PathfindCellInfo* info);
-	void removeHeap(PathfindCellInfo* info);
+	static Bool before(const PathfindSearchRecord* a, const PathfindSearchRecord* b);
+	void pushHeap(PathfindSearchRecord* info);
+	void removeHeap(PathfindSearchRecord* info);
 	void siftUp(Int index);
 	void siftDown(Int index);
 	void useLinkedList();
@@ -377,10 +387,14 @@ struct PathfindSearchBookkeeping {
  Int m_cumulativeCellsAllocated = 0;
 };
 
-struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
+struct PathfindSearchContext :
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
+ PathfindSearchNodes,
+#endif
+ PathfindSearchBookkeeping {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
  // GeneralsX @refactor Codex 26/10/2026 Searches own records and never attach them to permanent map cells.
- BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;
+ BoundedKeyedPool<const PathfindCell*, PathfindSearchRecord, PATHFIND_RECORD_CAPACITY> m_records;
  BoundedRecordIndex<PATHFIND_RECORD_CAPACITY> m_recordIndex;
  unsigned m_transientRecords = 0;
  SearchContextOwnership m_ownership;
@@ -437,13 +451,13 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
  };
 
  // GeneralsX @performance Codex 29/10/2026 Registered cells use one indexed slot read; unregistered/over-budget identities keep the original allocator lookup.
- PathfindCellInfo* findRecord(const PathfindCell* cell) {
+ PathfindSearchRecord* findRecord(const PathfindCell* cell) {
   const unsigned index=pathfindCellSearchIndex(cell);
   if(!m_recordIndex.covers(index))return m_records.find(cell);
   const unsigned slot=m_recordIndex.find(index);
   return slot==m_recordIndex.missing?nullptr:m_records.atSlot(slot);
  }
- PathfindCellInfo* allocateRecord(PathfindCell* cell, const ICoord2D& pos, Bool persistent) {
+ PathfindSearchRecord* allocateRecord(PathfindCell* cell, const ICoord2D& pos, Bool persistent) {
   if (auto* record = findRecord(cell)) return record;
   // Occupied cells already consume permanent capacity; only other search cells consume extra credit.
   const unsigned permanentUse = admissionUse();
@@ -458,8 +472,7 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   auto* record = m_records.acquire(cell);
   if (!record) return nullptr;
   record->m_cell = cell; record->m_pos = pos;
-  // GeneralsX @performance Codex 28/10/2026 Reset once before publishing the direct state pointer; records never outlive their generation.
-  record->m_searchState = &resetSlot(m_records.index(record));
+  // GeneralsX @performance Codex 29/10/2026 acquire already initialized the complete node once; publish only after cell/credit setup.
   record->m_searchCharged = !persistent;
   if (record->m_searchCharged) ++m_transientRecords;
   const unsigned index=pathfindCellSearchIndex(cell);
@@ -474,15 +487,17 @@ struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {
   m_recordIndex.erase(pathfindCellSearchIndex(cell));
   m_records.release(cell);
  }
+ auto generation()const{return m_records.generation();}
 #endif
  void beginSearch(bool prepareIndex=true) {
-  PathfindSearchNodes::beginSearch();
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
   m_records.beginGeneration(); m_transientRecords = 0;
   m_recordIndex.beginSearch(prepareIndex?pathfindSearchCellIndices().size():0);
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
   m_admissionWindow.reset();
 #endif
+#else
+  PathfindSearchNodes::beginSearch();
 #endif
  }
  // One byte per hierarchical block, not per terrain cell. A new map starts fully passable.
@@ -521,7 +536,9 @@ inline PathfindSearchContext& activePathfindSearchContext() {
  if (auto* selected=SearchContextBinding<PathfindSearchContext>::current()) return *selected;
  return mainPathfindSearchContext();
 }
+#ifndef GENERALS_ZH_SEARCH_CONTEXT
 inline PathfindSearchNodes& mainPathfindSearchNodes() { return mainPathfindSearchContext(); }
+#endif
 
 /**
  * This represents one cell in the pathfinding grid.
@@ -657,7 +674,7 @@ public:
 	void setPinched(Bool pinch) {m_pinched = pinch;	}
 
  // Search admission is separate from persistent unit/obstacle allocation.
- PathfindCellInfo* searchInfo() const {
+ PathfindSearchRecord* searchInfo() const {
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
   auto& context = activePathfindSearchContext();
   if (auto* record = context.findRecord(this)) return record;

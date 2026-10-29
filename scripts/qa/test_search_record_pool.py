@@ -42,7 +42,66 @@ bool s_useFixedPathfinding=true,s_forceCleanCells=false;
     return source + '\n'.join(function(marker) for marker in markers) + methods + operations
 
 
+# GeneralsX @test Codex 29/10/2026 Reconstruct the preceding split storage around unchanged production kernels for differential checks.
+def split_storage(source):
+    start=source.index('struct PathfindSearchNode : PathfindSearchState {')
+    end=source.index('\n};',start)+3
+    former=r'''struct PathfindSearchNode {
+ PathfindCell* m_cell=nullptr;
+ PathfindSearchState* m_searchState=nullptr;
+ PathfindSearchNode* m_nextFree=nullptr;
+ ICoord2D m_pos{};
+ ObjectID m_goalUnitID=0,m_posUnitID=0,m_goalAircraftID=0,m_obstacleID=0;
+ unsigned m_isFree:1,m_searchCharged:1,m_obstacleIsFence:1,m_obstacleIsTransparent:1;
+ PathfindSearchState& search()const{assert(m_searchState);return *m_searchState;}
+};'''
+    source=source[:start]+former+source[end:]
+    before='struct PathfindSearchContext :\n#ifndef GENERALS_ZH_SEARCH_CONTEXT\n PathfindSearchNodes,\n#endif\n PathfindSearchBookkeeping {'
+    assert before in source
+    source=source.replace(before,'struct PathfindSearchContext : PathfindSearchNodes, PathfindSearchBookkeeping {',1)
+    source=source.replace('#ifdef GENERALS_ZH_SEARCH_CONTEXT\n Bool m_searchCharged=false;\n#endif','',1)
+    source=source.replace('record->m_searchCharged = !persistent;',
+        'record->m_searchState=&resetSlot(m_records.index(record));record->m_searchCharged = !persistent;',1)
+    source=source.replace('m_records.beginGeneration(); m_transientRecords = 0;',
+        'PathfindSearchNodes::beginSearch();m_records.beginGeneration(); m_transientRecords = 0;',1)
+    # Match the old permanent record's unused state pointer too, for a layout check.
+    source=source.replace('PathfindCellInfo* m_nextFree;',
+        'PathfindSearchState* m_searchState=nullptr;PathfindCellInfo* m_nextFree;',1)
+    return source
+
+
 class SearchRecordPoolTest(unittest.TestCase):
+    def test_compact_pool_churn_and_credit_match_split_storage(self):
+        source=engine_fixture().replace(
+            'BoundedKeyedPool<const PathfindCell*, PathfindSearchRecord, PATHFIND_RECORD_CAPACITY> m_records;',
+            'BoundedKeyedPool<const PathfindCell*, PathfindSearchRecord, PATHFIND_RECORD_CAPACITY,unsigned char> m_records;')
+        source=source.replace('constexpr unsigned PATHFIND_RECORD_CAPACITY = 30000;','constexpr unsigned PATHFIND_RECORD_CAPACITY = 16;')
+        main=r'''
+int main(){PathfindCellInfo::allocateCellInfos();{PathfindCell cells[24];PathfindCell::registerSearchCells(cells,24);
+ auto&c=mainPathfindSearchContext();SearchContextBinding<PathfindSearchContext> binding(c);std::mt19937 random(611);unsigned long long hash=0;
+ const auto mix=[&](unsigned value){hash=hash*131+value;};
+ for(unsigned phase=0;phase<600;++phase){c.beginSearch();PathfindSearchContext::AdmissionScope allowance(c,4);
+  for(unsigned n=0;n<80;++n){unsigned key=random()%24,op=random()%5;
+   if(op==0)c.releaseRecord(&cells[key]);
+   else if(op==1){if(key<8)cells[key].setGoalUnit(cells[key].getGoalUnit()==INVALID_ID?17:INVALID_ID,{int(key),0});}
+   else {auto*node=c.allocateRecord(&cells[key],{int(key),3},cells[key].m_info!=nullptr);
+    mix(node!=nullptr);if(node){mix(c.m_records.index(node));mix(node->search().m_totalCost);mix(node->search().m_openSequence);
+     node->search().m_totalCost=static_cast<UnsignedShort>(n*13);node->search().m_openSequence=n+1;
+    }
+   }
+   mix(c.m_transientRecords);mix(c.m_records.size());
+   for(unsigned k=0;k<24;++k){auto*node=c.findRecord(&cells[k]);mix(node!=nullptr);
+    if(node){mix(c.m_records.index(node));mix(node->m_searchCharged);mix(node->search().m_totalCost);mix(node->search().m_openSequence);}
+   }
+  }
+ }
+ for(unsigned k=0;k<24;++k)cells[k].setGoalUnit(INVALID_ID,{int(k),0});
+ c.releaseStorage();printf("%llu\n",hash);}
+ pathfindSearchCellIndices().reset();PathfindCellInfo::releaseCellInfos();}
+'''
+        self.assertEqual(run_cpp(split_storage(source)+main,timeout=30).stdout,
+                         run_cpp(source+main,timeout=30).stdout)
+
     # GeneralsX @test Codex 29/10/2026 Direct lookup changes identity resolution, never allocation order, credit or lifetime.
     def test_index_randomized_pool_equivalence_and_rollover(self):
         run_cpp(r'''
@@ -103,15 +162,15 @@ int main(){PathfindCellInfo::allocateCellInfos();{
  auto*next=c.allocateRecord(&ground[1],{5,6},false);assert(next==recycled&&!next->search().m_totalCost);
  assert(c.m_transientRecords==3);c.beginSearch();assert(!c.findRecord(&ground[1])&&!c.findRecord(bridge)&&!c.findRecord(&outside));
  ground[0].setGoalUnit(17,{3,4});assert(ground[0].allocateSearchInfo({3,4}));assert(!c.m_transientRecords);
- const auto*permanent=ground[0].m_info;assert(c.findRecord(ground)!=permanent&&ground[0].getGoalUnit()==17);
+ const auto*permanent=ground[0].m_info;assert(static_cast<const void*>(c.findRecord(ground))!=permanent&&ground[0].getGoalUnit()==17);
  ground[0].setGoalUnit(0,{3,4});c.releaseRecord(ground);
  c.releaseStorage();assert(!c.m_recordIndex.size()&&!c.m_recordIndex.bytes());
  }pathfindSearchCellIndices().reset();mainPathfindSearchContext().beginSearch();PathfindCellInfo::releaseCellInfos();
 }
 ''')
 
-    # GeneralsX @test Codex 28/10/2026 Direct state binding saves metadata without moving arenas or merging permanent ownership.
-    def test_direct_binding_compacts_records_and_context_stays_immovable(self):
+    # GeneralsX @test Codex 29/10/2026 Private nodes own embedded state and cannot alias permanent records or move while linked.
+    def test_compact_binding_and_context_stay_immovable(self):
         run_cpp(engine_fixture() + r'''
 #include <type_traits>
 struct FormerRecord{
@@ -121,13 +180,16 @@ struct FormerRecord{
 };
 static_assert(!std::is_copy_constructible<PathfindSearchContext>::value,"bound states cannot move");
 static_assert(!std::is_move_constructible<PathfindSearchContext>::value,"bound states cannot move");
+static_assert(!std::is_base_of<PathfindSearchNodes,PathfindSearchContext>::value,"compact contexts must not retain the split state arena");
+static_assert(sizeof(PathfindSearchRecord)<=64,"host fixture nodes should fit 64 bytes");
+static_assert(sizeof(PathfindSearchContext)<3*1024*1024,"the redundant state arena must be removed");
 static_assert(sizeof(PathfindCellInfo)<sizeof(FormerRecord),"direct binding must reduce record storage");
 int main(){PathfindCellInfo::allocateCellInfos();
  {PathfindCell cell;cell.setGoalUnit(17,{2,3});auto*permanent=cell.m_info;
-  assert(!permanent->m_searchState);
+  static_assert(!std::is_same<PathfindSearchRecord,PathfindCellInfo>::value,"permanent and private storage must be different types");
   auto&c=mainPathfindSearchContext();auto*r=cell.searchInfo();
-  assert(r!=permanent && r->m_searchState==&c.get(c.m_records.index(r)));
-  assert(&r->search()==r->m_searchState && !r->m_searchCharged);
+  assert(static_cast<void*>(r)!=permanent);
+  assert(static_cast<PathfindSearchState*>(r)==&r->search() && !r->m_searchCharged);
   r->search().m_totalCost=91;assert(cell.getTotalCost()==91 && cell.getGoalUnit()==17);
   cell.setGoalUnit(0,{2,3});assert(!cell.m_info && cell.getTotalCost()==91);
   cell.releaseSearchInfo();assert(!c.m_records.size());
@@ -142,13 +204,13 @@ int main(){PathfindCellInfo::allocateCellInfos();
 int main(){PathfindCellInfo::allocateCellInfos();auto&c=mainPathfindSearchContext();
  {PathfindCell a,b;
   for(unsigned pass=0;pass<600;++pass){c.beginSearch();
-   auto*first=c.allocateRecord(&a,{2,3},false);assert(first);auto*state=first->m_searchState;
+   auto*first=c.allocateRecord(&a,{2,3},false);assert(first);auto*state=&first->search();
    assert(!state->m_pathParent && !state->m_open && !state->m_closed && state->m_openIndex==-1);
    state->m_totalCost=44;state->m_blockedByAlly=true;state->m_openSequence=99;
    c.releaseRecord(&a);assert(!c.findRecord(&a) && !c.m_transientRecords);
    auto*recycled=c.allocateRecord(&b,{4,5},false);
-   assert(recycled==first && recycled->m_searchState==state && !state->m_totalCost && !state->m_blockedByAlly && !state->m_openSequence);
-   assert(&recycled->search()==&c.get(c.m_records.index(recycled)));
+   assert(recycled==first && &recycled->search()==state && !state->m_totalCost && !state->m_blockedByAlly && !state->m_openSequence);
+   assert(static_cast<PathfindSearchState*>(recycled)==&recycled->search());
    state->m_closed=true;state->m_openIndex=17;state->m_pathParent=recycled;
    c.beginSearch();assert(!c.findRecord(&b) && !c.m_records.size() && !c.m_transientRecords);
    auto*next=c.allocateRecord(&a,{7,8},false);
@@ -225,11 +287,11 @@ int main(){PathfindCellInfo::allocateCellInfos();auto&c=mainPathfindSearchContex
         run_cpp(engine_fixture() + r'''
 int main(){PathfindCellInfo::allocateCellInfos();auto&c=mainPathfindSearchContext();c.beginSearch();
  {PathfindCell unit,empty;unit.setGoalUnit(17,{7,8});unit.setPosUnit(17,{7,8});unit.setGoalAircraft(19,{7,8});
-  auto*persistent=unit.m_info;assert(persistent && !persistent->m_searchState && unit.hasSearchInfo());
-  auto*search=unit.searchInfo();assert(search!=persistent && search->m_searchState==&c.get(c.m_records.index(search)));
+  auto*persistent=unit.m_info;assert(persistent && unit.hasSearchInfo());
+  auto*search=unit.searchInfo();assert(static_cast<void*>(search)!=persistent);
   unit.setTotalCost(44);unit.setBlockedByAlly(true);
   assert(empty.allocateSearchInfo({8,8}));empty.setTotalCost(99);
-  empty.setGoalUnit(27,{8,8});assert(empty.m_info && empty.m_info!=empty.searchInfo());
+  empty.setGoalUnit(27,{8,8});assert(empty.m_info && empty.m_info!=static_cast<void*>(empty.searchInfo()));
   assert(empty.getTotalCost()==99 && unit.getTotalCost()==44 && unit.isBlockedByAlly());
   unit.releaseSearchInfo();assert(unit.m_info==persistent && unit.getGoalUnit()==17 && unit.getPosUnit()==17 && unit.getGoalAircraft()==19);
   c.beginSearch();assert(unit.m_info==persistent && unit.getTotalCost()==0 && !unit.isBlockedByAlly());

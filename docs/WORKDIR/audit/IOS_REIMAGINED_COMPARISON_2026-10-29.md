@@ -2,11 +2,13 @@
 
 ## Scope and conclusion
 
-Compare experiment/ios-mod-testing at runtime 26be01d4a directly with
+Compare experiment/ios-mod-testing, including the subsequent compact-node stage, with
 the supplied ZeroHourReimagined_1.0.0_source. This is a pathfinding comparison;
 Reimagined graphics and gameplay content remain outside this integration. This
 supersedes the runtime snapshot in the 28 October comparison, while retaining
 its historical evidence.
+The latest device runtime remains 26be01d4a; compact-node native/device testing
+is pending. Historical stage descriptions below retain their original scope.
 
 Our implementation has the reference's core speculative model: predict queued
 requests, run independent searches concurrently with main participation, join,
@@ -19,13 +21,13 @@ The allocation-window change now accepts permanent-count differences only when
 every reached allocation decision stays equivalent. Cell diagnostics explain
 remaining raw failures. Query-only lookups now rely on complete occupancy-result
 replay; direct cell and allocation-kind dependencies retain exact snapshots.
-Registered cell reads now use a bounded cell-ID to record-slot index. This closes
-the repeated getter hash-probe gap for covered cells, while keeping the original
-allocator, larger records and separate state arena. The reference indexes a
-complete compact search node directly by cell ID.
+Registered cell reads now use a bounded cell-ID to record-slot index. Compact
+private nodes then embed search state and discard permanent-only fields and the
+separate state arena. The original allocator/admission policy remains. The
+reference indexes a complete compact search node directly by cell ID.
 
-The largest remaining differences are full off-thread API execution, compact
-search-only storage, broader dispatch, and different capacity/budget policies.
+The largest remaining differences are full off-thread API execution, dense
+map-sized node storage, broader dispatch, and different capacity/budget policies.
 The reference is not simply our implementation with additional workers enabled.
 
 ## Current comparison
@@ -33,15 +35,15 @@ The reference is not simply our implementation with additional workers enabled.
 | Area | Current iOS branch | Supplied Reimagined source |
 | --- | --- | --- |
 | Candidate ordering | Stable binary heap, 64-bit insertion sequence, retained retail list fallback | Stable binary heap, 32-bit insertion sequence |
-| Search state | Private records/lists/corridor, generation stamps, direct stable state pointers | Private search-only nodes/lists/corridor and generation stamps |
+| Search state | Compact private nodes with embedded state, private lists/corridor, allocator/index generation stamps | Private search-only nodes/lists/corridor and per-node generation stamps |
 | Search kinds | Ordinary, safe, queued closest and conditional closest fallback; stricter prediction gates | Same API categories, broader ordinary prediction |
 | Preparation | Real ordinary and closest hierarchy in private main-side contexts; authoritative caller repeats its own preparation | Whole search API runs in the participant's context; accepted completed Path returns before hierarchy is repeated |
 | Off-thread scope | Fine loops; Path construction, optimization, hierarchy and recovery stay on main | Complete findPath/findClosestPath/findSafePath calls, including hierarchy and Path construction/optimization |
 | Dispatch | Two adjacent eligible requests, one worker plus main | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
 | Worker count | One gameplay search worker | Automatic clamp(cores - 3, 0, 8), explicit override capped at 32 |
 | Result storage | Separate retained primary/fallback phase contexts, up to four, holding loop outcomes and parent records until main finishes | Thread-local search context reused between jobs/phases; each result already owns a completed engine Path |
-| Node lookup | Bounded cell-ID to record-slot table, record and separate state; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
-| Lookup/node memory | Index capped at 1 MiB/context plus existing bounded arenas; newest main index about 176 KiB | Node/read-mark arrays scale with registered map cells per participating context |
+| Node lookup | Bounded cell-ID to record-slot table, complete compact node; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
+| Lookup/node memory | Index capped at 1 MiB/context plus bounded complete-node pool; local fixed context shrinks about 1.37 MiB; preceding device main index about 176 KiB | Node/read-mark arrays scale with registered map cells per participating context |
 | Capacity | 30,000 records/context; allocation windows preserve every reached permanent/transient admission success and denial | Nonlegacy search nodes independent of permanent metadata; default node allowance is all registered cells, with testing override |
 | Dependency checks | Explicit request, movement, preparation, admission, epochs/lifecycle, cells, corridor, live occupancy, height and bounded-log checks | Request/ignore/tunnel matching plus intersection between read-cell set and subsequent cell-write log |
 | Read tracking | Bounded exact direct/allocation cell snapshots and complete query results; query-only lookups avoid redundant raw snapshots; query/height duplicates removed while actual reads still execute | Per-cell read marks deduplicate cell observations into a sorted cell-index set |
@@ -121,10 +123,11 @@ acceptance percentages establish a matched device or reference speed ranking.
 
 No matched replay benchmark or device-memory comparison with Reimagined exists.
 Dense storage scales with map size and participating threads; our bounded storage
-still contains larger records, indexes and multiple retained phase contexts.
-Neither lower memory use nor faster iPhone performance can be inferred from
-worker count, node layout or acceptance percentage alone. No completion
-percentage is justified.
+still contains indexes and multiple retained phase contexts. Compact storage
+reduces our own fixed object sizes, but does not establish memory use relative to
+the reference or iPhone RSS. Faster iPhone performance cannot be inferred from
+worker count, node layout or acceptance percentage. No completion percentage is
+justified.
 
 ## Useful next steps
 
@@ -135,11 +138,13 @@ allocation dependencies remain guarded. Do not remove remaining goal fields or
 raise bounds without equivalence evidence. Closest work samples and a host
 getter benchmark now exist; repeat the heavier scenario for comparable work.
 
-Compact bounded search-only nodes are the next distinct storage step: remove
-permanent-record-only fields from private records and consider combining record
-and state without changing slot allocation order, capacity or admission decisions.
-Indexed resolution alone does not do that. The reference's independent map-sized
-capacity and complete dense layout remain separate policy/memory decisions.
+Compact bounded search-only nodes are now implemented: permanent-only fields
+and the separate state arena are removed without changing slot allocation order,
+capacity or admission decisions. Host memory savings are clear; timings are mixed,
+with slower getter mixes and inconsistent complete closest results. The next
+step is matched device verification, not a speedup claim. The reference's
+independent map-sized capacity and complete dense layout remain separate
+policy/memory decisions.
 
 Full hierarchy and Path completion on workers is the larger execution milestone.
 It requires auditing transitive reads, allocations, ownership, recovery and
@@ -158,15 +163,19 @@ chooseWorkerCount; AIUpdate.cpp: predictPathfind; and GlobalData.cpp's default.
 Checked the current dispatcher, validator, context allocation, finalization,
 bounded observation logs, prediction gates and portable worker against them.
 
-Current validation is 232 local regression cases, 108 batch ThreadSanitizer cases
-and seven new index/work-counter ASan/UBSan cases. Native run
+The indexed-stage validation was 232 local regression cases, 108 batch
+ThreadSanitizer cases and seven index/work-counter ASan/UBSan cases. Native run
 [40843223256](https://github.com/RoundedSpine/generals-mac-ios-ipad/actions/runs/40843223256)
 also passes Mac QA/race checks, iOS SDK compilation, unsigned packaging and
 artifact upload for 26be01d4a; dependency save is skipped after the cache restore.
 Its device session confirms active validation and balanced outcomes. Those
 fixtures and this session do not prove full engine race freedom,
 reference replay equivalence or all lifecycle stress cases.
-This comparison changes documentation only; unchanged tests are not rerun.
+The original comparison was documentation-only. The subsequent compact stage
+passes 235 local regressions and seven targeted ASan/UBSan cases. Its full batch
+TSan run passes 109 cases with one 10-second matrix timeout; that case passes
+alone, and passes again with both new compact cases after its bound increases to
+30 seconds. No race report. See the compact report for scope and mixed benchmarks.
 
 ## Implementation reports
 
@@ -174,8 +183,9 @@ This comparison changes documentation only; unchanged tests are not rerun.
 - [Cell-rejection diagnostics and counter interpretation](IOS_PATH_CELL_REJECTIONS_2026-10-29.md)
 - [Query-only dependency audit and device result](IOS_PATH_QUERY_DEPENDENCIES_2026-10-29.md)
 - [Direct indexing, work counters and device result](IOS_PATH_DIRECT_INDEX_2026-10-29.md)
+- [Compact private nodes, layout savings and mixed host timings](IOS_PATH_COMPACT_NODES_2026-10-29.md)
 
-Compact search-only storage, full worker APIs, wider dispatch and grouped
+Dense map-sized storage, full worker APIs, wider dispatch and grouped
 scheduling remain separate differences. The current evidence does not establish
 performance parity with Reimagined.
 
@@ -278,3 +288,24 @@ closest samples show exact-goal and near-goal-pruned outcomes without over-2000
 pruning. These are device execution/counter checks, not a matched speed comparison.
 The larger compact-node layout, full worker APIs and broader dispatch remain
 differences from the reference.
+
+## Subsequent compact-node implementation
+
+The [compact-node stage](IOS_PATH_COMPACT_NODES_2026-10-29.md) supersedes the
+record/state-chain gap described in the historical sections above. A private
+node now embeds state and omits permanent IDs, obstacle flags, the free-link
+pointer and the state pointer. The context no longer owns a second stamped arena.
+Local fixed context size drops from 4,244,504 to 2,804,496 bytes; complete private
+slot/state storage drops from 112 to 64 bytes. Permanent records shrink too.
+
+We now share the reference's search-only node design principle. We retain a
+bounded ID-to-slot index, keyed allocator and original admission/lifetime policy,
+where its map-sized array provides direct ID-to-node access. These remain real
+differences; compact nodes do not imply complete worker APIs, dynamic dispatch,
+eight-request scheduling or independent map-sized limits.
+
+Split/compact controlled routes, expansion order, closest pruning and accounting
+match. Host getter benchmarks regress around 8–11%, while complete closest
+timings change direction between runs. This stage has a verified fixed-memory
+benefit, not a demonstrated speed benefit or device/reference performance parity.
+Test the new IPA in a matched heavier scenario before drawing that conclusion.

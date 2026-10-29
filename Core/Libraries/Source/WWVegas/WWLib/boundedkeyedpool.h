@@ -30,6 +30,8 @@ public:
  BoundedKeyedPool(const BoundedKeyedPool&)=delete;
  BoundedKeyedPool& operator=(const BoundedKeyedPool&)=delete;
  static constexpr std::size_t capacity() { return Capacity; }
+ // GeneralsX @refactor Codex 29/10/2026 Complete-node contexts expose this epoch instead of retaining a second stamped arena.
+ Generation generation()const{return m_generation;}
  std::size_t size() const { return m_size; }
  // GeneralsX @performance Codex 29/10/2026 Context-owned direct indexes resolve stable arena slots without repeating a key probe.
  Value* atSlot(unsigned slot){assert(slot<Capacity);return &m_values[slot];}

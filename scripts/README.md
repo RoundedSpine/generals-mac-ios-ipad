@@ -74,8 +74,9 @@ stamp rollover. The heap suite also exercises the enabled context.
 Run `python3 scripts/qa/test_search_record_pool.py` for collision-heavy bounded
 lookup, generation rollover, production cell allocation/cleanup, permanent pool
 reuse, independent node owners and route ordering with actual cell/list methods.
-It also verifies compact direct state binding, immovable context storage and
-recycling/generation cleanup without leaking search flags.
+It also verifies embedded compact private nodes, distinct permanent record types,
+immovable context storage, split/compact randomized credit/allocation equivalence
+through stamp rollover, and recycling without leaking search flags.
 
 Run `python3 scripts/qa/test_parallel_path_batch.py` for actual two-task search,
 validation and queue-budget tests. Its result-diagnostic cases check every first
@@ -109,10 +110,17 @@ Direct-index cases use `-k test_index` in both `test_search_record_pool.py` and
 `test_parallel_path_batch.py`: keyed equivalence, bounded fallback, generation
 wrap, failed growth, registered layers, actual getter probes, serial/parallel
 route/work/accounting matching and bounded closest diagnostics.
+Compact-node cases use `-k compact` in those two suites: split/compact routes,
+destinations, serial/participant expansion order, accounting, large closest
+pruning, layout, occupancy isolation and randomized recycling/rollover.
 Run `python3 scripts/qa/benchmark_path_index.py` for an optional production-getter
 host microbenchmark with equal checksums, medians and ranges. It compares indexed
 and keyed resolution without changing record capacity; it is not device FPS or
-a CI timing threshold. See `--help` for workload settings.
+a CI timing threshold. Add `--storage` to compare split/compact indexed getter
+storage, or `--search` for controlled complete closest API calls. All modes check
+equivalent outputs; host timings do not establish device speed. See `--help` for
+workload settings and [compact-node evidence](../docs/WORKDIR/audit/IOS_PATH_COMPACT_NODES_2026-10-29.md)
+for mixed host results and memory savings.
 
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)

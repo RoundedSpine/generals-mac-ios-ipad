@@ -453,10 +453,9 @@ void AIUpdateInterface::doPathfind(Pathfinder*p){assert(std::this_thread::get_id
     return source+'\n'+function('void Pathfinder::updateGoal(')+'\n'+function('void Pathfinder::removeGoal(')
 
 
-class ParallelBatchTests(unittest.TestCase):
-    # GeneralsX @test Codex 29/10/2026 Compare indexed and original keyed resolution through complete kernels and ordered reuse.
-    def test_index_routes_expansion_and_accounting_match_keyed_lookup(self):
-        main=r'''
+
+def kernel_trace_cases():
+    return r'''
 int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radius:{0,1})for(int kind=0;kind<4;++kind)for(int seed=0;seed<4;++seed){
  World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;p.testCenter=center;p.testRadius=radius;
  w.a.ai.safe=w.b.ai.safe=kind==1;w.a.ai.closest=w.b.ai.closest=kind==2;p.quickAllowed=kind!=3;
@@ -476,6 +475,41 @@ int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radi
  for(auto cell:p.serialExpansion)printf("%d,%d;",cell.x,cell.y);puts("");p.storage[5][5].setGoalUnit(0,{5,5});
 }}
 '''
+
+
+class ParallelBatchTests(unittest.TestCase):
+    # GeneralsX @test Codex 29/10/2026 Storage-only changes preserve complete serial and both participants' expansion traces.
+    def test_compact_nodes_match_split_routes_work_and_accounting(self):
+        from test_search_record_pool import split_storage
+        source=fixture().replace('struct Pathfinder {\n enum',
+            'struct Pathfinder {\n std::array<std::vector<ICoord2D>,4> privateExpansion;\n enum',1)
+        source=source.replace('void Pathfinder::checkChangeLayers(PathfindCell*cell) {',r'''
+void Pathfinder::checkChangeLayers(PathfindCell*cell) {
+ if(activePathfindSearchContext().m_parallelReads && m_parallelBatch){
+  for(unsigned i=0;i<2;++i){auto&job=m_parallelBatch->jobs[i];
+   if(&activePathfindSearchContext()==&job.context)privateExpansion[i*2].push_back({cell->getXIndex(),cell->getYIndex()});
+   if(job.fallback && &activePathfindSearchContext()==&job.fallback->context)privateExpansion[i*2+1].push_back({cell->getXIndex(),cell->getYIndex()});
+  }
+ }
+''',1)
+        main=kernel_trace_cases().replace('puts("");p.storage[5][5].setGoalUnit(0,{5,5});',r'''
+ puts("");for(const auto&trace:p.privateExpansion){printf("PE ");for(auto cell:trace)printf("%d,%d;",cell.x,cell.y);puts("");}
+ p.storage[5][5].setGoalUnit(0,{5,5});''')
+        self.assertIn('PE ',main)
+        before=run_cpp(split_storage(source)+main,timeout=45)
+        after=run_cpp(source+main,timeout=45)
+        self.assertEqual(before.stdout,after.stdout)
+
+    def test_compact_nodes_match_split_large_closest_pruning_and_routes(self):
+        from test_search_record_pool import split_storage
+        source=large_closest_fixture();main=large_closest_case()
+        before=run_cpp(split_storage(source)+main,timeout=45)
+        after=run_cpp(source+main,timeout=45)
+        self.assertEqual(before.stdout,after.stdout)
+
+    # GeneralsX @test Codex 29/10/2026 Compare indexed and original keyed resolution through complete kernels and ordered reuse.
+    def test_index_routes_expansion_and_accounting_match_keyed_lookup(self):
+        main=kernel_trace_cases()
         indexed=fixture()
         keyed=indexed.replace('if(!m_recordIndex.covers(index))return m_records.find(cell);','return m_records.find(cell);')
         self.assertNotEqual(indexed,keyed)
@@ -493,8 +527,8 @@ template<class K,class V,std::size_t N>struct CountingPool:BoundedKeyedPool<K,V,
  V*find(const K&key){++keyFinds;return BoundedKeyedPool<K,V,N>::find(key);}
 };
 ''' + engine_fixture()
-        source=source.replace('BoundedKeyedPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;',
-                              'CountingPool<const PathfindCell*, PathfindCellInfo, PATHFIND_RECORD_CAPACITY> m_records;')
+        source=source.replace('BoundedKeyedPool<const PathfindCell*, PathfindSearchRecord, PATHFIND_RECORD_CAPACITY> m_records;',
+                              'CountingPool<const PathfindCell*, PathfindSearchRecord, PATHFIND_RECORD_CAPACITY> m_records;')
         run_cpp(source+r'''
 int main(){PathfindCellInfo::allocateCellInfos();{PathfindCell cells[16],outside;
  PathfindCell::registerSearchCells(cells,16);auto&c=mainPathfindSearchContext();c.beginSearch();
@@ -1904,6 +1938,7 @@ int main(){AIUpdateInterface ai;Coord3D to;Path*path=nullptr;ai.finish(path,&to)
                          '38aa4435e7bc5bbb8891a575a29677996d18cb3aa8d29b9e970de7347e28e5d2')
 
     def test_closest_and_mixed_pairs_match_serial_and_apply_destination_on_main(self):
+        # GeneralsX @build Codex 29/10/2026 Bound the 80-world matrix separately from small harnesses under sanitizer/runner contention.
         run_cpp(fixture()+r'''
 int main(){for(bool fixed:{false,true})for(int kinds=0;kinds<5;++kinds)for(int seed=0;seed<8;++seed){
  World w;Pathfinder p;w.queue(p);s_useFixedPathfinding=fixed;
@@ -1930,7 +1965,7 @@ int main(){for(bool fixed:{false,true})for(int kinds=0;kinds<5;++kinds)for(int s
  assert(p.m_parallelBatch->closestSearches==p.m_parallelBatch->closestAccepted);
  assert(state.m_cumulativeCellsAllocated==budget&&state.m_openList.empty()&&state.m_closedList.empty());
 }}
-''')
+''',timeout=30)
 
     def test_two_closest_kernels_overlap_and_hierarchy_stays_on_main(self):
         run_cpp(fixture()+r'''

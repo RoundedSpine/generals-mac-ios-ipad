@@ -114,6 +114,11 @@ candidate/expansion/pruning counts, initial cell settings and index-array bytes.
 It uses the existing kernel timer and has no per-cell clocks. See
 [direct indexing and closest work fields](../WORKDIR/audit/IOS_PATH_DIRECT_INDEX_2026-10-29.md)
 for flags, outcomes, overlapping pruning reasons and interpretation limits.
+`[PATH_SEARCH_STORAGE]` is printed once at the first executed parallel batch when
+the timing option is enabled. It reports native `sizeof` values for the compact
+node, permanent record and fixed context, plus record capacity and the index-cell
+cap. These are layout sizes, not resident memory or live allocation counts. See
+[compact-node storage and verification](../WORKDIR/audit/IOS_PATH_COMPACT_NODES_2026-10-29.md).
 
 Use this when investigating runtime behavior (example: skirmish startup flow):
 

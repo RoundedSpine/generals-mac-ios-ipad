@@ -112,10 +112,10 @@ int main(){
         run_cpp(allocator_fixture() + r'''
 int main(){for(int pass=0;pass<2;++pass){
  PathfindCellInfo::allocateCellInfos();PathfindCell cell;std::vector<PathfindCellInfo*> records;
- for(unsigned i=0;i<PATHFIND_RECORD_CAPACITY;++i){auto*p=PathfindCellInfo::getACellInfo(&cell,{int(i),0});assert(p && !p->m_searchState);records.push_back(p);}
+ for(unsigned i=0;i<PATHFIND_RECORD_CAPACITY;++i){auto*p=PathfindCellInfo::getACellInfo(&cell,{int(i),0});assert(p);records.push_back(p);}
  assert(PathfindCellInfo::getACellInfo(&cell,{0,0})==nullptr);
  mainPathfindSearchContext().beginSearch();
- for(auto*p:records){assert(!p->m_searchState);PathfindCellInfo::releaseACellInfo(p);}
+ for(auto*p:records){PathfindCellInfo::releaseACellInfo(p);}
  PathfindCellInfo::releaseCellInfos();
 }}
 ''')
@@ -179,14 +179,14 @@ int main(){
  auto&c=mainPathfindSearchContext();c.resizeCorridor(12);
  for(unsigned i=0;i<12;++i)assert(c.corridorPassable(i));
  c.setCorridorPassable(7,false);c.m_ignoreObstacleID=91;c.m_isTunneling=true;c.m_cumulativeCellsAllocated=4999;
- c.get(2).m_totalCost=41;auto generation=c.generation();c.beginSearch();
- assert(c.generation()==generation+1 && c.get(2).m_totalCost==0);
+ PathfindCell cell;auto*node=c.allocateRecord(&cell,{2,3},false);node->search().m_totalCost=41;auto generation=c.generation();c.beginSearch();
+ assert(c.generation()==generation+1 && !c.findRecord(&cell));
  // Coarse/fine boundaries invalidate nodes only, preserving the corridor and caller's control state.
  assert(c.m_ignoreObstacleID==91 && c.m_isTunneling && c.m_cumulativeCellsAllocated==4999);
  for(unsigned i=0;i<12;++i)assert(c.corridorPassable(i)==(i!=7));
  auto*other=new PathfindSearchContext;other->resizeCorridor(12);
- other->get(2).m_totalCost=99;other->setCorridorPassable(1,false);
- assert(c.get(2).m_totalCost==0 && c.corridorPassable(1) && !c.corridorPassable(7));
+ other->allocateRecord(&cell,{2,3},false)->search().m_totalCost=99;other->setCorridorPassable(1,false);
+ assert(!c.findRecord(&cell) && c.corridorPassable(1) && !c.corridorPassable(7));
  assert(other->m_ignoreObstacleID==INVALID_ID && !other->m_isTunneling && !other->m_cumulativeCellsAllocated);
  assert(other->corridorPassable(7) && other->m_openList.empty() && other->m_closedList.empty());delete other;
  // Loading a map with the same or different dimensions must discard its old corridor.

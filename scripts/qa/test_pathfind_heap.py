@@ -44,8 +44,8 @@ inline unsigned pathfindCellSearchIndex(const PathfindCell*){return SearchCellIn
 #endif
 class PathfindCell {
 public:
- PathfindCellInfo* m_info=nullptr;
- PathfindCellInfo*searchInfo(){return m_info;}
+ PathfindSearchRecord* m_info=nullptr;
+ PathfindSearchRecord*searchInfo(){return m_info;}
  void releaseSearchInfo(){releaseInfo();}
  int id=0, releases=0;
  PathfindCell* getNextOpen(){return m_info->m_nextOpen?m_info->m_nextOpen->m_cell:nullptr;}
@@ -62,13 +62,10 @@ public:
 ''' + methods + operations + r'''
 struct Arena {
  std::vector<PathfindCell> cells;
- std::vector<PathfindCellInfo> info;
+ std::vector<PathfindSearchRecord> info;
  PathfindCellList queue;
  Arena(bool heap, int n):cells(n),info(n),queue(heap){
   for(int i=0;i<n;++i){cells[i].id=i;cells[i].m_info=&info[i];
-#ifdef GENERALS_ZH_SEARCH_CONTEXT
- static unsigned nextSlot=0;info[i].m_searchState=&mainPathfindSearchNodes().resetSlot((nextSlot++)%PATHFIND_RECORD_CAPACITY);
-#endif
 info[i].m_cell=&cells[i];info[i].m_openIndex=-1;}
  }
  void insert(int i,unsigned cost){info[i].m_totalCost=cost;cells[i].putOnSortedOpenList(queue);}

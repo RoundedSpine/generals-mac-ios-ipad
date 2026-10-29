@@ -1191,8 +1191,6 @@ void PathfindCellInfo::allocateCellInfos()
 #ifdef GENERALS_ZH_SEARCH_CONTEXT
 	// Map/engine allocation starts a new private search generation.
 	mainPathfindSearchContext().beginSearch();
- // GeneralsX @performance Codex 28/10/2026 Permanent records never point into a private search-state arena.
-	for (UnsignedInt i = 0; i < CELL_INFOS_TO_ALLOCATE; ++i) s_infoArray[i].m_searchState = nullptr;
 #endif
 	s_infoArray[CELL_INFOS_TO_ALLOCATE-1].freeLink() = nullptr;
 	s_infoArray[CELL_INFOS_TO_ALLOCATE-1].m_isFree = true;
@@ -1280,8 +1278,8 @@ void PathfindCellInfo::releaseACellInfo(PathfindCellInfo *theInfo)
 //-----------------------------------------------------------------------------------
 
 // GeneralsX @performance Codex 26/10/2026 Stable binary heap, inspired by Reimagined 1.0.0's open queue.
-// Keep our existing records and search semantics; no worker contexts or per-frame batching.
-Bool PathfindCellList::before(const PathfindCellInfo* a, const PathfindCellInfo* b)
+// Queue ordering is shared by compact private nodes and legacy permanent records.
+Bool PathfindCellList::before(const PathfindSearchRecord* a, const PathfindSearchRecord* b)
 {
 	return a->search().m_totalCost < b->search().m_totalCost ||
 		(a->search().m_totalCost == b->search().m_totalCost && a->search().m_openSequence < b->search().m_openSequence);
@@ -1305,7 +1303,7 @@ void PathfindCellList::reset()
 #endif
 }
 
-void PathfindCellList::pushHeap(PathfindCellInfo* info)
+void PathfindCellList::pushHeap(PathfindSearchRecord* info)
 {
 	info->search().m_openSequence = ++m_sequence;
 	info->search().m_openIndex = static_cast<Int>(m_heap.size());
@@ -1313,12 +1311,12 @@ void PathfindCellList::pushHeap(PathfindCellInfo* info)
 	siftUp(info->search().m_openIndex);
 }
 
-void PathfindCellList::removeHeap(PathfindCellInfo* info)
+void PathfindCellList::removeHeap(PathfindSearchRecord* info)
 {
 	const Int index = info->search().m_openIndex;
 	DEBUG_ASSERTCRASH(index >= 0 && index < static_cast<Int>(m_heap.size()) && m_heap[index] == info,
 		("Invalid pathfinding heap membership."));
-	PathfindCellInfo* last = m_heap.back();
+	PathfindSearchRecord* last = m_heap.back();
 	m_heap.pop_back();
 	if (last != info) {
 		m_heap[index] = last;
@@ -1331,7 +1329,7 @@ void PathfindCellList::removeHeap(PathfindCellInfo* info)
 
 void PathfindCellList::siftUp(Int index)
 {
-	PathfindCellInfo* info = m_heap[index];
+	PathfindSearchRecord* info = m_heap[index];
 	while (index > 0) {
 		const Int parent = (index - 1) / 2;
 		if (!before(info, m_heap[parent])) break;
@@ -1345,7 +1343,7 @@ void PathfindCellList::siftUp(Int index)
 
 void PathfindCellList::siftDown(Int index)
 {
-	PathfindCellInfo* info = m_heap[index];
+	PathfindSearchRecord* info = m_heap[index];
 	const Int count = static_cast<Int>(m_heap.size());
 	for (;;) {
 		Int child = 2 * index + 1;
@@ -1364,9 +1362,9 @@ void PathfindCellList::useLinkedList()
 {
 	// The retail insertion loop stops after 5,000 entries, even if that breaks cost ordering.
 	// Convert before an insertion can reach that limit; retain the original list for this search.
-	PathfindCellInfo* previous = nullptr;
+	PathfindSearchRecord* previous = nullptr;
 	while (!m_heap.empty()) {
-		PathfindCellInfo* info = m_heap[0];
+		PathfindSearchRecord* info = m_heap[0];
 		removeHeap(info);
 		info->search().m_prevOpen = previous;
 		info->search().m_nextOpen = nullptr;
@@ -2134,7 +2132,7 @@ Int PathfindCell::releaseOpenList( PathfindCellList &list )
 		DEBUG_ASSERTCRASH(list.m_head->searchInfo(), ("Has to have info."));
 		DEBUG_ASSERTCRASH(list.m_head->searchInfo()->search().m_closed==FALSE && list.m_head->searchInfo()->search().m_open==TRUE, ("Serious error - Invalid flags. jba"));
 		PathfindCell *cur = list.m_head;
-		PathfindCellInfo *curInfo = list.m_head->searchInfo();
+		PathfindSearchRecord *curInfo = list.m_head->searchInfo();
 
 #if RETAIL_COMPATIBLE_PATHFINDING
 		// TheSuperHackers @info This is only here to catch a crash point in the retail compatible pathfinding
@@ -2174,7 +2172,7 @@ Int PathfindCell::releaseClosedList( PathfindCellList &list )
 		DEBUG_ASSERTCRASH(list.m_head->searchInfo(), ("Has to have info."));
 		DEBUG_ASSERTCRASH(list.m_head->searchInfo()->search().m_closed==TRUE && list.m_head->searchInfo()->search().m_open==FALSE, ("Serious error - Invalid flags. jba"));
 		PathfindCell *cur = list.m_head;
-		PathfindCellInfo *curInfo = list.m_head->searchInfo();
+		PathfindSearchRecord *curInfo = list.m_head->searchInfo();
 #if RETAIL_COMPATIBLE_PATHFINDING
 		// TheSuperHackers @info This is only here to catch a crash point in the retail compatible pathfinding
 		// One crash mode is where a cell has no PathfindCellInfo, resulting in a nullptr access and a crash.
@@ -7661,7 +7659,15 @@ void Pathfinder::prepareParallelBatch()
     }
    }
    ++m_exclusiveWorker->searches;
-   if (!batch.batches++) fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
+   if (!batch.batches++) {
+    fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
+#ifdef GENERALS_ZH_PATH_TIMING
+    // GeneralsX @feature Codex 29/10/2026 Report the native compact layout once; these are sizes, not live process-memory measurements.
+    fprintf(stderr,"[PATH_SEARCH_STORAGE] node_bytes=%zu permanent_bytes=%zu context_bytes=%zu capacity=%u max_index_cells=%u\n",
+     sizeof(PathfindSearchRecord),sizeof(PathfindCellInfo),sizeof(PathfindSearchContext),PATHFIND_RECORD_CAPACITY,
+     BoundedRecordIndex<PATHFIND_RECORD_CAPACITY>::maximumCells);
+#endif
+   }
   }
 #ifdef GENERALS_ZH_PATH_TIMING
   else {
