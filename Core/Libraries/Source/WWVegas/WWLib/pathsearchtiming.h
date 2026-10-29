@@ -57,6 +57,7 @@ public:
  struct ReadSample {
   std::uint64_t queries=0,queryObservations=0,heights=0,heightObservations=0;
   QueryProfile queryProfile;
+  std::uint64_t cacheHits=0;
   std::uint64_t hierarchyNanoseconds=0,fineNanoseconds=0,finalizationNanoseconds=0;
   unsigned flags=0;
  };
@@ -442,9 +443,9 @@ private:
   std::fprintf(output,"[PATH_READS_SLOW] pair=%llu role=%s phase=%s queries=%llu query_observations=%llu heights=%llu height_observations=%llu flags=%u\n",
    u(pair),role,phase,u(s.queries),u(s.queryObservations),u(s.heights),u(s.heightObservations),s.flags);
   const auto&p=s.queryProfile;
-  std::fprintf(output,"[PATH_TASK_PROFILE] pair=%llu role=%s phase=%s hierarchy_ms=%.3f fine_ms=%.3f finalize_ms=%.3f query_calls=%llu query_stride=%u query_samples=%llu sampled_evaluate_ms=%.6f sampled_log_ms=%.6f\n",
+  std::fprintf(output,"[PATH_TASK_PROFILE] pair=%llu role=%s phase=%s hierarchy_ms=%.3f fine_ms=%.3f finalize_ms=%.3f query_calls=%llu query_stride=%u query_samples=%llu sampled_evaluate_ms=%.6f sampled_log_ms=%.6f cache_hits=%llu\n",
    u(pair),role,phase,s.hierarchyNanoseconds/1000000.0,s.fineNanoseconds/1000000.0,s.finalizationNanoseconds/1000000.0,
-   u(p.calls),QueryProfile::stride,u(p.samples),p.evaluationNanoseconds/1000000.0,p.loggingNanoseconds/1000000.0);
+   u(p.calls),QueryProfile::stride,u(p.samples),p.evaluationNanoseconds/1000000.0,p.loggingNanoseconds/1000000.0,u(s.cacheHits));
   const char* stages[]={"prepare","hierarchy","fine","finalize"};
   for(unsigned i=0;i<4;++i)if(p.stageCalls[i])
    std::fprintf(output,"[PATH_QUERY_STAGE] pair=%llu role=%s phase=%s stage=%s calls=%llu samples=%llu sampled_evaluate_ms=%.6f sampled_log_ms=%.6f\n",

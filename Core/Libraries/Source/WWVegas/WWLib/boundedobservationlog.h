@@ -32,6 +32,20 @@ public:
  BoundedObservationLog()=default;
  BoundedObservationLog(const BoundedObservationLog&)=delete;
  BoundedObservationLog& operator=(const BoundedObservationLog&)=delete;
+ // GeneralsX @performance Codex 30/10/2026 Optional frozen-request reuse shares the existing bounded dependency index and values.
+ // Copy the returned value before the next observe/clear can invalidate its storage.
+ const Value* find(const Value& request)const{
+  if(invalid())return nullptr;
+  const auto key=KeyOf{}(request);
+  auto bucket=Hash{}(key)&(tableSize()-1);
+  for(std::size_t probes=0;probes<tableSize();++probes,bucket=(bucket+1)&(tableSize()-1)){
+   const auto& entry=m_buckets[bucket];
+   if(entry.stamp!=m_generation)return nullptr;
+   const auto& previous=m_values[entry.slot];
+   if(KeyOf{}(previous)==key)return &previous;
+  }
+  return nullptr;
+ }
  bool observe(const Value& value){
   ++m_observations;
   if(invalid())return false;

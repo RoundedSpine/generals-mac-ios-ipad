@@ -94,6 +94,12 @@ The same suites verify sparse query timing and stage restoration, unchanged live
 evaluation, winding-route optimizer counts, independent zone retention and actual
 zone-table equality with profiling OFF/ON. See
 [query-cost profiling scope](../docs/WORKDIR/audit/IOS_PATH_OCCUPANCY_COST_2026-10-29.md).
+Run `python3 scripts/qa/test_zone_merges.py` for minimum-label merges, exhaustive
+flattening comparisons and full controlled rebuild-table equivalence. Run
+`python3 scripts/qa/test_frozen_occupancy_cache.py` for optional request-cache
+route/budget equivalence, bounds, reset and live result rejection. Both accept
+`--tsan`; `--benchmark` measures controlled production-method fixtures with
+`-O2`, and `--reverse` reverses variant order. Host timings are not device claims.
 The bounded-preparation cases also cover restricted ordinary corridors, unchanged
 authoritative accounting, recovery abort/Path cleanup, exact query/height identity,
 collision/rollover/conflict handling and large searches exceeding 8,192 repeated

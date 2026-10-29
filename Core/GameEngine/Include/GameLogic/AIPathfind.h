@@ -43,6 +43,11 @@
 #if defined(GENERALS_SEARCH_CONTEXT) && RTS_ZEROHOUR
 #define GENERALS_ZH_SEARCH_CONTEXT 1
 #endif
+// GeneralsX @performance Codex 30/10/2026 Experimental rebuild merges preserve minimum labels and publish ordinary flat tables.
+#if defined(GENERALS_FAST_ZONE_MERGES) && RTS_ZEROHOUR
+#define GENERALS_ZH_FAST_ZONE_MERGES 1
+#include "minimumzoneequivalence.h"
+#endif
 #if defined(GENERALS_OCCUPANCY_WORKER) && defined(GENERALS_ZH_SEARCH_CONTEXT)
 #define GENERALS_ZH_OCCUPANCY_WORKER 1
 namespace PathOccupancy { struct Input; struct Result; }
@@ -63,6 +68,10 @@ void observeParallelCorridor(std::size_t block, Bool passable);
 // GeneralsX @feature Codex 29/10/2026 Whole requests use the same joined two-participant dispatcher and bounded allocation policy.
 #if defined(GENERALS_COMPLETE_PATH_WORKER) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)
 #define GENERALS_ZH_COMPLETE_PATH_WORKER 1
+#endif
+// GeneralsX @performance Codex 30/10/2026 Memoization is restricted to the already joined, frozen complete request lifetime.
+#if defined(GENERALS_FROZEN_OCCUPANCY_CACHE) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
+#define GENERALS_ZH_FROZEN_OCCUPANCY_CACHE 1
 #endif
 // GeneralsX @feature Codex 28/10/2026 Timing storage exists only in the optional experimental profiler.
 #if defined(GENERALS_PATH_TIMING) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)

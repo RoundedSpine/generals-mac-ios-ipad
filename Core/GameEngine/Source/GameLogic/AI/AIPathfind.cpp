@@ -2545,6 +2545,10 @@ static void flattenZones(zoneStorageType *zoneArray, zoneStorageType *zoneHierar
 		zone2 = zoneHierarchical[zone1];
 		zoneArray[i] = zone2;
 	}
+#ifdef GENERALS_ZH_FAST_ZONE_MERGES
+ // GeneralsX @performance Codex 30/10/2026 Preserve the original transform and use union-find only when its output is canonical.
+ if(MinimumZoneEquivalence<zoneStorageType>::flattenCanonical(zoneArray,zoneHierarchical,sizeOfZones))return;
+#endif
 #if 1
 
 	for (i=0; i<sizeOfZones; i++) {
@@ -3102,6 +3106,19 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 		m_hierarchicalZones[i] = i;
 	}
 
+#ifdef GENERALS_ZH_FAST_ZONE_MERGES
+ // GeneralsX @performance Codex 30/10/2026 These rebuild tables start as identity; defer flattening until every connection is merged.
+ const auto mergeZoneIndices=[](Int from,Int to,zoneStorageType* table,Int size){
+  DEBUG_ASSERTCRASH(from>0&&to>0,("Unset rebuild zone."));
+  MinimumZoneEquivalence<zoneStorageType>(table,size).merge(from,to);
+ };
+ const auto mergeCellZones=[&](const PathfindCell& target,const PathfindCell& source,zoneStorageType* table,Int size){
+  mergeZoneIndices(target.getZone(),source.getZone(),table,size);
+ };
+#else
+ void (__fastcall *const mergeZoneIndices)(Int,Int,zoneStorageType*,Int)=&resolveZones;
+ void (*const mergeCellZones)(PathfindCell&,const PathfindCell&,zoneStorageType*,Int)=&applyZone;
+#endif
 	for( j=globalBounds.lo.y; j<=globalBounds.hi.y; j++ ) {
 		for( i=globalBounds.lo.x; i<=globalBounds.hi.x; i++ ) {
 			PathfindCell &r_thisCell = map[i][j];
@@ -3109,7 +3126,7 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 			if ( (r_thisCell.getConnectLayer() > LAYER_GROUND) &&
 				(r_thisCell.getType() == PathfindCell::CELL_CLEAR) ) {
 				PathfindLayer *layer = layers + r_thisCell.getConnectLayer();
-				resolveZones(r_thisCell.getZone(), layer->getZone(), m_hierarchicalZones, m_maxZone);
+				mergeZoneIndices(r_thisCell.getZone(), layer->getZone(), m_hierarchicalZones, m_maxZone);
 			}
 
 			if ( i > globalBounds.lo.x && r_thisCell.getZone() != map[i-1][j].getZone() ) {
@@ -3117,47 +3134,47 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 
 #if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
 				if (r_thisCell.getType() == r_leftCell.getType()) {
-					applyZone(r_thisCell, r_leftCell, m_hierarchicalZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_hierarchicalZones, m_maxZone);
 				}
 				if (waterGround(r_thisCell, r_leftCell)) {
-					applyZone(r_thisCell, r_leftCell, m_groundWaterZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_groundWaterZones, m_maxZone);
 				}
 				if (groundRubble(r_thisCell, r_leftCell)) {
-					applyZone(r_thisCell, r_leftCell, m_groundRubbleZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_groundRubbleZones, m_maxZone);
 				}
 				if (groundCliff(r_thisCell, r_leftCell)) {
-					applyZone(r_thisCell, r_leftCell, m_groundCliffZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_groundCliffZones, m_maxZone);
 				}
 				if (terrain(r_thisCell, r_leftCell)) {
-					applyZone(r_thisCell, r_leftCell, m_terrainZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_terrainZones, m_maxZone);
 				}
 				if (crusherGround(r_thisCell, r_leftCell)) {
-					applyZone(r_thisCell, r_leftCell, m_crusherZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_crusherZones, m_maxZone);
 				}
 #else
 				//if this is true, skip all the ones below
 				if (r_thisCell.getType() == r_leftCell.getType())
-					applyZone(r_thisCell, r_leftCell, m_hierarchicalZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_leftCell, m_hierarchicalZones, m_maxZone);
 				else {
 					Bool notTerrainOrCrusher = TRUE; // if this is false, skip the if-else-ladder below
 
 					if (terrain(r_thisCell, r_leftCell)) {
-						applyZone(r_thisCell, r_leftCell, m_terrainZones, m_maxZone);
+						mergeCellZones(r_thisCell, r_leftCell, m_terrainZones, m_maxZone);
 						notTerrainOrCrusher = FALSE;
 					}
 
 					if (crusherGround(r_thisCell, r_leftCell)) {
-						applyZone(r_thisCell, r_leftCell, m_crusherZones, m_maxZone);
+						mergeCellZones(r_thisCell, r_leftCell, m_crusherZones, m_maxZone);
 						notTerrainOrCrusher = FALSE;
 					}
 
 					if ( notTerrainOrCrusher ) {
 						if (waterGround(r_thisCell, r_leftCell))
-							applyZone(r_thisCell, r_leftCell, m_groundWaterZones, m_maxZone);
+							mergeCellZones(r_thisCell, r_leftCell, m_groundWaterZones, m_maxZone);
 						else if (groundRubble(r_thisCell, r_leftCell))
-							applyZone(r_thisCell, r_leftCell, m_groundRubbleZones, m_maxZone);
+							mergeCellZones(r_thisCell, r_leftCell, m_groundRubbleZones, m_maxZone);
 						else if (groundCliff(r_thisCell, r_leftCell))
-							applyZone(r_thisCell, r_leftCell, m_groundCliffZones, m_maxZone);
+							mergeCellZones(r_thisCell, r_leftCell, m_groundCliffZones, m_maxZone);
 					}
 
 				}
@@ -3170,47 +3187,47 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 
 #if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
 				if (r_thisCell.getType() == r_topCell.getType()) {
-					applyZone(r_thisCell, r_topCell, m_hierarchicalZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_hierarchicalZones, m_maxZone);
 				}
 				if (waterGround(r_thisCell, r_topCell)) {
-					applyZone(r_thisCell, r_topCell, m_groundWaterZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_groundWaterZones, m_maxZone);
 				}
 				if (groundRubble(r_thisCell, r_topCell)) {
-					applyZone(r_thisCell, r_topCell, m_groundRubbleZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_groundRubbleZones, m_maxZone);
 				}
 				if (groundCliff(r_thisCell, r_topCell)) {
-					applyZone(r_thisCell, r_topCell, m_groundCliffZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_groundCliffZones, m_maxZone);
 				}
 				if (terrain(r_thisCell, r_topCell)) {
-					applyZone(r_thisCell, r_topCell, m_terrainZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_terrainZones, m_maxZone);
 				}
 				if (crusherGround(r_thisCell, r_topCell)) {
-					applyZone(r_thisCell, r_topCell, m_crusherZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_crusherZones, m_maxZone);
 				}
 #else
 				//if this is true, skip all the ones below
 				if (r_thisCell.getType() == r_topCell.getType())
-					applyZone(r_thisCell, r_topCell, m_hierarchicalZones, m_maxZone);
+					mergeCellZones(r_thisCell, r_topCell, m_hierarchicalZones, m_maxZone);
 				else {
 					Bool notTerrainOrCrusher = TRUE; // if this is false, skip the if-else-ladder below
 
 					if (terrain(r_thisCell, r_topCell)) {
-						applyZone(r_thisCell, r_topCell, m_terrainZones, m_maxZone);
+						mergeCellZones(r_thisCell, r_topCell, m_terrainZones, m_maxZone);
 						notTerrainOrCrusher = FALSE;
 					}
 
 					if (crusherGround(r_thisCell, r_topCell)) {
-						applyZone(r_thisCell, r_topCell, m_crusherZones, m_maxZone);
+						mergeCellZones(r_thisCell, r_topCell, m_crusherZones, m_maxZone);
 						notTerrainOrCrusher = FALSE;
 					}
 
 					if (notTerrainOrCrusher) {
 						if (waterGround(r_thisCell, r_topCell))
-							applyZone(r_thisCell, r_topCell, m_groundWaterZones, m_maxZone);
+							mergeCellZones(r_thisCell, r_topCell, m_groundWaterZones, m_maxZone);
 						else if (groundRubble(r_thisCell, r_topCell))
-							applyZone(r_thisCell, r_topCell, m_groundRubbleZones, m_maxZone);
+							mergeCellZones(r_thisCell, r_topCell, m_groundRubbleZones, m_maxZone);
 						else if (groundCliff(r_thisCell, r_topCell))
-							applyZone(r_thisCell, r_topCell, m_groundCliffZones, m_maxZone);
+							mergeCellZones(r_thisCell, r_topCell, m_groundCliffZones, m_maxZone);
 					}
 
 				}
@@ -3221,6 +3238,10 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 		}
 	}
 
+#ifdef GENERALS_ZH_FAST_ZONE_MERGES
+ zoneStorageType* rebuildTables[]={m_groundCliffZones,m_groundWaterZones,m_groundRubbleZones,m_terrainZones,m_crusherZones,m_hierarchicalZones};
+ for(auto* table:rebuildTables)MinimumZoneEquivalence<zoneStorageType>(table,m_maxZone).materialize();
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  equivalenceTiming.stop();
  PathSearchTiming::Scope flattenTiming(zoneTiming.metric(PathSearchTiming::ZoneFlatten));
@@ -4413,11 +4434,12 @@ struct PathfindParallelReads {
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
  PathSearchTiming::QueryProfile queryProfile;
+ std::uint64_t cacheHits=0;
 #endif
  Bool overflow = false;
  void reset() {cells.reset();corridor.reset();queries.clear();heights.clear();overflow=false;
 #ifdef GENERALS_ZH_PATH_TIMING
-  queryProfile={};
+  queryProfile={};cacheHits=0;
 #endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
   terrain.clear();objects.reset();
@@ -4537,6 +4559,7 @@ void Pathfinder::observeParallelCell(PathfindCell* cell) {
 Real Pathfinder::searchGroundHeight(Real x, Real y) {
  const Real height=TheTerrainLogic->getGroundHeight(x,y);
  if (auto* reads=activePathfindSearchContext().m_parallelReads) {
+
   reads->height(x,y,height);
  }
  return height;
@@ -6017,6 +6040,18 @@ PathOccupancy::Result Pathfinder::evaluateOccupancyQuery(const Object *obj, cons
 	LiveOccupancyReader live = {this, obj};
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  if (auto* reads=activePathfindSearchContext().m_parallelReads) {
+#ifdef GENERALS_ZH_FROZEN_OCCUPANCY_CACHE
+  // GeneralsX @performance Codex 30/10/2026 Share the dependency index only for the fixed mover inside an executing frozen request.
+  const auto& context=activePathfindSearchContext();
+  if(context.m_completeExecuting && context.m_completeJob && context.m_completeJob->obj==obj){
+   if(const auto* previous=reads->queries.find({input,{}})){
+#ifdef GENERALS_ZH_PATH_TIMING
+    ++reads->cacheHits;
+#endif
+    return previous->result;
+   }
+  }
+#endif
   // GeneralsX @performance Codex 29/10/2026 Keep query-only snapshots out of the raw cell log; replay all five result fields before reuse.
   // Direct cell reads and allocation-kind observation retain their independent exact snapshots.
   PathfindSearchContext::OccupancyReadScope queryReads(activePathfindSearchContext());
@@ -7933,7 +7968,7 @@ void Pathfinder::prepareParallelBatch()
     }
     // GeneralsX @feature Codex 28/10/2026 Copy bounded observation counts after join to distinguish deduplication, capacity and conflict.
     const auto copyReads=[](const PathfindParallelJob& job,PathSearchTiming::ReadSample& sample){
-     const auto&reads=job.reads;sample.queryProfile=reads.queryProfile;
+     const auto&reads=job.reads;sample.queryProfile=reads.queryProfile;sample.cacheHits=reads.cacheHits;
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
      sample.hierarchyNanoseconds=job.stageTiming[PathSearchTiming::Hierarchy].totalNanoseconds;
      sample.fineNanoseconds=job.stageTiming[PathSearchTiming::FineSearch].totalNanoseconds;
@@ -7972,8 +8007,14 @@ void Pathfinder::prepareParallelBatch()
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
     fprintf(stderr,"[PATH_COMPLETE_WORKER] enabled hierarchy=true path_construction=true optimization=true reuse=before_preparation\n");
 #endif
+#ifdef GENERALS_ZH_FROZEN_OCCUPANCY_CACHE
+    fprintf(stderr,"[PATH_OCCUPANCY_CACHE] enabled scope=frozen_complete_job storage=dependency_log capacity=8192 validation=live\n");
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
     // GeneralsX @feature Codex 29/10/2026 Report the native compact layout once; these are sizes, not live process-memory measurements.
+#ifdef GENERALS_ZH_FAST_ZONE_MERGES
+    fprintf(stderr,"[PATH_ZONE_MERGES] enabled strategy=minimum_root storage=existing_tables flatten=canonical_only\n");
+#endif
     fprintf(stderr,"[PATH_SEARCH_STORAGE] node_bytes=%zu permanent_bytes=%zu context_bytes=%zu capacity=%u max_index_cells=%u\n",
      sizeof(PathfindSearchRecord),sizeof(PathfindCellInfo),sizeof(PathfindSearchContext),PATHFIND_RECORD_CAPACITY,
      BoundedRecordIndex<PATHFIND_RECORD_CAPACITY>::maximumCells);

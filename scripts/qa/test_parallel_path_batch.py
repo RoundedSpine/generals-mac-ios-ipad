@@ -479,6 +479,50 @@ int main(){for(bool fixed:{false,true})for(bool center:{false,true})for(int radi
 '''
 
 
+def zone_rebuild_fixture(width=5,height=5,block_size=2,capacity=256):
+    header_start=HEADER.index('void calculateZones(')
+    declaration=HEADER[header_start:HEADER.index(';',header_start)+1]
+    source=r'''
+    #include "pathsearchtiming.h"
+#include "minimumzoneequivalence.h"
+    #include <cassert>
+    #include <cstdio>
+    using Int=int;using Bool=bool;using zoneStorageType=unsigned short;
+    #define __fastcall
+    #define DEBUG_ASSERTCRASH(condition, message) assert(condition)
+    #define RTS_GENERALS 0
+    constexpr int LAYER_GROUND=0,LAYER_LAST=3;
+    constexpr bool TRUE=true,FALSE=false;
+    struct ICoord2D{int x=0,y=0;};struct IRegion2D{ICoord2D lo{0,0},hi{4,4};};
+    struct PathfindCell{
+     enum CellType {CELL_CLEAR=0,CELL_WATER=1,CELL_CLIFF=2,CELL_RUBBLE=3,CELL_OBSTACLE=4};
+     CellType type=CELL_CLEAR;int zone=0;
+     CellType getType()const{return type;}int getZone()const{return zone;}void setZone(int value){zone=value;}
+     int connect=LAYER_GROUND;int getConnectLayer()const{return connect;}
+     bool fence=false;bool isObstacleFence()const{return fence;}
+    };
+    struct PathfindLayer{int zone=0;void setZone(int z){zone=z;}int getZone()const{return zone;}void applyZone(){}
+     bool unused=true,destroyed=false;bool isUnused()const{return unused;}bool isDestroyed()const{return destroyed;}
+     void getStartCellIndex(ICoord2D*){}void getEndCellIndex(ICoord2D*){}
+    };
+    struct PathfindZoneManager{
+     enum{ZONE_BLOCK_SIZE=TEST_BLOCK_SIZE};int m_maxZone=0,m_zonesAllocated=TEST_CAPACITY;unsigned m_nextFrameToCalculateZones=0;
+     zoneStorageType m_groundCliffZones[TEST_CAPACITY]{},m_groundWaterZones[TEST_CAPACITY]{},m_groundRubbleZones[TEST_CAPACITY]{},
+      m_terrainZones[TEST_CAPACITY]{},m_crusherZones[TEST_CAPACITY]{},m_hierarchicalZones[TEST_CAPACITY]{};
+     struct Block{void setInteractsWithBridge(bool){}void blockCalculateZones(PathfindCell**,PathfindLayer*,const IRegion2D&) {}}m_zoneBlocks[TEST_BLOCKS_X][TEST_BLOCKS_Y];
+     void setBridge(int,int,bool){}void allocateZones(){}
+     DECLARATION
+    };
+    '''.replace('DECLARATION',declaration)
+    for marker in ['inline Bool waterGround(', 'inline Bool groundRubble(', 'inline Bool terrain(',
+                   'inline Bool crusherGround(', 'inline Bool groundCliff(', 'static void __fastcall resolveZones(',
+                   'static void flattenZones(', 'inline void applyZone(', 'void PathfindZoneManager::calculateZones(']:
+        source+='\n'+function(marker)
+    return (source.replace('TEST_BLOCK_SIZE',str(block_size)).replace('TEST_CAPACITY',str(capacity))
+            .replace('TEST_BLOCKS_X',str((width+block_size-1)//block_size))
+            .replace('TEST_BLOCKS_Y',str((height+block_size-1)//block_size)))
+
+
 class ParallelBatchTests(unittest.TestCase):
     # GeneralsX @feature Codex 29/10/2026 Verify sparse clocks, exact stage attribution and exception restoration with deterministic time.
     def test_sampled_query_profile_keeps_every_evaluation_and_bounds_clock_reads(self):
@@ -537,44 +581,7 @@ int main(){using T=BasicPathSearchTiming<Clock>;T t;
 ''')
 
     def test_zone_pass_profiling_compiles_real_rebuild_and_preserves_zone_tables(self):
-        # Production relabel/merge/flatten code and predicates; layer/block services remain controlled.
-        header_start=HEADER.index('void calculateZones(')
-        declaration=HEADER[header_start:HEADER.index(';',header_start)+1]
-        source=r'''
-#include "pathsearchtiming.h"
-#include <cassert>
-#include <cstdio>
-using Int=int;using Bool=bool;using zoneStorageType=unsigned short;
-#define __fastcall
-#define DEBUG_ASSERTCRASH(condition, message) assert(condition)
-#define RTS_GENERALS 0
-constexpr int LAYER_GROUND=0,LAYER_LAST=3;
-constexpr bool TRUE=true,FALSE=false;
-struct ICoord2D{int x=0,y=0;};struct IRegion2D{ICoord2D lo{0,0},hi{4,4};};
-struct PathfindCell{
- enum CellType {CELL_CLEAR=0,CELL_WATER=1,CELL_CLIFF=2,CELL_RUBBLE=3,CELL_OBSTACLE=4};
- CellType type=CELL_CLEAR;int zone=0;
- CellType getType()const{return type;}int getZone()const{return zone;}void setZone(int value){zone=value;}
- int getConnectLayer()const{return LAYER_GROUND;}
- bool isObstacleFence()const{return false;}
-};
-struct PathfindLayer{int zone=0;void setZone(int z){zone=z;}int getZone()const{return zone;}void applyZone(){}
- bool isUnused()const{return true;}bool isDestroyed()const{return false;}
- void getStartCellIndex(ICoord2D*){}void getEndCellIndex(ICoord2D*){}
-};
-struct PathfindZoneManager{
- enum{ZONE_BLOCK_SIZE=2};int m_maxZone=0,m_zonesAllocated=256;unsigned m_nextFrameToCalculateZones=0;
- zoneStorageType m_groundCliffZones[256]{},m_groundWaterZones[256]{},m_groundRubbleZones[256]{},
-  m_terrainZones[256]{},m_crusherZones[256]{},m_hierarchicalZones[256]{};
- struct Block{void setInteractsWithBridge(bool){}void blockCalculateZones(PathfindCell**,PathfindLayer*,const IRegion2D&) {}}m_zoneBlocks[3][3];
- void setBridge(int,int,bool){}void allocateZones(){}
- DECLARATION
-};
-'''.replace('DECLARATION',declaration)
-        for marker in ['inline Bool waterGround(', 'inline Bool groundRubble(', 'inline Bool terrain(',
-                       'inline Bool crusherGround(', 'inline Bool groundCliff(', 'static void __fastcall resolveZones(',
-                       'static void flattenZones(', 'inline void applyZone(', 'void PathfindZoneManager::calculateZones(']:
-            source+='\n'+function(marker)
+        source=zone_rebuild_fixture()
         source+=r'''
 int main(){for(unsigned seed=0;seed<8;++seed){PathfindZoneManager zones;PathfindCell storage[5][5];PathfindCell*map[5];
  PathfindLayer layers[4];IRegion2D bounds;

@@ -91,6 +91,12 @@ if(GENERALS_PARALLEL_PATH_BATCH)
     add_compile_definitions(GENERALS_PARALLEL_PATH_BATCH=1)
 endif()
 
+# GeneralsX @performance Codex 30/10/2026 Keep minimum-label zone merging opt-in for matched native testing.
+option(GENERALS_FAST_ZONE_MERGES "Use minimum-root equivalence merging during Zero Hour zone rebuilds" OFF)
+if(GENERALS_FAST_ZONE_MERGES)
+    add_compile_definitions(GENERALS_FAST_ZONE_MERGES=1)
+endif()
+
 # GeneralsX @feature Codex 29/10/2026 Complete speculative APIs own hierarchy, engine Paths and optimization through joined validation.
 option(GENERALS_COMPLETE_PATH_WORKER "Run complete queued search APIs on parallel participants" OFF)
 if(GENERALS_COMPLETE_PATH_WORKER)
@@ -98,6 +104,15 @@ if(GENERALS_COMPLETE_PATH_WORKER)
         message(FATAL_ERROR "GENERALS_COMPLETE_PATH_WORKER requires GENERALS_PARALLEL_PATH_BATCH")
     endif()
     add_compile_definitions(GENERALS_COMPLETE_PATH_WORKER=1)
+endif()
+
+# GeneralsX @performance Codex 30/10/2026 Benchmark request-local occupancy reuse independently from zone merging.
+option(GENERALS_FROZEN_OCCUPANCY_CACHE "Reuse occupancy results only within a frozen complete search request" OFF)
+if(GENERALS_FROZEN_OCCUPANCY_CACHE)
+    if(NOT GENERALS_COMPLETE_PATH_WORKER)
+        message(FATAL_ERROR "GENERALS_FROZEN_OCCUPANCY_CACHE requires GENERALS_COMPLETE_PATH_WORKER")
+    endif()
+    add_compile_definitions(GENERALS_FROZEN_OCCUPANCY_CACHE=1)
 endif()
 
 # GeneralsX @build Codex 28/10/2026 Optional phase-boundary timing for the experimental search batch.
