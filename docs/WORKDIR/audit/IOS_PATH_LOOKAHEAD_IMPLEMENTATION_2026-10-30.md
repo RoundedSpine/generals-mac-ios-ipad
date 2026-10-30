@@ -115,3 +115,54 @@ profile add small fixed metadata, not another search arena or result buffer.
 After this trial, detach arenas from logical result slots and add the bounded
 joined pool before increasing selected jobs or worker count. Keep wider batching,
 independent map-sized node limits and altered queue budgets as separate decisions.
+
+## Device follow-up — 31 October 2026
+
+The supplied `~8084275` stderr log confirms anchored lookahead, complete APIs,
+two reusable participant arenas, occupancy caching and fast zone merging. It
+exits with code zero. No worker/environment/allocation failure, dependency-log
+overflow or unfinished validated result is recorded. Movement correctness still
+requires gameplay observation; a normal log does not prove every scenario.
+
+All counter identities reconcile: 10,955 windows plus 1,173 retained attempts
+equal 12,128 preparations; inspected entries equal eligible entries plus skips;
+histogram totals and weighted inspected counts match; 920 selected pairs execute.
+All nonempty windows retire. Primary outcomes are 1,796 reused, 21 rejected and
+23 unused, totaling 1,840 (97.61% reused). Fallback outcomes are 39 reused and four
+unused, totaling 43. Rejections detect changed cell snapshots, including goal
+unit changes in all 21 cases; there are no log-full/capture failures.
+
+Partner offsets are 878 adjacent pairs and 42 nonadjacent pairs (4.57%): 30 at
+offset two, six at three, four at four, one at five and one at seven. The last
+exercises the eighth entry of the scan. This confirms nonadjacent dispatch is
+used, not 42 net additional batches compared with an unrecorded counterfactual.
+There are 9,223 unsupported-head windows and 812 singleton/sparse windows. The
+candidate exclusions include 5,760 dozers and 3,724 failed predictions (2,107
+nonfinal, 1,596 attack and 21 not waiting); they include head and partner entries.
+Eligibility counts remain censored at two and cannot select an optimal pool size.
+
+The queue maximum is 25.990 ms across 7,854 measured queue calls; seven reach
+20 ms and none reach 50 ms. The pair maximum is 17.042 ms. All four retained
+slowest queues have no dispatched pair. The largest retained serial closest
+search is 21.675 ms, with 5,069 examined cells, 5,506 records and 8,755 expansions.
+These pathfinding timers do not cover every game/UI/rendering frame or rule out
+unlogged input delays. A larger pool cannot split that single serial search.
+
+A comparable retained worker matches the old cache-OFF session's 3,225 examined
+cells, 3,683 records and 142,281 occupancy requests. It now evaluates 3,550 live
+queries plus 138,731 cache hits (97.50%). Complete worker time is 17.004 ms versus
+33.477 ms in that older session; fine time is 16.691 versus 32.867 ms. This is
+supporting evidence for the accumulated cache/reuse work across separate sessions,
+not attribution to lookahead or a controlled device speedup benchmark. Another
+3,666-cell/3,939-record worker records 12.870 ms versus the preceding cache-ON
+session's 14.101 ms, with identical query/hit counts; that difference is also
+uncontrolled.
+
+Native layout reports a 2,804,560-byte context and 1,520,720-byte job, with 64-byte
+private nodes and 48-byte permanent records. The job grows by 16 bytes relative
+to the earlier layout because the optional timing type adds two admission
+counters. No extra arena/result slot is introduced; resident memory is unmeasured.
+
+Keep the lookahead trial enabled. The results support continuing the planned
+participant-arena separation and bounded joined-pool work, while leaving the
+gain from more workers unproven and retaining all prediction/validation policies.

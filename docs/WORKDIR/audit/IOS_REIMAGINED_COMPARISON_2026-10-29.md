@@ -7,10 +7,10 @@ the supplied ZeroHourReimagined_1.0.0_source. This is a pathfinding comparison;
 Reimagined graphics and gameplay content remain outside this integration. This
 supersedes the runtime snapshot in the 28 October comparison, while retaining
 its historical evidence.
-The latest supplied device runtime is b05cf78 with complete APIs, fast zone merges
-and frozen occupancy caching enabled. The arena-reuse IPA build (41014492451)
-has succeeded; its device validation and the subsequent anchored lookahead's
-native/device validation remain pending. Historical stage descriptions below
+The latest supplied device runtime is 8084275 with complete APIs, fast zone merges,
+frozen occupancy caching, arena reuse and anchored lookahead enabled. It exits
+normally and records 42 nonadjacent pairs among 920 dispatched pairs. Further
+gameplay coverage and matched performance validation remain. Historical stage descriptions below
 retain their original scope.
 
 Our implementation has the reference's core speculative model: predict queued
