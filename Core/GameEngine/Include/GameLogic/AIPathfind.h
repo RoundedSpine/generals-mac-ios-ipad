@@ -69,6 +69,11 @@ void observeParallelCorridor(std::size_t block, Bool passable);
 #if defined(GENERALS_COMPLETE_PATH_WORKER) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)
 #define GENERALS_ZH_COMPLETE_PATH_WORKER 1
 #endif
+// GeneralsX @performance Codex 30/10/2026 Bounded partner lookahead requires completed independently validated results.
+#if defined(GENERALS_PATH_LOOKAHEAD) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
+#define GENERALS_ZH_PATH_LOOKAHEAD 1
+#include "pathlookaheadwindow.h"
+#endif
 // GeneralsX @performance Codex 30/10/2026 Completed results no longer retain their participant's search arena.
 #if defined(GENERALS_REUSE_PATH_CONTEXTS) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
 #define GENERALS_ZH_REUSE_PATH_CONTEXTS 1
@@ -1215,6 +1220,13 @@ protected:
  PathSearchTiming& searchTiming();
 #endif
  unsigned long long m_parallelWorldEpoch;
+// GeneralsX @performance Codex 30/10/2026 Inspect queue spans without allocating another result buffer or search arena.
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+ PathLookaheadWindow<PATHFIND_QUEUE_LEN> m_lookaheadWindow;
+#ifdef GENERALS_ZH_PATH_TIMING
+ PathLookaheadProfile m_lookaheadProfile;
+#endif
+#endif
  void prepareParallelBatch();
  void clearParallelBatch();
  void observeParallelCell(PathfindCell* cell);

@@ -99,6 +99,11 @@ complete-worker/cache checks with two retained participant arenas and independen
 result ownership. It also checks borrowed reset, deliberately overwritten arenas,
 failed-primary/fallback publication and reuse-OFF/ON route/accounting equivalence.
 See [context reuse and memory bounds](../docs/WORKDIR/audit/IOS_PATH_CONTEXT_REUSE_2026-10-30.md).
+Run `python3 scripts/qa/test_path_lookahead.py` (or add `--tsan` / `--asan`) for
+production nonadjacent selection, retained/negative windows, serial path/order/
+budget equivalence, lifecycle capture, post-load invalidation, deletion and joined
+failure cleanup. It also checks profiler/cache/reuse-OFF configurations. See
+[lookahead scope and diagnostic meanings](../docs/WORKDIR/audit/IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md).
 Run `python3 scripts/qa/test_zone_merges.py` for minimum-label merges, exhaustive
 flattening comparisons and full controlled rebuild-table equivalence. Run
 `python3 scripts/qa/test_frozen_occupancy_cache.py` for optional request-cache

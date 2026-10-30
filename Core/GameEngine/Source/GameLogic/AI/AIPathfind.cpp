@@ -4646,6 +4646,13 @@ Real Pathfinder::searchLayerHeight(Real x,Real y,PathfindLayerEnum layer){
 #endif
 
 void Pathfinder::clearParallelBatch() {
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+ // GeneralsX @bugfix Codex 30/10/2026 Negative windows also expire when the queue call ends, even without result buffers.
+#ifdef GENERALS_ZH_PATH_TIMING
+ if(!m_lookaheadWindow.empty())++m_lookaheadProfile.retired;
+#endif
+ m_lookaheadWindow.reset();
+#endif
  if (!m_parallelBatch) return;
  for (auto& job:m_parallelBatch->jobs) {
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -4689,6 +4696,9 @@ Pathfinder::~Pathfinder()
  // GeneralsX @feature Codex 28/10/2026 Resolve any remaining dispositions before reporting the retained scalar samples.
  clearParallelBatch();
 #endif
+#if defined(GENERALS_ZH_PATH_LOOKAHEAD) && defined(GENERALS_ZH_PATH_TIMING)
+ m_lookaheadProfile.report(stderr);
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
  // GeneralsX @feature Codex 28/10/2026 Report bounded session aggregates after all synchronous queue calls have returned.
  m_pathTiming.report(stderr);
@@ -4715,6 +4725,10 @@ void Pathfinder::reset()
 {
 #ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
  invalidateParallelResults();
+#endif
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+ // GeneralsX @bugfix Codex 30/10/2026 Release joined outputs and negative windows before map identities are retired.
+ clearParallelBatch();
 #endif
 
 #ifdef GENERALS_ZH_OCCUPANCY_WORKER
@@ -7761,6 +7775,98 @@ void Pathfinder::prepareParallelBatch()
 #endif
   return;
  }
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+ // GeneralsX @performance Codex 30/10/2026 Keep results across inspected holes; anchor speculation at an eligible real queue head.
+ // Reference: dement123, ZeroHourReimagined_1.0.0_source, prefetchPaths; retain our per-request budget and prediction guards.
+ const auto lifecycle=PathOccupancy::validationLifecycleEpoch().load();
+ if(m_lookaheadWindow.contains(m_queuePRHead,m_parallelWorldEpoch,lifecycle)){
+#ifdef GENERALS_ZH_PATH_TIMING
+  ++m_lookaheadProfile.retained;
+  admission.reason=m_parallelBatch&&m_parallelBatch->active&&m_parallelBatch->jobs[0].ready?
+   PathSearchTiming::Admission::ExistingPair:PathSearchTiming::Admission::ExistingAttempt;
+#endif
+  return;
+ }
+ if(!m_lookaheadWindow.empty() || (m_parallelBatch&&m_parallelBatch->active))clearParallelBatch();
+
+ struct Candidate {
+  ObjectID id=INVALID_ID,ignored=INVALID_ID;Int queueIndex=0;
+  Object* object=nullptr;
+  Coord3D from{},to{},repulsor2{};
+  Bool safe=false,closest=false,blocked=false;
+  Real repulsorRadius=0,pathCostMultiplier=0;
+  PathPredictionReason prediction=PathPredictionReason::Accepted;
+ };
+ const auto capture=[&](ObjectID id,Int index,Candidate& candidate){
+  candidate={};candidate.id=id;candidate.queueIndex=index;
+  candidate.object=TheGameLogic->findObjectByID(id);
+  if(!candidate.object)return PathLookaheadEligibility::MissingObject;
+  auto* ai=candidate.object->getAIUpdateInterface();
+  if(!ai)return PathLookaheadEligibility::MissingAI;
+  if(candidate.object->isKindOf(KINDOF_DOZER))return PathLookaheadEligibility::Dozer;
+  if(candidate.object->getCrusherLevel()>0 && TheNameKeyGenerator->findExistingNameKey("SquishCollide")==NAMEKEY_INVALID)
+   return PathLookaheadEligibility::CrusherKey;
+  if(ai->getLocomotorSet().getValidSurfaces()==0)return PathLookaheadEligibility::Immobile;
+  if(!ai->predictOrdinaryPath(candidate.from,candidate.to,candidate.ignored
+#ifdef GENERALS_ZH_PATH_TIMING
+   ,&candidate.prediction
+#endif
+  )){
+   if(ai->predictSafePath(candidate.from,candidate.to,candidate.repulsor2,candidate.repulsorRadius))candidate.safe=true;
+   else if(ai->predictClosestPath(candidate.from,candidate.to,candidate.blocked,candidate.pathCostMultiplier))candidate.closest=true;
+   else return PathLookaheadEligibility::Prediction;
+   candidate.ignored=mainPathfindSearchContext().m_ignoreObstacleID;
+  }
+  return PathLookaheadEligibility::Eligible;
+ };
+ Candidate selected[2];
+ const Int begin=m_queuePRHead,tail=m_queuePRTail;
+ const auto world=m_parallelWorldEpoch;
+ unsigned scanned=0,count=0;
+#ifdef GENERALS_ZH_PATH_TIMING
+ unsigned partnerOffset=0;
+#endif
+ Int position=begin;
+ while(position!=tail && scanned<PathLookaheadWindow<PATHFIND_QUEUE_LEN>::scanLimit && count<2){
+  const auto offset=scanned++;
+  const auto id=m_queuedPathfindRequests[position];
+  Candidate candidate;
+  const auto status=count&&selected[0].id==id?PathLookaheadEligibility::Duplicate:capture(id,position,candidate);
+  if(status==PathLookaheadEligibility::Eligible){
+   selected[count++]=candidate;
+#ifdef GENERALS_ZH_PATH_TIMING
+   if(count==2)partnerOffset=offset;
+#endif
+  }else{
+#ifdef GENERALS_ZH_PATH_TIMING
+   m_lookaheadProfile.reject(status,candidate.prediction);
+#endif
+   // An unsupported head runs first on main; later unsupported partners remain holes in this window.
+   if(offset==0)break;
+  }
+  position=(position+1)%PATHFIND_QUEUE_LEN;
+ }
+ m_lookaheadWindow.capture(begin,scanned,world,lifecycle);
+#ifdef GENERALS_ZH_PATH_TIMING
+ m_lookaheadProfile.record(scanned,count,count==2?2:0,partnerOffset);
+#endif
+ if(count<2){
+#ifdef GENERALS_ZH_PATH_TIMING
+  admission.reason=count==0&&scanned?PathSearchTiming::Admission::LookaheadHead:PathSearchTiming::Admission::LookaheadSparse;
+#endif
+  return;
+ }
+ ObjectID ids[2],ignored[2];Object* objects[2];Int positions[2];
+ Coord3D from[2],to[2],repulsor2[2];
+ Bool safe[2],closest[2],blocked[2];Real repulsorRadius[2],pathCostMultiplier[2];
+ for(unsigned i=0;i<2;++i){
+  const auto& candidate=selected[i];
+  ids[i]=candidate.id;objects[i]=candidate.object;positions[i]=candidate.queueIndex;
+  from[i]=candidate.from;to[i]=candidate.to;ignored[i]=candidate.ignored;repulsor2[i]=candidate.repulsor2;
+  safe[i]=candidate.safe;closest[i]=candidate.closest;blocked[i]=candidate.blocked;
+  repulsorRadius[i]=candidate.repulsorRadius;pathCostMultiplier[i]=candidate.pathCostMultiplier;
+ }
+#else
  if (m_parallelBatch && m_parallelBatch->active) {
   if (m_queuePRHead==m_parallelBatch->jobs[0].queueIndex || m_queuePRHead==m_parallelBatch->jobs[1].queueIndex) {
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -7836,6 +7942,7 @@ void Pathfinder::prepareParallelBatch()
    ignored[i]=mainPathfindSearchContext().m_ignoreObstacleID;
   }
  }
+#endif
  try {
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
   // WorldBuilder and single-threaded tools may intentionally omit these locks.
@@ -7867,10 +7974,19 @@ void Pathfinder::prepareParallelBatch()
   for (Int i=0;i<2;++i) {
    auto& job=batch.jobs[i];job.reset();job.obj=objects[i];job.id=ids[i];
    job.locomotor=&objects[i]->getAIUpdateInterface()->getLocomotorSet();
-   job.from=from[i];job.to=to[i];job.ignored=ignored[i];job.queueIndex=i?next:m_queuePRHead;
+   job.from=from[i];job.to=to[i];job.ignored=ignored[i];
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+   job.queueIndex=positions[i];
+#else
+   job.queueIndex=i?next:m_queuePRHead;
+#endif
    job.safe=safe[i];job.repulsor2=repulsor2[i];job.repulsorRadius=repulsorRadius[i];
    job.closest=closest[i];job.closestSettings={blocked[i],pathCostMultiplier[i],false,false,false,false,ignored[i]};
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+   job.epoch=world;job.lifecycle=lifecycle;
+#else
    job.epoch=m_parallelWorldEpoch;job.lifecycle=PathOccupancy::validationLifecycleEpoch().load();
+#endif
 #ifndef GENERALS_ZH_REUSE_PATH_CONTEXTS
    job.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
    job.context.m_ignoreObstacleID=ignored[i];job.context.m_parallelReads=&job.reads;
@@ -7958,6 +8074,16 @@ void Pathfinder::prepareParallelBatch()
   preparationTiming.stop();
 #endif
   if (hasWork(batch.jobs[0]) && hasWork(batch.jobs[1])) {
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+   // GeneralsX @bugfix Codex 30/10/2026 A lifecycle transition during main-thread capture retires the window before dispatch.
+   if(PathOccupancy::validationPaused().load() || world!=m_parallelWorldEpoch ||
+      lifecycle!=PathOccupancy::validationLifecycleEpoch().load()){
+#ifdef GENERALS_ZH_PATH_TIMING
+    admission.reason=PathSearchTiming::Admission::Paused;
+#endif
+    clearParallelBatch();return;
+   }
+#endif
    auto execute=[&](Int index) {
     auto& job=batch.jobs[index];
     if (job.captured) {
@@ -8079,9 +8205,15 @@ void Pathfinder::prepareParallelBatch()
      ++batch.fallbackSearches;if(job.fallback->earlyFallback) ++batch.earlyFallbackSearches;
     }
    }
+#if defined(GENERALS_ZH_PATH_LOOKAHEAD) && defined(GENERALS_ZH_PATH_TIMING)
+   ++m_lookaheadProfile.dispatched;
+#endif
    ++m_exclusiveWorker->searches;
    if (!batch.batches++) {
     fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+    fprintf(stderr,"[PATH_LOOKAHEAD] enabled scan=8 selected=2 anchor=head lifetime=inspected_span workers=unchanged\n");
+#endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
     fprintf(stderr,"[PATH_COMPLETE_WORKER] enabled hierarchy=true path_construction=true optimization=true reuse=before_preparation\n");
 #ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
@@ -13593,5 +13725,8 @@ void Pathfinder::xfer( Xfer *xfer )
 //-----------------------------------------------------------------------------
 void Pathfinder::loadPostProcess()
 {
-
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+ // GeneralsX @bugfix Codex 30/10/2026 Transient results and inspected queue positions never survive a loaded world.
+ invalidateParallelResults();clearParallelBatch();
+#endif
 }

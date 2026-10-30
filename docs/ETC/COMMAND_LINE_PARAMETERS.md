@@ -110,6 +110,14 @@ retained participant arenas, shared only with their sequential fallbacks; result
 Paths, validation logs and publication state remain independent. Reported native
 layout sizes are not resident memory. See
 [context reuse, ownership and bounds](../WORKDIR/audit/IOS_PATH_CONTEXT_REUSE_2026-10-30.md).
+`GENERALS_PATH_LOOKAHEAD` defaults OFF, requires complete-worker mode and is enabled
+on the iOS testing branch. It selects two eligible requests from an anchored
+eight-entry window with one worker, retaining skipped serial callbacks and the
+per-request budget. `[PATH_LOOKAHEAD] enabled` confirms execution; optional timing
+rows summarize inspected/eligible/selected entries, dispatched pairs and partner
+offsets. Scans stop at two eligible entries, so these are not full eight-entry
+availability counts. See
+[lookahead lifetime, counters and tests](../WORKDIR/audit/IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
 and whether current usage increased, decreased or stayed equal at a rejected
 allocation-decision window check. `[PATH_ADMISSION_REUSE]` counts changed permanent

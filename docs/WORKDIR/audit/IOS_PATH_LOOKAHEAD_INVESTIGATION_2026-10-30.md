@@ -1,5 +1,9 @@
 # Eligible-request lookahead investigation — 30 October 2026
 
+The subsequent [production stage](IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md)
+implements the anchored two-slot window with committed production regression
+checks. The probe findings below retain their investigation scope.
+
 ## Recommendation
 
 Implement a bounded scan across unsupported queue entries, retaining current

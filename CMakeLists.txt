@@ -106,6 +106,15 @@ if(GENERALS_COMPLETE_PATH_WORKER)
     add_compile_definitions(GENERALS_COMPLETE_PATH_WORKER=1)
 endif()
 
+# GeneralsX @performance Codex 30/10/2026 Inspect bounded eligible partners without changing worker count or queue scheduling.
+option(GENERALS_PATH_LOOKAHEAD "Select two eligible complete-search requests from an anchored eight-entry queue window" OFF)
+if(GENERALS_PATH_LOOKAHEAD)
+    if(NOT GENERALS_COMPLETE_PATH_WORKER)
+        message(FATAL_ERROR "GENERALS_PATH_LOOKAHEAD requires GENERALS_COMPLETE_PATH_WORKER")
+    endif()
+    add_compile_definitions(GENERALS_PATH_LOOKAHEAD=1)
+endif()
+
 # GeneralsX @performance Codex 30/10/2026 Reuse one arena per joined participant while results own their publication state.
 option(GENERALS_REUSE_PATH_CONTEXTS "Reuse complete-search participant contexts across primary and fallback requests" OFF)
 if(GENERALS_REUSE_PATH_CONTEXTS)

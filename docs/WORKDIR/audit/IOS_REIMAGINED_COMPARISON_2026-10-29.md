@@ -8,8 +8,9 @@ Reimagined graphics and gameplay content remain outside this integration. This
 supersedes the runtime snapshot in the 28 October comparison, while retaining
 its historical evidence.
 The latest supplied device runtime is b05cf78 with complete APIs, fast zone merges
-and frozen occupancy caching enabled. Participant arena reuse is the subsequent
-stage awaiting native/device validation. Historical stage descriptions below
+and frozen occupancy caching enabled. The arena-reuse IPA build (41014492451)
+has succeeded; its device validation and the subsequent anchored lookahead's
+native/device validation remain pending. Historical stage descriptions below
 retain their original scope.
 
 Our implementation has the reference's core speculative model: predict queued
@@ -42,7 +43,7 @@ The reference is not simply our implementation with additional workers enabled.
 | Search kinds | Ordinary, safe, queued closest and conditional closest fallback; stricter prediction gates | Same API categories, broader ordinary prediction |
 | Preparation | Main captures inputs; participant runs hierarchy; accepted completed Path returns before preparation repeats | Whole search API runs in the participant's context; accepted completed Path returns before hierarchy is repeated |
 | Off-thread scope | Complete ordinary/safe/closest APIs, including hierarchy, Path construction/optimization and private cleanup; attempted live recovery aborts to caller | Complete findPath/findClosestPath/findSafePath calls, including hierarchy and Path construction/optimization |
-| Dispatch | Two adjacent eligible requests, one worker plus main | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
+| Dispatch | Eligible head plus earliest eligible partner within eight queue entries; one worker plus main, retained windows across serial holes | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
 | Worker count | One gameplay search worker | Automatic clamp(cores - 3, 0, 8), explicit override capped at 32 |
 | Result storage | Two retained participant arenas; each fallback reuses its primary's arena; Paths, validation logs and publication snapshots remain result-owned | Thread-local search context reused between jobs/phases; each result owns a completed engine Path |
 | Node lookup | Bounded cell-ID to record-slot table, complete compact node; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
@@ -355,3 +356,17 @@ iPhone RSS or a speedup. The subsequent cache-enabled b05cf78 device log confirm
 complete APIs and live rejection checks, but predates arena reuse. Native/device
 validation of this stage remains required. Dense node lookup/capacity, wider
 scanning, dynamic pool dispatch and eight-request scheduling remain distinct.
+
+## Subsequent anchored partner lookahead
+
+The [lookahead stage](IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md) adds bounded
+scanning past unsupported partners while preserving the existing one-worker,
+two-result executor. An unsupported actual head runs serially first. A lightweight
+inspected-span window retains nonadjacent results across skipped callbacks and
+negative scans until the call ends, the head exits, or an epoch invalidates it.
+Request identity, live validation and per-request queue budgeting remain.
+
+This adopts eligible-entry scanning without adopting the reference's dynamic
+pool, up-to-eight selected requests or eight-request budget grouping. The two-job
+cap censors the new eligibility counts; they cannot establish how many additional
+workers would be useful. Native/device verification and matched timing remain.

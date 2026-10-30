@@ -25,10 +25,11 @@ public:
   StartCell, GoalCell, StartIndex, Movement, Overflow, FixedMode, Recovery,
   Cells, Corridor, Occupancy, Height, Count
  };
+ // GeneralsX @feature Codex 30/10/2026 Keep lookahead head/sparse outcomes distinct from adjacent-pair failures.
  enum class Admission {
   Dispatched, ExistingPair, ExistingAttempt, Unavailable, Debug, Paused, Nested, ShortQueue,
   Duplicate, MissingObject, MissingAI, Dozer, CrusherKey, Prediction, Capture,
-  EnvironmentFailure, ThreadFailure, AllocationFailure, Exception, DebugBuild, Count
+  EnvironmentFailure, ThreadFailure, AllocationFailure, Exception, DebugBuild, LookaheadHead, LookaheadSparse, Count
  };
  static constexpr unsigned retainedSamples=4;
  struct ResultSample {Result result=Result::NotRun;Rejection reason=Rejection::None;};
@@ -357,7 +358,8 @@ public:
     static_cast<unsigned long long>(metric.thresholds[2]),static_cast<unsigned long long>(metric.thresholds[3]),
     static_cast<unsigned long long>(metric.thresholds[4]),static_cast<unsigned long long>(metric.thresholds[5]));
   }
-  const char* admissions[]={"dispatched","existing_pair","existing_unexecuted","unavailable","debug","paused","nested","short_queue","duplicate","missing_object","missing_ai","dozer","crusher_key","prediction","capture","environment_failure","thread_failure","allocation_failure","exception","debug_build"};
+  // GeneralsX @feature Codex 30/10/2026 Append optional window outcomes without changing the preceding admission indices.
+  const char* admissions[]={"dispatched","existing_pair","existing_unexecuted","unavailable","debug","paused","nested","short_queue","duplicate","missing_object","missing_ai","dozer","crusher_key","prediction","capture","environment_failure","thread_failure","allocation_failure","exception","debug_build","lookahead_head","lookahead_sparse"};
   std::uint64_t attempts=0;for(auto count:m_admission)attempts+=count;
   std::fprintf(output,"[PATH_PAIR_ADMISSION] calls=%llu",u(attempts));
   for(unsigned i=0;i<m_admission.size();++i)std::fprintf(output," %s=%llu",admissions[i],u(m_admission[i]));
