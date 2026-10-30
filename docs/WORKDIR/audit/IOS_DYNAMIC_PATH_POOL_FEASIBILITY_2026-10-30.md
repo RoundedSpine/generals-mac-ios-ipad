@@ -17,6 +17,12 @@ and serial result-application order. The window policy must be independent of
 worker count. Test zero, one and two workers against the serial baseline before
 considering a wider window or more workers.
 
+The subsequent [lookahead investigation](IOS_PATH_LOOKAHEAD_INVESTIGATION_2026-10-30.md)
+refines this policy: start speculation at an eligible queue head, then skip
+unsupported partner entries. A tested two-slot lookahead prototype can precede
+the pool/arena refactor without adding arenas. Retaining the scanned window is
+essential; preserving the old two-index lifetime discards nonadjacent results.
+
 ## Source comparison
 
 Reviewed branch revision `fc8a2ddc8` and the supplied
