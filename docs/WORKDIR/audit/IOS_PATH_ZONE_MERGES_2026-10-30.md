@@ -1,5 +1,30 @@
 # Minimum-label zone merging and frozen occupancy-cache prototype
 
+## Current device trial: occupancy cache enabled
+
+After the zone-only `7bc99194d` device baseline, the experimental iOS workflow now
+enables the existing frozen occupancy cache on `experiment/ios-mod-testing`.
+Other workflow branches and CMake defaults keep it OFF. The cache implementation,
+zone option, runner, worker count, scheduling, limits and live result validation
+are unchanged. Native compilation and device cache-performance verification
+remain pending for this enablement.
+All four cache-specific cases pass again normally and under ThreadSanitizer;
+the existing iOS workflow also runs the full regression and race-check suites.
+
+The supplied zone-only device log confirms `[PATH_ZONE_MERGES]` and exits zero.
+Retained rebuilds with the same 527-by-521 dimensions and 4,823-zone count change
+from 37.041 to 18.776 ms; merging from 18.665 to 7.804 ms, flattening from 7.451
+to 0.257 ms and labeling from 9.100 to 8.922 ms. Separate sessions limit the
+precision of this comparison. It provides device evidence for the targeted
+zone-pass improvement, not a controlled game-wide performance result.
+
+Its worst worker still makes 142,281 occupancy requests (138,968 during fine
+search), with 3,550 distinct query identities. Fine work takes 32.867 ms and
+cache hits are zero as intended. Primary outcomes are 1,281 reuses, seven
+rejections and four unused results; fallback outcomes are 29 reuses and one
+world-epoch rejection. No allocation/thread failure or dependency-log overflow
+is recorded. This is the baseline for the cache trial.
+
 ## Evidence and build scope
 
 The `35bed76` device log exits zero and confirms complete-worker execution.
@@ -17,8 +42,8 @@ are measured empty-queue calls, not absent work. No queue call reaches 50 ms in
 the supplied session. One raw-cell log reaches its existing 8,192-entry bound
 and correctly rejects reuse; the bound is unchanged.
 
-The next experimental iOS build enables `GENERALS_FAST_ZONE_MERGES` only on
-`experiment/ios-mod-testing`. It explicitly keeps `GENERALS_FROZEN_OCCUPANCY_CACHE`
+The first zone-only build, `7bc99194d`, enabled `GENERALS_FAST_ZONE_MERGES` only on
+`experiment/ios-mod-testing`. It explicitly kept `GENERALS_FROZEN_OCCUPANCY_CACHE`
 OFF to isolate the zone change. Both options default OFF elsewhere; the cache
 option requires complete-worker mode. No worker count, search limit, queue
 scheduling, fine line-walk behavior or gameplay setting changes.
@@ -49,7 +74,7 @@ would assume properties the old flattening code does not promise.
 flatten=canonical_only` reports enablement at the first profiled batch. Existing
 zone-pass timings and retained zone rows remain available for native comparison.
 
-## Bounded occupancy cache: implemented for comparison, OFF in the IPA
+## Bounded occupancy cache implementation
 
 The optional prototype looks up results in the existing dependency-log index;
 there is no second hash table, duplicated query storage or increased entry bound.
@@ -103,7 +128,7 @@ The winding cache case improves from 33.326 to 26.932 ms (19%), but the open cas
 regresses from 9.162 to 9.968 ms (9%). Open-layout benefit is therefore unproven;
 do not report the first 5% gain as a stable improvement. The repeat confirms the
 zone result and winding benefit on this host, while supporting the decision to
-keep caching OFF in the next IPA. These measurements justify a device zone trial
+keep caching OFF in the first zone-only IPA. These measurements justify a device zone trial
 and continued cache evaluation, not a matching FPS or hitch reduction claim.
 
 Reproduce with `python3 scripts/qa/test_zone_merges.py --benchmark` and
@@ -136,10 +161,14 @@ onto the queried route and assert a changed query before testing rejection.
 An initially misplaced guarded cache block failed compilation and was moved to
 the intended evaluator before successful tests. No new runtime failure or race
 report remains in the executed checks. Native SDK compilation and device testing
-of these changes remain pending.
+were pending at that commit; the zone-only device follow-up is recorded above.
 
-Use the same save/orders on the new IPA and exit normally. Check the zone mode
-marker and compare `zone_equivalence`, `zone_flatten` and `[PATH_ZONE_SLOW]` for
-similar dimensions and zone counts. Check movement across bridges and terrain
-transitions. The worker fine-search spike can remain because this IPA keeps
-occupancy memoization OFF. Enable that independently only in a later trial.
+For the cache-enabled trial, use the same save/orders and exit normally. Confirm
+`[PATH_OCCUPANCY_CACHE] enabled` and inspect the same expensive route, ordinary
+movement, bridges, terrain transitions and blocked destinations. Compare complete
+pair/task wall time and fine/finalization time, not just evaluation counts.
+Add `cache_hits` to live `query_calls` to account for total query requests; the
+prior 142,281-request task can remain equally large while live evaluations fall.
+Query-stage/sample rows count cache misses only. Main validation remains live,
+so monitor rejection/overflow counts as well. The cache does not eliminate
+line-walk state updates, lookup/list work, serial searches or all possible spikes.

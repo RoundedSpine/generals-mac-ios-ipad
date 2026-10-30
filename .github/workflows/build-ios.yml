@@ -125,6 +125,7 @@ jobs:
         id: configure
         run: |
           set -euo pipefail
+          # GeneralsX @performance Codex 30/10/2026 Trial frozen-request occupancy reuse on the testing branch after the zone-only device baseline.
           cmake --preset ios-vulkan \
             -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && 'quad-lists-v1' || '' }} \
             -DGENERALS_SEARCH_CONTEXT=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
@@ -134,7 +135,7 @@ jobs:
             -DGENERALS_PARALLEL_PATH_BATCH=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_COMPLETE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_FAST_ZONE_MERGES=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_FROZEN_OCCUPANCY_CACHE=OFF \
+            -DGENERALS_FROZEN_OCCUPANCY_CACHE=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_PATH_TIMING=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_EXCLUSIVE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_QUAD_LISTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \

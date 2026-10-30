@@ -99,8 +99,9 @@ the default null profiler remains unmeasured. See
 `GENERALS_FAST_ZONE_MERGES` is an optional Zero Hour compile-time optimization,
 enabled on the iOS testing branch. `[PATH_ZONE_MERGES]` confirms it at the first
 profiled batch. `GENERALS_FROZEN_OCCUPANCY_CACHE` is a separate compile-time
-prototype requiring complete-worker mode; it remains OFF in this IPA workflow.
-If enabled separately, `cache_hits` counts reused occupancy results, while query
+prototype requiring complete-worker mode, now enabled only on the iOS testing
+branch after the zone-only device baseline. `[PATH_OCCUPANCY_CACHE]` confirms it.
+`cache_hits` counts reused occupancy results, while query
 calls/stages/samples count live evaluations only. Main validation stays live.
 See [zone merging, cache scope and benchmark limits](../WORKDIR/audit/IOS_PATH_ZONE_MERGES_2026-10-30.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
