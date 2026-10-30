@@ -104,6 +104,14 @@ production nonadjacent selection, retained/negative windows, serial path/order/
 budget equivalence, lifecycle capture, post-load invalidation, deletion and joined
 failure cleanup. It also checks profiler/cache/reuse-OFF configurations. See
 [lookahead scope and diagnostic meanings](../docs/WORKDIR/audit/IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md).
+Run `python3 scripts/qa/test_joined_search_pool.py` for bounded dynamic claims,
+joined failures, FP/cancellation and partial thread-construction checks. Run
+`python3 scripts/qa/test_participant_path_pool.py` for production complete APIs
+with participant-owned arenas, independent result publication, physical timing
+and queue/path/budget equivalence. Both accept `--tsan` or `--asan`. The host suite
+also exercises four jobs/three participants; the device trial retains one worker
+and two selected jobs. See
+[pool ownership and execution contracts](../docs/WORKDIR/audit/IOS_PARTICIPANT_PATH_POOL_2026-10-31.md).
 Run `python3 scripts/qa/test_zone_merges.py` for minimum-label merges, exhaustive
 flattening comparisons and full controlled rebuild-table equivalence. Run
 `python3 scripts/qa/test_frozen_occupancy_cache.py` for optional request-cache

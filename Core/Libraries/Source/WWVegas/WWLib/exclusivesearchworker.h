@@ -55,6 +55,15 @@ public:
   m_thread.join();
  }
  static bool onWorker(){return workerFlag();}
+ // GeneralsX @refactor Codex 31/10/2026 Joined pools share the worker-role guard used by optional occupancy sampling.
+ class WorkerScope {
+  bool previous;
+ public:
+  explicit WorkerScope(bool worker):previous(workerFlag()){workerFlag()=worker;}
+  ~WorkerScope(){workerFlag()=previous;}
+  WorkerScope(const WorkerScope&)=delete;
+  WorkerScope&operator=(const WorkerScope&)=delete;
+ };
  // GeneralsX @feature Codex 27/10/2026 Join both independent tasks before returning, including either task's failure.
  void runPair(std::function<void()> job, std::function<void()> caller){
   if(std::this_thread::get_id()!=m_owner) throw std::logic_error("Exclusive search dispatch requires its owner thread");

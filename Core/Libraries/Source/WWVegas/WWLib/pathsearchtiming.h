@@ -81,6 +81,10 @@ public:
   std::array<std::uint64_t,CellFieldCount> fields{};
  };
  struct TaskSample {
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+  // GeneralsX @feature Codex 31/10/2026 Record executing participants separately from logical result slots.
+  unsigned participant=0;
+#endif
   Kind kind=Kind::Ordinary;
   bool primary=false, fallback=false;
   std::uint64_t nanoseconds=0;
@@ -435,6 +439,9 @@ public:
    }
    std::fprintf(output,"\n");
    for(unsigned j=0;j<2;++j){const auto&t=s.tasks[j];const char*role=j?"worker":"caller";
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    if(t.primary||t.fallback)std::fprintf(output,"[PATH_POOL_TASK] pair=%llu slot=%u participant=%u\n",u(s.id),j,t.participant);
+#endif
     if(t.primary)reportReads(output,s.id,role,"primary",t.primaryReads);
     if(t.fallback)reportReads(output,s.id,role,"fallback",t.fallbackReads);
    }

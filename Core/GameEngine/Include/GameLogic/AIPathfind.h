@@ -78,6 +78,10 @@ void observeParallelCorridor(std::size_t block, Bool passable);
 #if defined(GENERALS_REUSE_PATH_CONTEXTS) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
 #define GENERALS_ZH_REUSE_PATH_CONTEXTS 1
 #endif
+// GeneralsX @feature Codex 31/10/2026 Participant-owned arenas require complete results and the independent publication snapshot.
+#if defined(GENERALS_PATH_WORKER_POOL) && defined(GENERALS_ZH_REUSE_PATH_CONTEXTS)
+#define GENERALS_ZH_PATH_WORKER_POOL 1
+#endif
 // GeneralsX @performance Codex 30/10/2026 Memoization is restricted to the already joined, frozen complete request lifetime.
 #if defined(GENERALS_FROZEN_OCCUPANCY_CACHE) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
 #define GENERALS_ZH_FROZEN_OCCUPANCY_CACHE 1
@@ -1238,7 +1242,11 @@ protected:
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
  Bool takeCompletePath(const Object* obj,const LocomotorSet& locomotorSet,const Coord3D& from,const Coord3D& to,
   const Coord3D* repulsor2,Real repulsorRadius,const PathfindClosestSettings* closest,Path*& path,Coord3D* adjustedTo=nullptr);
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+ void executeCompletePath(PathfindParallelJob& job,PathfindSearchContext& context);
+#else
  void executeCompletePath(PathfindParallelJob& job);
+#endif
  PathfindLayerEnum searchDestinationLayer(const Coord3D* pos);
  Real searchLayerHeight(Real x,Real y,PathfindLayerEnum layer);
  void observeParallelObject(ObjectID id);

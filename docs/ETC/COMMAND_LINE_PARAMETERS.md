@@ -118,6 +118,14 @@ rows summarize inspected/eligible/selected entries, dispatched pairs and partner
 offsets. Scans stop at two eligible entries, so these are not full eight-entry
 availability counts. See
 [lookahead lifetime, counters and tests](../WORKDIR/audit/IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md).
+`GENERALS_PATH_WORKER_POOL` defaults OFF and requires complete-worker mode plus
+context-reuse snapshots. The iOS testing branch enables participant-owned arenas
+and joined dynamic claims, retaining one background worker and two selected jobs.
+`[PATH_WORKER_POOL]` confirms enablement and summarizes logical-item execution by
+participant. In pool mode, retained sample `caller`/`worker` prefixes identify
+logical slots; `[PATH_POOL_TASK]` maps each slot to its actual participant. Kernel
+aggregate metrics use the actual executing participant. See
+[pool contracts, cancellation and measurement limits](../WORKDIR/audit/IOS_PARTICIPANT_PATH_POOL_2026-10-31.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
 and whether current usage increased, decreased or stayed equal at a rejected
 allocation-decision window check. `[PATH_ADMISSION_REUSE]` counts changed permanent

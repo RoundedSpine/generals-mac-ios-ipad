@@ -42,6 +42,9 @@
 
 #ifdef GENERALS_ZH_EXCLUSIVE_PATH_WORKER
 #include "exclusivesearchworker.h"
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+#include "joinedsearchpool.h"
+#endif
 #include "Common/NameKeyGenerator.h"
 #endif
 #include "Common/PerfTimer.h"
@@ -4458,11 +4461,16 @@ void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* ce
 
 struct PathfindParallelJob {
 #ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
  // GeneralsX @performance Codex 30/10/2026 Primary slots own the two arenas; their sequential fallbacks borrow the same participant arena.
  std::unique_ptr<PathfindSearchContext> ownedContext;
  PathfindSearchContext& context;
  explicit PathfindParallelJob(PathfindSearchContext* shared=nullptr):
   ownedContext(shared?nullptr:new PathfindSearchContext),context(shared?*shared:*ownedContext){}
+#else
+ // GeneralsX @refactor Codex 31/10/2026 Results own no arena or borrowed arena reference; execution receives participant scratch explicitly.
+ unsigned executionParticipant=0;
+#endif
  struct CompleteState {
   Bool began=false,corridorWritten=false,tunneling=false;
   ObjectID ignored=INVALID_ID;
@@ -4470,15 +4478,19 @@ struct PathfindParallelJob {
  }completeState;
  // Input corridor before execution, owned output afterward; never a view of reusable arena storage.
  std::vector<unsigned char> completeCorridor;
- void resetArena(){
+ // GeneralsX @refactor Codex 31/10/2026 Reset scratch independently of logical result ownership.
+ static void resetArena(PathfindSearchContext& context,bool prepareIndex=true){
   context.m_requestAdmission=nullptr;context.m_completeJob=nullptr;context.m_completeExecuting=false;
   context.m_completeBegan=context.m_completeCorridorWritten=false;context.m_occupancyQueryReads=false;
 #ifdef GENERALS_ZH_PATH_TIMING
   context.m_privateTiming=nullptr;
 #endif
-  context.m_parallelReads=nullptr;context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
+  context.m_parallelReads=nullptr;context.m_openList.reset();context.m_closedList.reset();context.beginSearch(prepareIndex);
   context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;context.m_ignoreObstacleID=INVALID_ID;
  }
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
+ void resetArena(){resetArena(context);}
+#endif
 #else
  PathfindSearchContext context;
 #endif
@@ -4554,7 +4566,11 @@ struct PathfindParallelJob {
 #ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
   completeState={};completeCorridor.clear();
   // A borrowed fallback must not reset its primary's arena or invalidate another completed result.
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
   if(ownedContext)resetArena();
+#else
+  executionParticipant=0;
+#endif
 #else
   context.m_parallelReads=nullptr;
   context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
@@ -4565,6 +4581,15 @@ struct PathfindParallelJob {
  }
 };
 struct PathfindParallelBatch {
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+ // GeneralsX @feature Codex 31/10/2026 Pool lifetime and arenas belong to Pathfinder; one arena is reused by each fixed participant.
+ static constexpr unsigned participantCount=2;
+ std::array<std::unique_ptr<PathfindSearchContext>,participantCount> arenas;
+ JoinedSearchPool pool{participantCount-1};
+ unsigned long long poolBatches=0,poolSkipped=0;
+ std::array<unsigned long long,participantCount> poolJobs{};
+ PathfindParallelBatch(){for(auto&arena:arenas)arena.reset(new PathfindSearchContext);}
+#endif
  PathfindParallelJob jobs[2];
  PathfindParallelJob* preparing = nullptr;
  unsigned long long batches=0, accepted=0, rejected=0, unused=0, safeSearches=0, safeAccepted=0;
@@ -4573,6 +4598,12 @@ struct PathfindParallelBatch {
  unsigned long long primarySearches=0, fallbackOnly=0, earlyFallbackSearches=0, earlyFallbackAccepted=0;
  Bool active=false;
  ~PathfindParallelBatch() {
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+  pool.stop();
+  fprintf(stderr,"[PATH_WORKER_POOL] stopped batches=%llu skipped=%llu",poolBatches,poolSkipped);
+  for(unsigned i=0;i<participantCount;++i)fprintf(stderr," participant%u_jobs=%llu",i,poolJobs[i]);
+  fprintf(stderr,"\n");
+#endif
   fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2 primary=%llu fallback_only=%llu\n",
    batches,accepted,rejected,unused,primarySearches,fallbackOnly);
   fprintf(stderr,"[PATH_PARALLEL_SAFE] stopped searches=%llu accepted=%llu\n",safeSearches,safeAccepted);
@@ -4666,6 +4697,10 @@ void Pathfinder::clearParallelBatch() {
   job.reset();
  }
  m_parallelBatch->preparing=nullptr;m_parallelBatch->active=false;
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+ // GeneralsX @refactor Codex 31/10/2026 Reset each participant once after join, independently of discarded result records.
+ for(auto&arena:m_parallelBatch->arenas)PathfindParallelJob::resetArena(*arena,false);
+#endif
 }
 #endif
 
@@ -5903,7 +5938,9 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
    // GeneralsX @performance Codex 29/10/2026 Reuse only if every recorded allocation success/denial remains identical under the actual caller's frozen allowance.
    const auto admissionMatches=[&]{
     admissionNow=current.admissionUse();
-#ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    const bool same=job.requestAdmission.matches(job.permanent,admissionNow);
+#elif defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
     const bool same=(complete?job.requestAdmission:job.context.m_admissionWindow).matches(job.permanent,admissionNow);
 #else
     const bool same=job.context.m_admissionWindow.matches(job.permanent,admissionNow);
@@ -6025,12 +6062,18 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
 // GeneralsX @feature Codex 29/10/2026 Execute the original API through hierarchy, fine search, optimization and cleanup under one private owner.
-void Pathfinder::executeCompletePath(PathfindParallelJob& job){
+void Pathfinder::executeCompletePath(PathfindParallelJob& job
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+ ,PathfindSearchContext& context
+#endif
+){
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
  auto&context=job.context;
+#endif
  SearchContextBinding<PathfindSearchContext> binding(context);
 #ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
  // GeneralsX @performance Codex 30/10/2026 Reinitialize scratch for this request; prior completed outputs live in their own jobs.
- job.resetArena();
+ PathfindParallelJob::resetArena(context);
  context.m_corridor=job.completeCorridor;context.m_isTunneling=job.tunneling;context.m_ignoreObstacleID=job.ignored;
  context.m_parallelReads=&job.reads;
 #endif
@@ -7965,11 +8008,13 @@ void Pathfinder::prepareParallelBatch()
   Path::prepareMemoryPoolForSearch();PathNode::prepareMemoryPoolForSearch();
 #endif
   if (!m_parallelBatch) m_parallelBatch=new PathfindParallelBatch;
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
   if (!m_exclusiveWorker) {
    m_exclusiveWorker=new PathfindExclusiveWorker;
    m_exclusiveWorker->mode="parallel";
    fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_safe_closest_fallback worker=1 caller=1\n");
   }
+#endif
   auto& batch=*m_parallelBatch;
   for (Int i=0;i<2;++i) {
    auto& job=batch.jobs[i];job.reset();job.obj=objects[i];job.id=ids[i];
@@ -8036,7 +8081,7 @@ void Pathfinder::prepareParallelBatch()
     // Reference: dement123, ZeroHourReimagined_1.0.0_source, combined ordinary/closest request execution.
     if (!job.safe && !job.closest && objects[i]->getAIUpdateInterface()->getPath()==nullptr) {
      if (!job.fallback) job.fallback.reset(new PathfindParallelJob
-#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+#if defined(GENERALS_ZH_REUSE_PATH_CONTEXTS) && !defined(GENERALS_ZH_PATH_WORKER_POOL)
       (&job.context)
 #endif
      );
@@ -8084,11 +8129,19 @@ void Pathfinder::prepareParallelBatch()
     clearParallelBatch();return;
    }
 #endif
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+   auto execute=[&](Int index,unsigned participant) {
+#else
    auto execute=[&](Int index) {
+#endif
     auto& job=batch.jobs[index];
     if (job.captured) {
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+     job.executionParticipant=participant;executeCompletePath(job,*batch.arenas[participant]);
+#else
      executeCompletePath(job);
+#endif
 #else
 #ifdef GENERALS_ZH_PATH_TIMING
      PathSearchTiming::Scope kernelTiming(&job.kernelTime);
@@ -8120,7 +8173,11 @@ void Pathfinder::prepareParallelBatch()
      fallback.ignored=job.context.m_ignoreObstacleID;fallback.context.m_ignoreObstacleID=fallback.ignored;
 #endif
      fallback.earlyFallback=job.outcome.lastCell==nullptr;
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+     fallback.executionParticipant=participant;executeCompletePath(fallback,*batch.arenas[participant]);
+#else
      executeCompletePath(fallback);
+#endif
 #else
 #ifdef GENERALS_ZH_PATH_TIMING
      PathSearchTiming::Scope kernelTiming(&fallback.kernelTime);
@@ -8142,17 +8199,35 @@ void Pathfinder::prepareParallelBatch()
 #ifdef GENERALS_ZH_PATH_TIMING
     PathSearchTiming::Scope pairTiming(&m_pathTiming[PathSearchTiming::Pair]);
 #endif
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    const auto capturedLifecycle=batch.jobs[0].lifecycle;
+    batch.pool.run(2,[&](unsigned index,unsigned participant){execute(index,participant);},[&]{
+     return !PathOccupancy::validationPaused().load()&&capturedLifecycle==PathOccupancy::validationLifecycleEpoch().load();
+    });
+    ++batch.poolBatches;
+    for(unsigned i=0;i<batch.participantCount;++i)batch.poolJobs[i]+=batch.pool.completedBy(i);
+    for(unsigned i=0;i<2;++i)if(!batch.pool.completed(i))++batch.poolSkipped;
+#else
     m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
     pairSample.nanoseconds=pairTiming.stop();
 #endif
    }
 #ifdef GENERALS_ZH_PATH_TIMING
    for(Int i=0;i<2;++i) {
-    auto& metric=m_pathTiming[i?PathSearchTiming::WorkerKernel:PathSearchTiming::CallerKernel];
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    const bool worker=batch.jobs[i].executionParticipant!=0;
+#else
+    const bool worker=i!=0;
+#endif
+    auto& metric=m_pathTiming[worker?PathSearchTiming::WorkerKernel:PathSearchTiming::CallerKernel];
     metric.merge(batch.jobs[i].kernelTime);
     if(batch.jobs[i].fallback) metric.merge(batch.jobs[i].fallback->kernelTime);
     const auto&job=batch.jobs[i];auto&task=pairSample.tasks[i];
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    task.participant=job.executionParticipant;
+#endif
     task.kind=job.safe?PathSearchTiming::Kind::Safe:job.closest?PathSearchTiming::Kind::Closest:PathSearchTiming::Kind::Ordinary;
     task.primary=job.kernelTime.calls!=0;task.fallback=job.fallback&&job.fallback->kernelTime.calls!=0;
     task.nanoseconds=job.kernelTime.totalNanoseconds+(task.fallback?job.fallback->kernelTime.totalNanoseconds:0);
@@ -8198,9 +8273,13 @@ void Pathfinder::prepareParallelBatch()
    admission.reason=PathSearchTiming::Admission::Dispatched;
 #endif
    for (auto& job:batch.jobs) {
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    job.ready=job.captured&&job.complete;
+#else
     job.ready=job.captured;
+#endif
     if(job.ready) {++batch.primarySearches;if(job.safe) ++batch.safeSearches;if(job.closest) ++batch.closestSearches;}
-    else ++batch.fallbackOnly;
+    else if(!job.captured)++batch.fallbackOnly;
     if(job.fallback && job.fallback->ready) {
      ++batch.fallbackSearches;if(job.fallback->earlyFallback) ++batch.earlyFallbackSearches;
     }
@@ -8208,7 +8287,9 @@ void Pathfinder::prepareParallelBatch()
 #if defined(GENERALS_ZH_PATH_LOOKAHEAD) && defined(GENERALS_ZH_PATH_TIMING)
    ++m_lookaheadProfile.dispatched;
 #endif
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
    ++m_exclusiveWorker->searches;
+#endif
    if (!batch.batches++) {
     fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
 #ifdef GENERALS_ZH_PATH_LOOKAHEAD
@@ -8217,6 +8298,9 @@ void Pathfinder::prepareParallelBatch()
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
     fprintf(stderr,"[PATH_COMPLETE_WORKER] enabled hierarchy=true path_construction=true optimization=true reuse=before_preparation\n");
 #ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+#ifdef GENERALS_ZH_PATH_WORKER_POOL
+    fprintf(stderr,"[PATH_WORKER_POOL] enabled workers=1 caller=1 selected=2 assignment=dynamic arenas=participant jobs=logical_slots\n");
+#endif
     fprintf(stderr,"[PATH_CONTEXT_REUSE] enabled arenas=2 results=independent fallback=same_participant job_bytes=%zu context_bytes=%zu\n",
      sizeof(PathfindParallelJob),sizeof(PathfindSearchContext));
 #endif
@@ -8245,10 +8329,12 @@ void Pathfinder::prepareParallelBatch()
    }
   }
 #endif
+#ifndef GENERALS_ZH_PATH_WORKER_POOL
   for (auto& job:batch.jobs) {
    job.context.m_parallelReads=nullptr;
    if(job.fallback) job.fallback->context.m_parallelReads=nullptr;
   }
+#endif
  } catch (const PathfindSearchContext::SpeculativeRecovery&) {
   // GeneralsX @bugfix Codex 28/10/2026 Discard private preparation; the original caller remains responsible for recovery.
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -8597,7 +8683,7 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
   std::unique_ptr<Path,PathfindParallelJob::DisposePath> completedOwner;
 #endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
-  if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=job->context.m_records.size();}
+  if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=activePathfindSearchContext().m_records.size();}
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
   // GeneralsX @feature Codex 28/10/2026 Include main-thread Path construction, optimization and original cleanup on success or failure.
@@ -8729,7 +8815,8 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	}
 	return nullptr;
  };
-#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @refactor Codex 31/10/2026 Pool results are complete; retain arena-based finalization only for the legacy executor.
+#if defined(GENERALS_ZH_PARALLEL_PATH_BATCH) && !defined(GENERALS_ZH_PATH_WORKER_POOL)
  if (contextBinding.canTransfer()) {
   if (auto* job=takeParallelResult(obj,locomotorSet,*from,*rawTo,nullptr,0,parentCell,goalCell,startCellNdx,settings)) {
    auto& current=activePathfindSearchContext();
@@ -11153,7 +11240,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
   std::unique_ptr<Path,PathfindParallelJob::DisposePath> completedOwner;
 #endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
-  if(auto*job=activePathfindSearchContext().m_completeJob){job->closestOutcome=outcome;job->completeRecords=job->context.m_records.size();}
+  if(auto*job=activePathfindSearchContext().m_completeJob){job->closestOutcome=outcome;job->completeRecords=activePathfindSearchContext().m_records.size();}
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
   PathSearchTiming::StageScope finalizationTiming(&searchTiming(),PathSearchTiming::Finalization);
@@ -11293,7 +11380,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	}
 	return nullptr;
  };
-#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @refactor Codex 31/10/2026 Pool results are complete; retain arena-based finalization only for the legacy executor.
+#if defined(GENERALS_ZH_PARALLEL_PATH_BATCH) && !defined(GENERALS_ZH_PATH_WORKER_POOL)
  if (contextBinding.canTransfer()) {
   if (auto* job=takeParallelResult(obj,locomotorSet,*from,*rawTo,nullptr,0,parentCell,goalCell,startCellNdx,settings,&closest)) {
    auto& current=activePathfindSearchContext();
@@ -13542,7 +13630,7 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
   std::unique_ptr<Path,PathfindParallelJob::DisposePath> completedOwner;
 #endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
-  if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=job->context.m_records.size();}
+  if(auto*job=activePathfindSearchContext().m_completeJob){job->outcome=outcome;job->completeRecords=activePathfindSearchContext().m_records.size();}
 #endif
 #ifdef GENERALS_ZH_PATH_TIMING
   PathSearchTiming::StageScope finalizationTiming(&searchTiming(),PathSearchTiming::Finalization);
@@ -13630,7 +13718,8 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 	return nullptr;
  };
 
-#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+// GeneralsX @refactor Codex 31/10/2026 Pool results are complete; retain arena-based finalization only for the legacy executor.
+#if defined(GENERALS_ZH_PARALLEL_PATH_BATCH) && !defined(GENERALS_ZH_PATH_WORKER_POOL)
  if (contextBinding.canTransfer()) {
   if (auto* job=takeParallelResult(obj,locomotorSet,startPosition,*repulsorPos1,repulsorPos2,repulsorRadius,
       parentCell,nullptr,startCellNdx,settings)) {

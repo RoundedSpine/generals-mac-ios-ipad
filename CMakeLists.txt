@@ -124,6 +124,15 @@ if(GENERALS_REUSE_PATH_CONTEXTS)
     add_compile_definitions(GENERALS_REUSE_PATH_CONTEXTS=1)
 endif()
 
+# GeneralsX @feature Codex 31/10/2026 Use participant arenas and bounded joined dynamic claims while retaining the two-request trial.
+option(GENERALS_PATH_WORKER_POOL "Use a bounded joined search pool with participant-owned arenas" OFF)
+if(GENERALS_PATH_WORKER_POOL)
+    if(NOT GENERALS_COMPLETE_PATH_WORKER OR NOT GENERALS_REUSE_PATH_CONTEXTS)
+        message(FATAL_ERROR "GENERALS_PATH_WORKER_POOL requires complete-worker mode and context reuse")
+    endif()
+    add_compile_definitions(GENERALS_PATH_WORKER_POOL=1)
+endif()
+
 # GeneralsX @performance Codex 30/10/2026 Benchmark request-local occupancy reuse independently from zone merging.
 option(GENERALS_FROZEN_OCCUPANCY_CACHE "Reuse occupancy results only within a frozen complete search request" OFF)
 if(GENERALS_FROZEN_OCCUPANCY_CACHE)

@@ -43,16 +43,16 @@ The reference is not simply our implementation with additional workers enabled.
 | Search kinds | Ordinary, safe, queued closest and conditional closest fallback; stricter prediction gates | Same API categories, broader ordinary prediction |
 | Preparation | Main captures inputs; participant runs hierarchy; accepted completed Path returns before preparation repeats | Whole search API runs in the participant's context; accepted completed Path returns before hierarchy is repeated |
 | Off-thread scope | Complete ordinary/safe/closest APIs, including hierarchy, Path construction/optimization and private cleanup; attempted live recovery aborts to caller | Complete findPath/findClosestPath/findSafePath calls, including hierarchy and Path construction/optimization |
-| Dispatch | Eligible head plus earliest eligible partner within eight queue entries; one worker plus main, retained windows across serial holes | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
+| Dispatch | Eligible head plus earliest eligible partner within eight entries; dynamically claim two logical jobs with one worker plus main | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
 | Worker count | One gameplay search worker | Automatic clamp(cores - 3, 0, 8), explicit override capped at 32 |
-| Result storage | Two retained participant arenas; each fallback reuses its primary's arena; Paths, validation logs and publication snapshots remain result-owned | Thread-local search context reused between jobs/phases; each result owns a completed engine Path |
+| Result storage | Two pool-owned participant arenas reused across jobs/phases; results contain no arena reference; Paths/logs/publication stay independent | Thread-local search context reused between jobs/phases; each result owns a completed engine Path |
 | Node lookup | Bounded cell-ID to record-slot table, complete compact node; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
 | Lookup/node memory | Index capped at 1 MiB/context plus bounded complete-node pool; local fixed context shrinks about 1.37 MiB; preceding device main index about 176 KiB | Node/read-mark arrays scale with registered map cells per participating context |
 | Capacity | 30,000 records/context; allocation windows preserve every reached permanent/transient admission success and denial | Nonlegacy search nodes independent of permanent metadata; default node allowance is all registered cells, with testing override |
 | Dependency checks | Explicit request/movement, all-generation admission, epochs/lifecycle, exact cells, occupancy, ground/layer height, destination layers, ignored-object snapshots and bounded logs; complete corridor is private output | Request/ignore/tunnel matching plus intersection between read-cell set and subsequent cell-write log |
 | Read tracking | Bounded exact direct/allocation cell snapshots and complete query results; frozen complete-job cache reuses occupancy evaluations; main validation reevaluates live | Per-cell read marks deduplicate cell observations into a sorted cell-index set |
 | Queue budget | Check the existing 5,000-cell budget after each actual request | In nonlegacy mode, check between groups of eight, even with runtime prefetch disabled |
-| Wait behavior | Main runs one task then waits on a condition variable; joined exception/lifecycle handling and FP environment capture | Main shares dynamic chunks then yields until all finish; workers spin for 500 microseconds before sleeping, with x86 pause intrinsic |
+| Wait behavior | Main claims jobs dynamically then waits on a condition variable; joined errors/cancellation and per-job FP propagation; idle workers sleep | Main shares dynamic chunks then yields until all finish; workers spin for 500 microseconds before sleeping, with x86 pause intrinsic |
 | Zone rebuilding | Synchronous on main; minimum-root merging and canonical flattening optimization | Synchronous on main; original whole-table merging/flattening |
 | Enablement | Experimental iOS workflow enables the options; defaults OFF elsewhere | Runtime PathfindPrefetch defaults FALSE and configuration can enable it |
 
@@ -370,3 +370,18 @@ This adopts eligible-entry scanning without adopting the reference's dynamic
 pool, up-to-eight selected requests or eight-request budget grouping. The two-job
 cap censors the new eligibility counts; they cannot establish how many additional
 workers would be useful. Native/device verification and matched timing remain.
+
+## Subsequent participant-owned joined pool
+
+The [pool foundation](IOS_PARTICIPANT_PATH_POOL_2026-10-31.md) detaches scratch
+from logical result records and adds bounded dynamic job claims. Main and the
+one retained worker reuse their own arenas across complete jobs and fallbacks.
+Logical result identity is independent of physical execution, with explicit
+timing mappings. Joined failure handling, per-job FP propagation and lifecycle
+cancellation adapt the reference dispatcher for our contracts and ARM64 build.
+
+This closes the fixed-assignment/arena-ownership gap. The device trial still
+selects two jobs with one background worker; it does not yet adopt the reference's
+wider job window or larger pool. Host tests additionally execute four complete
+searches on three participant arenas. Native/device validation of the new pool
+and performance benefits remain pending; the latest device log predates it.
