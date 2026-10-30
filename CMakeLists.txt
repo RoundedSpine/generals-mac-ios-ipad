@@ -106,6 +106,15 @@ if(GENERALS_COMPLETE_PATH_WORKER)
     add_compile_definitions(GENERALS_COMPLETE_PATH_WORKER=1)
 endif()
 
+# GeneralsX @performance Codex 30/10/2026 Reuse one arena per joined participant while results own their publication state.
+option(GENERALS_REUSE_PATH_CONTEXTS "Reuse complete-search participant contexts across primary and fallback requests" OFF)
+if(GENERALS_REUSE_PATH_CONTEXTS)
+    if(NOT GENERALS_COMPLETE_PATH_WORKER)
+        message(FATAL_ERROR "GENERALS_REUSE_PATH_CONTEXTS requires GENERALS_COMPLETE_PATH_WORKER")
+    endif()
+    add_compile_definitions(GENERALS_REUSE_PATH_CONTEXTS=1)
+endif()
+
 # GeneralsX @performance Codex 30/10/2026 Benchmark request-local occupancy reuse independently from zone merging.
 option(GENERALS_FROZEN_OCCUPANCY_CACHE "Reuse occupancy results only within a frozen complete search request" OFF)
 if(GENERALS_FROZEN_OCCUPANCY_CACHE)

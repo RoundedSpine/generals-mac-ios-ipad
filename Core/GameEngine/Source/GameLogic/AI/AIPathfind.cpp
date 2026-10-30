@@ -4457,7 +4457,31 @@ void observeParallelAllocationCell(PathfindParallelReads* reads,PathfindCell* ce
 }
 
 struct PathfindParallelJob {
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+ // GeneralsX @performance Codex 30/10/2026 Primary slots own the two arenas; their sequential fallbacks borrow the same participant arena.
+ std::unique_ptr<PathfindSearchContext> ownedContext;
+ PathfindSearchContext& context;
+ explicit PathfindParallelJob(PathfindSearchContext* shared=nullptr):
+  ownedContext(shared?nullptr:new PathfindSearchContext),context(shared?*shared:*ownedContext){}
+ struct CompleteState {
+  Bool began=false,corridorWritten=false,tunneling=false;
+  ObjectID ignored=INVALID_ID;
+  Int charged=0;
+ }completeState;
+ // Input corridor before execution, owned output afterward; never a view of reusable arena storage.
+ std::vector<unsigned char> completeCorridor;
+ void resetArena(){
+  context.m_requestAdmission=nullptr;context.m_completeJob=nullptr;context.m_completeExecuting=false;
+  context.m_completeBegan=context.m_completeCorridorWritten=false;context.m_occupancyQueryReads=false;
+#ifdef GENERALS_ZH_PATH_TIMING
+  context.m_privateTiming=nullptr;
+#endif
+  context.m_parallelReads=nullptr;context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
+  context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;context.m_ignoreObstacleID=INVALID_ID;
+ }
+#else
  PathfindSearchContext context;
+#endif
  PathfindParallelReads reads;
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
  // GeneralsX @feature Codex 29/10/2026 A joined result owns its completed engine Path until accepted or discarded exactly once.
@@ -4510,12 +4534,16 @@ struct PathfindParallelJob {
   if (fallback) fallback->reset();
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
   completedPath.reset();requestAdmission.reset();complete=false;completeRecords=0;
+#ifndef GENERALS_ZH_REUSE_PATH_CONTEXTS
   context.m_requestAdmission=nullptr;context.m_completeJob=nullptr;context.m_completeExecuting=false;
   context.m_completeBegan=context.m_completeCorridorWritten=false;
 #endif
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+#ifndef GENERALS_ZH_REUSE_PATH_CONTEXTS
   context.m_privateTiming=nullptr;
+#endif
   for(unsigned i=0;i<PathSearchTiming::PhaseCount;++i)stageTiming[static_cast<PathSearchTiming::Phase>(i)]={};
 #endif
   kernelTime={};
@@ -4523,9 +4551,15 @@ struct PathfindParallelJob {
 #endif
   fallbackResult=fallbackAllowed=earlyFallback=false;
   outcome={nullptr,0,false};
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+  completeState={};completeCorridor.clear();
+  // A borrowed fallback must not reset its primary's arena or invalidate another completed result.
+  if(ownedContext)resetArena();
+#else
   context.m_parallelReads=nullptr;
   context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
   context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;
+#endif
   reads.reset();obj=nullptr;captured=ready=used=false;queueIndex=-1;
   validatedPermanent=0;
  }
@@ -5980,6 +6014,12 @@ PathfindParallelJob* Pathfinder::takeParallelResult(const Object* obj, const Loc
 void Pathfinder::executeCompletePath(PathfindParallelJob& job){
  auto&context=job.context;
  SearchContextBinding<PathfindSearchContext> binding(context);
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+ // GeneralsX @performance Codex 30/10/2026 Reinitialize scratch for this request; prior completed outputs live in their own jobs.
+ job.resetArena();
+ context.m_corridor=job.completeCorridor;context.m_isTunneling=job.tunneling;context.m_ignoreObstacleID=job.ignored;
+ context.m_parallelReads=&job.reads;
+#endif
  PathfindSearchContext::AdmissionScope allowance(context,job.permanent);
  PathfindSearchContext::PreparationScope recoveryGuard(context);
  context.m_completeExecuting=true;context.m_requestAdmission=&job.requestAdmission;context.m_completeJob=&job;
@@ -5991,6 +6031,9 @@ void Pathfinder::executeCompletePath(PathfindParallelJob& job){
  struct Restore {
   PathfindSearchContext& context;
   ~Restore(){context.m_completeExecuting=false;context.m_requestAdmission=nullptr;context.m_completeJob=nullptr;
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+   context.m_parallelReads=nullptr;
+#endif
 #ifdef GENERALS_ZH_PATH_TIMING
    context.m_privateTiming=nullptr;
 #endif
@@ -6001,6 +6044,12 @@ void Pathfinder::executeCompletePath(PathfindParallelJob& job){
  else if(job.closest)job.completedPath.reset(findClosestPath(job.obj,*job.locomotor,&job.from,&job.adjustedTo,
   job.closestSettings.blocked,job.closestSettings.pathCostMultiplier,job.closestSettings.moveAllies));
  else job.completedPath.reset(findPathWithInputs(job.obj,*job.locomotor,&job.from,&job.to));
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+ // Snapshot every application effect before the same arena can execute the fallback or a later request.
+ job.completeState={context.m_completeBegan,context.m_completeCorridorWritten,context.m_isTunneling,
+  context.m_ignoreObstacleID,context.m_cumulativeCellsAllocated};
+ if(context.m_completeCorridorWritten)job.completeCorridor.swap(context.m_corridor);
+#endif
  job.complete=true;job.captured=true;
 }
 
@@ -6016,10 +6065,18 @@ Bool Pathfinder::takeCompletePath(const Object* obj,const LocomotorSet& locomoto
  const auto settings=captureMovementSettings(obj,locomotorSet,radius,center,human);
  auto*job=takeParallelResult(obj,locomotorSet,from,to,repulsor2,repulsorRadius,nullptr,nullptr,{},settings,closest,true);
  if(!job)return false;
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+ // GeneralsX @bugfix Codex 30/10/2026 Publication must never read an arena already reused by another phase.
+ if(job->completeState.began)current.beginSearch();
+ current.m_cumulativeCellsAllocated+=job->completeState.charged;
+ current.m_isTunneling=job->completeState.tunneling;current.m_ignoreObstacleID=job->completeState.ignored;
+ if(job->completeState.corridorWritten)current.m_corridor.swap(job->completeCorridor);
+#else
  if(job->context.m_completeBegan)current.beginSearch();
  current.m_cumulativeCellsAllocated+=job->context.m_cumulativeCellsAllocated;
  current.m_isTunneling=job->context.m_isTunneling;current.m_ignoreObstacleID=job->context.m_ignoreObstacleID;
  if(job->context.m_completeCorridorWritten)current.m_corridor.swap(job->context.m_corridor);
+#endif
  path=job->completedPath.release();
  if(adjustedTo)*adjustedTo=job->adjustedTo;
  job->fallbackAllowed=!path && job->fallback && job->fallback->ready;
@@ -7814,13 +7871,19 @@ void Pathfinder::prepareParallelBatch()
    job.safe=safe[i];job.repulsor2=repulsor2[i];job.repulsorRadius=repulsorRadius[i];
    job.closest=closest[i];job.closestSettings={blocked[i],pathCostMultiplier[i],false,false,false,false,ignored[i]};
    job.epoch=m_parallelWorldEpoch;job.lifecycle=PathOccupancy::validationLifecycleEpoch().load();
+#ifndef GENERALS_ZH_REUSE_PATH_CONTEXTS
    job.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
    job.context.m_ignoreObstacleID=ignored[i];job.context.m_parallelReads=&job.reads;
    if (job.safe) job.context.m_isTunneling=mainPathfindSearchContext().m_isTunneling;
+#endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
    // Input capture stays on main. Neither hierarchy nor engine Path construction runs during this preparation.
-   job.context.m_corridor=mainPathfindSearchContext().m_corridor;
-   job.tunneling=mainPathfindSearchContext().m_isTunneling;job.context.m_isTunneling=job.tunneling;
+   job.tunneling=mainPathfindSearchContext().m_isTunneling;
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+   job.completeCorridor=mainPathfindSearchContext().m_corridor;
+#else
+   job.context.m_corridor=mainPathfindSearchContext().m_corridor;job.context.m_isTunneling=job.tunneling;
+#endif
    job.permanent=PathfindSearchContext::permanentRecordsInUse();
    Bool center;Int radius;getRadiusAndCenter(job.obj,radius,center);
    const Bool human=!(job.obj->getControllingPlayer() && job.obj->getControllingPlayer()->getPlayerType()==PLAYER_COMPUTER);
@@ -7856,17 +7919,27 @@ void Pathfinder::prepareParallelBatch()
     // GeneralsX @feature Codex 27/10/2026 Prepare a read-only fallback on main for ordinary expansion failure or early caller rejection.
     // Reference: dement123, ZeroHourReimagined_1.0.0_source, combined ordinary/closest request execution.
     if (!job.safe && !job.closest && objects[i]->getAIUpdateInterface()->getPath()==nullptr) {
-     if (!job.fallback) job.fallback.reset(new PathfindParallelJob);
+     if (!job.fallback) job.fallback.reset(new PathfindParallelJob
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+      (&job.context)
+#endif
+     );
      auto& fallback=*job.fallback;
      fallback.reset();fallback.fallbackResult=true;fallback.closest=true;fallback.safe=false;
      fallback.earlyFallback=!job.captured;
      fallback.obj=job.obj;fallback.id=job.id;fallback.locomotor=job.locomotor;
      fallback.from=job.from;fallback.to=job.to;fallback.ignored=job.ignored;fallback.queueIndex=job.queueIndex;
      fallback.epoch=job.epoch;fallback.lifecycle=job.lifecycle;
+#ifndef GENERALS_ZH_REUSE_PATH_CONTEXTS
      fallback.context.resizeCorridor(mainPathfindSearchContext().m_corridor.size());
      fallback.context.m_ignoreObstacleID=job.ignored;fallback.context.m_parallelReads=&fallback.reads;
+#endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+     fallback.completeCorridor=mainPathfindSearchContext().m_corridor;
+#else
      fallback.context.m_corridor=mainPathfindSearchContext().m_corridor;
+#endif
      fallback.settings=job.settings;fallback.permanent=job.permanent;fallback.fixed=job.fixed;
      fallback.safePosition=job.safePosition;fallback.captured=true;
      fallback.closestSettings={false,0,false,false,false,false,job.ignored};
@@ -7913,8 +7986,13 @@ void Pathfinder::prepareParallelBatch()
         job.fallback && job.fallback->captured) {
      auto& fallback=*job.fallback;
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+     fallback.tunneling=job.complete?job.completeState.tunneling:job.tunneling;
+     fallback.ignored=job.complete?job.completeState.ignored:job.ignored;
+#else
      fallback.tunneling=job.context.m_isTunneling;fallback.context.m_isTunneling=fallback.tunneling;
      fallback.ignored=job.context.m_ignoreObstacleID;fallback.context.m_ignoreObstacleID=fallback.ignored;
+#endif
      fallback.earlyFallback=job.outcome.lastCell==nullptr;
      executeCompletePath(fallback);
 #else
@@ -8006,6 +8084,10 @@ void Pathfinder::prepareParallelBatch()
     fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
     fprintf(stderr,"[PATH_COMPLETE_WORKER] enabled hierarchy=true path_construction=true optimization=true reuse=before_preparation\n");
+#ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
+    fprintf(stderr,"[PATH_CONTEXT_REUSE] enabled arenas=2 results=independent fallback=same_participant job_bytes=%zu context_bytes=%zu\n",
+     sizeof(PathfindParallelJob),sizeof(PathfindSearchContext));
+#endif
 #endif
 #ifdef GENERALS_ZH_FROZEN_OCCUPANCY_CACHE
     fprintf(stderr,"[PATH_OCCUPANCY_CACHE] enabled scope=frozen_complete_job storage=dependency_log capacity=8192 validation=live\n");

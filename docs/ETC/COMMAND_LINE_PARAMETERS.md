@@ -104,6 +104,12 @@ branch after the zone-only device baseline. `[PATH_OCCUPANCY_CACHE]` confirms it
 `cache_hits` counts reused occupancy results, while query
 calls/stages/samples count live evaluations only. Main validation stays live.
 See [zone merging, cache scope and benchmark limits](../WORKDIR/audit/IOS_PATH_ZONE_MERGES_2026-10-30.md).
+`GENERALS_REUSE_PATH_CONTEXTS` defaults OFF, requires complete-worker mode and is
+enabled only on the iOS testing branch. `[PATH_CONTEXT_REUSE]` confirms two
+retained participant arenas, shared only with their sequential fallbacks; result
+Paths, validation logs and publication state remain independent. Reported native
+layout sizes are not resident memory. See
+[context reuse, ownership and bounds](../WORKDIR/audit/IOS_PATH_CONTEXT_REUSE_2026-10-30.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
 and whether current usage increased, decreased or stayed equal at a rejected
 allocation-decision window check. `[PATH_ADMISSION_REUSE]` counts changed permanent

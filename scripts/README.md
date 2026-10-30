@@ -94,6 +94,11 @@ The same suites verify sparse query timing and stage restoration, unchanged live
 evaluation, winding-route optimizer counts, independent zone retention and actual
 zone-table equality with profiling OFF/ON. See
 [query-cost profiling scope](../docs/WORKDIR/audit/IOS_PATH_OCCUPANCY_COST_2026-10-29.md).
+Run `python3 scripts/qa/test_reused_path_contexts.py` (or add `--tsan`) to replay
+complete-worker/cache checks with two retained participant arenas and independent
+result ownership. It also checks borrowed reset, deliberately overwritten arenas,
+failed-primary/fallback publication and reuse-OFF/ON route/accounting equivalence.
+See [context reuse and memory bounds](../docs/WORKDIR/audit/IOS_PATH_CONTEXT_REUSE_2026-10-30.md).
 Run `python3 scripts/qa/test_zone_merges.py` for minimum-label merges, exhaustive
 flattening comparisons and full controlled rebuild-table equivalence. Run
 `python3 scripts/qa/test_frozen_occupancy_cache.py` for optional request-cache

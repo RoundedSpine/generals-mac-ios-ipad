@@ -69,6 +69,10 @@ void observeParallelCorridor(std::size_t block, Bool passable);
 #if defined(GENERALS_COMPLETE_PATH_WORKER) && defined(GENERALS_ZH_PARALLEL_PATH_BATCH)
 #define GENERALS_ZH_COMPLETE_PATH_WORKER 1
 #endif
+// GeneralsX @performance Codex 30/10/2026 Completed results no longer retain their participant's search arena.
+#if defined(GENERALS_REUSE_PATH_CONTEXTS) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
+#define GENERALS_ZH_REUSE_PATH_CONTEXTS 1
+#endif
 // GeneralsX @performance Codex 30/10/2026 Memoization is restricted to the already joined, frozen complete request lifetime.
 #if defined(GENERALS_FROZEN_OCCUPANCY_CACHE) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
 #define GENERALS_ZH_FROZEN_OCCUPANCY_CACHE 1

@@ -7,8 +7,10 @@ the supplied ZeroHourReimagined_1.0.0_source. This is a pathfinding comparison;
 Reimagined graphics and gameplay content remain outside this integration. This
 supersedes the runtime snapshot in the 28 October comparison, while retaining
 its historical evidence.
-The latest supplied device runtime remains 26be01d4a; compact-node and complete-API
-device testing are pending. Historical stage descriptions below retain their original scope.
+The latest supplied device runtime is b05cf78 with complete APIs, fast zone merges
+and frozen occupancy caching enabled. Participant arena reuse is the subsequent
+stage awaiting native/device validation. Historical stage descriptions below
+retain their original scope.
 
 Our implementation has the reference's core speculative model: predict queued
 requests, run independent searches concurrently with main participation, join,
@@ -28,7 +30,7 @@ separate state arena. The original allocator/admission policy remains. The
 reference indexes a complete compact search node directly by cell ID.
 
 The largest remaining differences are dense map-sized node storage, broader
-dispatch, context reuse, and different capacity/budget policies.
+dispatch and different capacity/budget policies.
 The reference is not simply our implementation with additional workers enabled.
 
 ## Current comparison
@@ -42,15 +44,15 @@ The reference is not simply our implementation with additional workers enabled.
 | Off-thread scope | Complete ordinary/safe/closest APIs, including hierarchy, Path construction/optimization and private cleanup; attempted live recovery aborts to caller | Complete findPath/findClosestPath/findSafePath calls, including hierarchy and Path construction/optimization |
 | Dispatch | Two adjacent eligible requests, one worker plus main | Scan eight upcoming requests, skip unsupported entries, share eligible jobs dynamically across pool and main |
 | Worker count | One gameplay search worker | Automatic clamp(cores - 3, 0, 8), explicit override capped at 32 |
-| Result storage | Results own completed engine Paths; separate primary/fallback context buffers remain retained, up to four | Thread-local search context reused between jobs/phases; each result owns a completed engine Path |
+| Result storage | Two retained participant arenas; each fallback reuses its primary's arena; Paths, validation logs and publication snapshots remain result-owned | Thread-local search context reused between jobs/phases; each result owns a completed engine Path |
 | Node lookup | Bounded cell-ID to record-slot table, complete compact node; keyed allocation/release and uncovered-cell fallback remain | Cell ID directly selects a compact search-only node |
 | Lookup/node memory | Index capped at 1 MiB/context plus bounded complete-node pool; local fixed context shrinks about 1.37 MiB; preceding device main index about 176 KiB | Node/read-mark arrays scale with registered map cells per participating context |
 | Capacity | 30,000 records/context; allocation windows preserve every reached permanent/transient admission success and denial | Nonlegacy search nodes independent of permanent metadata; default node allowance is all registered cells, with testing override |
 | Dependency checks | Explicit request/movement, all-generation admission, epochs/lifecycle, exact cells, occupancy, ground/layer height, destination layers, ignored-object snapshots and bounded logs; complete corridor is private output | Request/ignore/tunnel matching plus intersection between read-cell set and subsequent cell-write log |
-| Read tracking | Bounded exact direct/allocation cell snapshots and complete query results; query-only lookups avoid redundant raw snapshots; query/height duplicates removed while actual reads still execute | Per-cell read marks deduplicate cell observations into a sorted cell-index set |
+| Read tracking | Bounded exact direct/allocation cell snapshots and complete query results; frozen complete-job cache reuses occupancy evaluations; main validation reevaluates live | Per-cell read marks deduplicate cell observations into a sorted cell-index set |
 | Queue budget | Check the existing 5,000-cell budget after each actual request | In nonlegacy mode, check between groups of eight, even with runtime prefetch disabled |
 | Wait behavior | Main runs one task then waits on a condition variable; joined exception/lifecycle handling and FP environment capture | Main shares dynamic chunks then yields until all finish; workers spin for 500 microseconds before sleeping, with x86 pause intrinsic |
-| Zone rebuilding | Synchronous on main before queued searches | Also synchronous before prefetch/queued searches |
+| Zone rebuilding | Synchronous on main; minimum-root merging and canonical flattening optimization | Synchronous on main; original whole-table merging/flattening |
 | Enablement | Experimental iOS workflow enables the options; defaults OFF elsewhere | Runtime PathfindPrefetch defaults FALSE and configuration can enable it |
 
 ## What changed since the previous comparison
@@ -337,3 +339,19 @@ eight-request scheduling remain distinct from the reference. Main still joins
 the pair, so there is no asynchronous simulation overlap. New task timings cover
 complete APIs and cannot be ranked directly against old fine-only kernel times.
 Native/device verification and a matched speed comparison are still required.
+
+## Subsequent participant-arena reuse
+
+The [context-reuse stage](IOS_PATH_CONTEXT_REUSE_2026-10-30.md) removes the retained
+primary/fallback arena duplication. Our two fixed participant slots each own one
+arena and reuse it for the sequential fallback. Each result owns its completed
+Path, validation/cache/admission records, timing and final publication snapshot.
+Reimagined uses thread-local reusable contexts with its dynamic dispatcher; our
+implementation keeps the existing fixed participants and Pathfinder lifetime.
+
+The controlled 64-bit layout eliminates up to two 2,804,560-byte fallback arenas
+and their dynamic indexes. Logs remain separately owned; this is not measured
+iPhone RSS or a speedup. The subsequent cache-enabled b05cf78 device log confirms
+complete APIs and live rejection checks, but predates arena reuse. Native/device
+validation of this stage remains required. Dense node lookup/capacity, wider
+scanning, dynamic pool dispatch and eight-request scheduling remain distinct.
