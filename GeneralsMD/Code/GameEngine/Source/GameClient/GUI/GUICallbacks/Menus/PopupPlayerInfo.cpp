@@ -1113,6 +1113,9 @@ void HandlePersistentStorageResponses()
 		{
 			switch (resp.responseType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case PSResponse::PSRESPONSE_COULDNOTCONNECT:
 				{
 					// message box & hide the window

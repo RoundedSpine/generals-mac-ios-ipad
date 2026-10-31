@@ -625,6 +625,7 @@ private: \
 	}
 
 // ----------------------------------------------------------------------------
+// GeneralsX @build Codex 31/10/2026 Forbidden new paths throw; unreachable null returns violate modern allocator diagnostics.
 #define MEMORY_POOL_GLUE_WITHOUT_GCMP(ARGCLASS) \
 protected: \
 	virtual ~ARGCLASS() override; \
@@ -665,7 +666,6 @@ protected: \
 		DEBUG_CRASH(("This operator new should normally never be called... please use new(char*) instead.")); \
 		DEBUG_ASSERTCRASH(s == sizeof(ARGCLASS), ("The wrong operator new is being called; ensure all objects in the hierarchy have MemoryPoolGlue set up correctly")); \
 		throw ERROR_BUG; \
-		return 0; \
 	} \
 	inline void operator delete(void *p) \
 	{ \
@@ -707,7 +707,6 @@ protected: \
 		DEBUG_CRASH(("this should be impossible to call (abstract base class)")); \
 		DEBUG_ASSERTCRASH(s == sizeof(ARGCLASS), ("The wrong operator new is being called; ensure all objects in the hierarchy have MemoryPoolGlue set up correctly")); \
 		throw ERROR_BUG; \
-		return 0; \
 	} \
 protected: \
 	inline void operator delete(void *p, ARGCLASS##MagicEnum e DECLARE_LITERALSTRING_ARG2) \
@@ -720,7 +719,6 @@ protected: \
 		DEBUG_CRASH(("this should be impossible to call (abstract base class)")); \
 		DEBUG_ASSERTCRASH(s == sizeof(ARGCLASS), ("The wrong operator new is being called; ensure all objects in the hierarchy have MemoryPoolGlue set up correctly")); \
 		throw ERROR_BUG; \
-		return 0; \
 	} \
 	inline void operator delete(void *p) \
 	{ \
@@ -730,7 +728,6 @@ private: \
 	virtual MemoryPool *getObjectMemoryPool() override \
 	{ \
 		throw ERROR_BUG; \
-		return 0; \
 	} \
 public: /* include this line at the end to reset visibility to 'public' */
 
@@ -751,7 +748,8 @@ protected:
 	virtual ~MemoryPoolObject() { }
 
 protected:
-	void *operator new(size_t s) { DEBUG_CRASH(("This should be impossible")); return 0; }
+	// GeneralsX @bugfix Codex 31/10/2026 Forbidden allocation must fail explicitly, never return null from throwing new.
+	void *operator new(size_t s) { DEBUG_CRASH(("This should be impossible")); throw ERROR_BUG; }
 	void operator delete(void *p) { DEBUG_CRASH(("This should be impossible")); }
 
 protected:
@@ -859,10 +857,10 @@ extern void userMemoryAdjustPoolSize(const char *poolName, Int& initialAllocatio
 	#define _OPERATOR_NEW_DEFINED_
 
 	extern void * __cdecl operator new		(size_t size);
-	extern void __cdecl operator delete		(void *p);
+	extern void __cdecl operator delete		(void *p) throw();
 
 	extern void * __cdecl operator new[]	(size_t size);
-	extern void __cdecl operator delete[]	(void *p);
+	extern void __cdecl operator delete[]	(void *p) throw();
 
 	// additional overloads to account for VC/MFC funky versions
 	extern void* __cdecl operator new(size_t nSize, const char *, int);

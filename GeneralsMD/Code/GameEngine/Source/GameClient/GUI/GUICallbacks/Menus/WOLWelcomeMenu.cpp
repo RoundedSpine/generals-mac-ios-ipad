@@ -633,6 +633,9 @@ void WOLWelcomeMenuUpdate( WindowLayout * layout, void *userData)
 		{
 			switch (resp.peerResponseType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case PeerResponse::PEERRESPONSE_GROUPROOM:
 				{
 					GameSpyGroupRoom room;

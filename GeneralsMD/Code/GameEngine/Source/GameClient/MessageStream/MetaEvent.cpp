@@ -459,6 +459,9 @@ void MetaEventTranslator::onMouseEvent(const GameMessage *msg)
 	Int index = 3;
 	switch (msg->getType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
 			--index;
 			FALLTHROUGH;

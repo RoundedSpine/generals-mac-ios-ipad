@@ -50,13 +50,14 @@ public:
 	virtual ~SDL3Keyboard(void);
 
 	// SubsystemInterface
-	virtual void init(void);
-	virtual void reset(void);
-	virtual void update(void);
+	// GeneralsX @build Codex 31/10/2026 Make the existing virtual overrides explicit.
+	virtual void init(void) override;
+	virtual void reset(void) override;
+	virtual void update(void) override;
 
 	// Keyboard interface
 	virtual KeyboardIO *getKeyboard(void);
-	virtual Bool getCapsState(void);  // GeneralsX @build fbraz 12/02/2026 BenderAI - Caps Lock state
+	virtual Bool getCapsState(void) override;  // GeneralsX @build fbraz 12/02/2026 BenderAI - Caps Lock state
 	
 	// SDL3-specific methods - Fighter19 pattern
 	// GeneralsX @refactor felipebraz 16/02/2026 Add direct addSDLEvent() method
@@ -66,7 +67,7 @@ public:
 	void addSDL3KeyEvent(const SDL_KeyboardEvent& event);
 
 protected:
-	virtual void getKey(KeyboardIO *key);  // GeneralsX @build fbraz 12/02/2026 BenderAI - Get keyboard event
+	virtual void getKey(KeyboardIO *key) override;  // GeneralsX @build fbraz 12/02/2026 BenderAI - Get keyboard event
 	virtual KeyVal translateScanCodeToKeyVal(unsigned char scan);
 
 private:

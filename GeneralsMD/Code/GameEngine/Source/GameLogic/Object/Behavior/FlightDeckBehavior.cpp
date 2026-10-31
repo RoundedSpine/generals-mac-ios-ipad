@@ -1501,6 +1501,9 @@ void FlightDeckBehavior::propagateOrderToSpecificPlane( Object *jet )
 			Object *target = TheGameLogic->findObjectByID( m_designatedTarget );
 			switch( m_designatedCommand )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case AICMD_GUARD_POSITION:
 					ai->aiGuardPosition( &m_designatedPosition, GUARDMODE_NORMAL, CMD_FROM_AI );
 					break;

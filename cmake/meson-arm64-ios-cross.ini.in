@@ -19,6 +19,7 @@ endian = 'little'
 
 [built-in options]
 c_args = ['-arch', 'arm64', '-isysroot', '@IOS_SDK@', '-miphoneos-version-min=16.0']
-cpp_args = ['-arch', 'arm64', '-isysroot', '@IOS_SDK@', '-miphoneos-version-min=16.0']
+# GeneralsX @build Codex 31/10/2026 Native DirectX declarations are external SDK headers, including inside the adapter build.
+cpp_args = ['-arch', 'arm64', '-isysroot', '@IOS_SDK@', '-miphoneos-version-min=16.0', '-isystem', '@DXVK_SOURCE_DIR@/include/native/directx', '-isystem', '@DXVK_SOURCE_DIR@/include/native/windows']
 c_link_args = ['-arch', 'arm64', '-isysroot', '@IOS_SDK@', '-miphoneos-version-min=16.0']
 cpp_link_args = ['-arch', 'arm64', '-isysroot', '@IOS_SDK@', '-miphoneos-version-min=16.0']

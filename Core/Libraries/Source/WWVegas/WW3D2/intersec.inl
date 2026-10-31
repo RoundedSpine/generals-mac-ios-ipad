@@ -548,7 +548,7 @@ bool IntersectionClass::Intersect_Screen_Object(	IntersectionResultClass *Final_
 											Vector4 &Area,
 											RenderObjClass *obj)
 {
-	if(Final_Result->Intersects =  ((ScreenX >= Area[0]) && (ScreenX <= Area[2]) && (ScreenY >= Area[1]) && (ScreenY <= Area[3]))) {
+	if((Final_Result->Intersects =  ((ScreenX >= Area[0]) && (ScreenX <= Area[2]) && (ScreenY >= Area[1]) && (ScreenY <= Area[3])))) {
 		Final_Result->IntersectionType = IntersectionResultClass::GENERIC;
 		Final_Result->IntersectedRenderObject = obj;
 		Final_Result->Range = 0;
@@ -576,7 +576,7 @@ void IntersectionClass::_Intersect_Lines_Z(
 	Vector2 ClippedUV[6],
 	int &DestIndex)
 {
-	/*
+	/ *
 		Let A,B,C,D be 2-space position vectors.  Then the directed line segments AB & CD are given by:
 
 				AB=A+r(B-A), r in [0,1]
@@ -727,7 +727,7 @@ void IntersectionClass::_Intersect_Lines_Z(
 	}
 }
 
-/*
+/ *
 	A failed attempt to use a graphics gem vol 2 example
 
 
@@ -1064,7 +1064,7 @@ int IntersectionClass::_Intersect_Triangles_Z(
 
 	//	If no intersections have occurred, then the triangle must be completely outside
 	//	the clipping area.
-/*
+/ *
 	//	if it is determined that no intersections have occurred, then copy the clip triangle points
 	//	into the destination array and determine the correct UV values for the subset of the
 	//	triangle that was clipped.

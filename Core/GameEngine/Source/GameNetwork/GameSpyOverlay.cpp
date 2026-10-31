@@ -234,6 +234,9 @@ void GameSpyCloseOverlay( GSOverlayType overlay )
 {
 	switch(overlay)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GSOVERLAY_PLAYERINFO:
 			DEBUG_LOG(("Closing overlay GSOVERLAY_PLAYERINFO"));
 			break;

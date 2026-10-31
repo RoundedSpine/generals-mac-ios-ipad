@@ -951,6 +951,9 @@ const Image* ControlBar::calculateVeterancyOverlayForThing( const ThingTemplate 
 	//Return the appropriate image (including nullptr if no veterancy levels)
 	switch( level )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case LEVEL_VETERAN:
 			return m_rankVeteranIcon;
 		case LEVEL_ELITE:
@@ -973,6 +976,9 @@ const Image* ControlBar::calculateVeterancyOverlayForObject( const Object *obj )
 	//Return the appropriate image (including nullptr if no veterancy levels)
 	switch( level )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case LEVEL_VETERAN:
 			return m_rankVeteranIcon;
 		case LEVEL_ELITE:
@@ -1124,6 +1130,9 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 
 	switch( command->getCommandType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GUI_COMMAND_DOZER_CONSTRUCT:
 		{
       const ThingTemplate * whatToBuild = command->getThingTemplate();

@@ -2638,6 +2638,9 @@ void OpenALAudioManager::processFadingList(void)
 
 		switch (playing->m_type)
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 		case PAT_Sample:
 		{
 			alSourcef(playing->m_source, AL_GAIN, volume);

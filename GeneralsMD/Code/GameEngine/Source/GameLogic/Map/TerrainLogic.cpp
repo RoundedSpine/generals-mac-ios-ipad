@@ -412,6 +412,9 @@ Bridge::Bridge(Object *bridgeObj)
 		Coord3D pos = towerPos[type];
 		switch( type )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case BRIDGE_TOWER_FROM_LEFT:
 			case BRIDGE_TOWER_TO_LEFT:
 				pos.x += v.x*offset;
@@ -472,7 +475,7 @@ Bool Bridge::isPointOnBridge(const Coord3D *pLoc)
 }
 
 /*-------------------------------------------------------------------------------------------------
-/** Clip a floating point line to the region provided.  The source line runs from p1 to p2, and is clipped
+/ ** Clip a floating point line to the region provided.  The source line runs from p1 to p2, and is clipped
 	* using the clipRegion.
 	*
 	* Return values:
@@ -2644,6 +2647,9 @@ void TerrainLogic::flattenTerrain(Object *obj)
 	const Coord3D *pos = obj->getPosition();
 	switch(obj->getGeometryInfo().getGeomType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_BOX:
 		{
 			Real angle = obj->getOrientation();

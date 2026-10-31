@@ -84,6 +84,9 @@ void BridgeScaffoldBehavior::setMotion( ScaffoldTargetMotion targetMotion )
 	// given the target motion, pick a destination target
 	switch( m_targetMotion )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		// --------------------------------------------------------------------------------------------
 		case STM_RISE:
@@ -250,6 +253,9 @@ UpdateSleepTime BridgeScaffoldBehavior::update()
 		//
 		switch( m_targetMotion )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 
 			case STM_RISE: setMotion( STM_BUILD_ACROSS ); break;
 			case STM_BUILD_ACROSS: setMotion( STM_STILL ); break;

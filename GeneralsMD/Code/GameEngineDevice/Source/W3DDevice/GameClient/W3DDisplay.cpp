@@ -35,6 +35,8 @@ static void drawFramerateBar();
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include <numeric>
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include <stdlib.h>
 #include <windows.h>
 // GeneralsX @bugfix BenderAI 13/02/2026 - io.h is Windows-specific, use unistd.h on Linux
@@ -1417,13 +1419,13 @@ void W3DDisplay::gatherDebugStats()
 				fps, ms, gameOverheadMS, consoleMS, threeDOverheadMS, terrainMS, objectMS, overlapMS);
 			if (extendedStats==SHOW_STATS_TIME-2) {
 				char bufferA[ 256 ];
-				sprintf( bufferA, "FPS: %.2f, %.2fms - OH %.2fms, Console %.2fms, 3D OH %.2fms, Terrain %.2fms, Obs %.2fms, CPU %.2fms\n",
+				snprintf(bufferA, sizeof(bufferA), "FPS: %.2f, %.2fms - OH %.2fms, Console %.2fms, 3D OH %.2fms, Terrain %.2fms, Obs %.2fms, CPU %.2fms\n",
 					fps, ms, gameOverheadMS, consoleMS, threeDOverheadMS, terrainMS, objectMS, overlapMS);
 				::OutputDebugString(bufferA);
 				if (pListFile) {
 					fprintf(pListFile, "\n%s", bufferA);
 				}
-				sprintf( bufferA, "Polygons: per frame %d, per second %d\n", polyPerFrame,
+				snprintf(bufferA, sizeof(bufferA), "Polygons: per frame %d, per second %d\n", polyPerFrame,
 						(Int)(polyPerFrame*fps));
 				::OutputDebugString(bufferA);
 				if (pListFile) {
@@ -1871,7 +1873,7 @@ void W3DDisplay::calculateTerrainLOD()
 			}
 			Int64 time64 = getPerformanceCounter();
 			timeForFrame = (float)((double)(time64-startTime64) / (double)(freq64));
-			sprintf(buf, "%.2fms ", timeForFrame*1000.0f);
+			snprintf(buf, sizeof(buf), "%.2fms ", timeForFrame*1000.0f);
 			::OutputDebugString(buf);
 			if (i>=NUM_TO_DISCARD) {
 				frameTime += timeForFrame;
@@ -1884,7 +1886,7 @@ void W3DDisplay::calculateTerrainLOD()
 		}
 		frameTime /= ((i)-NUM_TO_DISCARD);
 		count++;
-		sprintf(buf, "\n LOD %d, time %.2fms\n", curLOD, frameTime*1000.0f);
+		snprintf(buf, sizeof(buf), "\n LOD %d, time %.2fms\n", curLOD, frameTime*1000.0f);
 		::OutputDebugString(buf);
 		if (frameTime<maxTimeLimit && goodLOD<curLOD) {
 			goodLOD = curLOD;
@@ -3295,9 +3297,9 @@ void W3DDisplay::takeScreenShot()
 	Bool done = false;
 	while (!done) {
 #ifdef CAPTURE_TO_TARGA
-		sprintf( leafname, "%s%.3d.tga", "sshot", frame_number++);
+		snprintf(leafname, sizeof(leafname), "%s%.3d.tga", "sshot", frame_number++);
 #else
-		sprintf( leafname, "%s%.3d.bmp", "sshot", frame_number++);
+		snprintf(leafname, sizeof(leafname), "%s%.3d.bmp", "sshot", frame_number++);
 #endif
 		strlcpy(pathname, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(pathname));
 		strlcat(pathname, leafname, ARRAY_SIZE(pathname));
@@ -3608,7 +3610,7 @@ void W3DDisplay::dumpAssetUsage(const char* mapname)
 	int idx = 1;
 	while (true)
 	{
-		sprintf(buf, "AssetUsage_%s_%04d.txt",leafname,idx);
+		snprintf(buf, sizeof(buf), "AssetUsage_%s_%04d.txt",leafname,idx);
 		if (_access(buf, 0) != 0)
 			break;	// it exists, we're good
 		++idx;

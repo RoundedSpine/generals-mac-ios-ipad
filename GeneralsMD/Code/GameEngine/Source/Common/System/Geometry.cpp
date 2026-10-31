@@ -84,6 +84,9 @@ void GeometryInfo::set(GeometryType type, Bool isSmall, Real height, Real majorR
 
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 			m_majorRadius = majorRadius;
 			m_minorRadius = majorRadius;
@@ -192,6 +195,9 @@ void GeometryInfo::setMaxHeightAbovePosition(Real z)
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 			m_majorRadius = z;
 			break;
@@ -211,6 +217,9 @@ Real GeometryInfo::getMaxHeightAbovePosition() const
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 			return m_majorRadius;
 
@@ -228,6 +237,9 @@ Real GeometryInfo::getMaxHeightBelowPosition() const
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 			return m_majorRadius;
 
@@ -267,6 +279,9 @@ void GeometryInfo::get2DBounds(const Coord3D& geomCenter, Real angle, Region2D& 
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		case GEOMETRY_CYLINDER:
 		{
@@ -324,6 +339,9 @@ void GeometryInfo::clipPointToFootprint(const Coord3D& geomCenter, Coord3D& ptTo
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		case GEOMETRY_CYLINDER:
 		{
@@ -356,6 +374,9 @@ Bool GeometryInfo::isPointInFootprint(const Coord3D& geomCenter, const Coord3D& 
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		case GEOMETRY_CYLINDER:
 		{
@@ -380,6 +401,9 @@ void GeometryInfo::makeRandomOffsetWithinFootprint(Coord3D& pt) const
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		case GEOMETRY_CYLINDER:
 		{
@@ -420,6 +444,9 @@ void GeometryInfo::makeRandomOffsetOnPerimeter(Coord3D& pt) const
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		case GEOMETRY_CYLINDER:
 		{
@@ -467,6 +494,9 @@ Real GeometryInfo::getFootprintArea() const
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		case GEOMETRY_CYLINDER:
 		{
@@ -488,6 +518,9 @@ void GeometryInfo::calcBoundingStuff()
 {
 	switch(m_type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_SPHERE:
 		{
 			m_boundingSphereRadius = m_majorRadius;

@@ -227,6 +227,9 @@ UpdateSleepTime DynamicShroudClearingRangeUpdate::update()
 
 	switch (m_state)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		case DSCRU_NOT_STARTED_YET :
 		{

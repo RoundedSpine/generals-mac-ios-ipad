@@ -66,6 +66,9 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 
 	switch(msg->getType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		//---------------------------------------------------------------------------------------------
 		// TheSuperHackers @bugfix Prevent double-clicks from falling through to other translators during building placement

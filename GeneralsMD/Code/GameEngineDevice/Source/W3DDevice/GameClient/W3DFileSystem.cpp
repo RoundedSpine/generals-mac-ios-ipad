@@ -41,6 +41,8 @@
 // #define MAINTAIN_LEGACY_FILES
 
 #include "Common/ArchiveFile.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include "Common/Debug.h"
 #include "Common/file.h"
 #include "Common/FileSystem.h"
@@ -177,7 +179,7 @@ char const * GameFileClass::Set_Name( char const *filename )
 	if( fileType == FILE_TYPE_W3D )
 	{
 		static const char *localizedPathFormat = "Data/%s/Art/W3D/";
-		sprintf(m_filePath,localizedPathFormat, GetRegistryLanguage().str());
+		snprintf(m_filePath, sizeof(m_filePath),localizedPathFormat, GetRegistryLanguage().str());
 		strlcat(m_filePath, filename, ARRAY_SIZE(m_filePath));
 
 	}
@@ -185,7 +187,7 @@ char const * GameFileClass::Set_Name( char const *filename )
 	else if( isImageFileType(fileType) )
 	{
 		static const char *localizedPathFormat = "Data/%s/Art/Textures/";
-		sprintf(m_filePath,localizedPathFormat, GetRegistryLanguage().str());
+		snprintf(m_filePath, sizeof(m_filePath),localizedPathFormat, GetRegistryLanguage().str());
 		strlcat(m_filePath, filename, ARRAY_SIZE(m_filePath));
 
 	}
@@ -286,13 +288,13 @@ char const * GameFileClass::Set_Name( char const *filename )
 	{
 		if( fileType == FILE_TYPE_W3D )
 		{
-			sprintf(m_filePath,USER_W3D_DIR_PATH, TheGlobalData->getPath_UserData().str());
+			snprintf(m_filePath, sizeof(m_filePath),USER_W3D_DIR_PATH, TheGlobalData->getPath_UserData().str());
 			strlcat(m_filePath, filename, ARRAY_SIZE(m_filePath));
 
 		}
 		else if( isImageFileType(fileType) )
 		{
-			sprintf(m_filePath,USER_TGA_DIR_PATH, TheGlobalData->getPath_UserData().str());
+			snprintf(m_filePath, sizeof(m_filePath),USER_TGA_DIR_PATH, TheGlobalData->getPath_UserData().str());
 			strlcat(m_filePath, filename, ARRAY_SIZE(m_filePath));
 
 		}
@@ -308,7 +310,7 @@ char const * GameFileClass::Set_Name( char const *filename )
 	{
 		if( fileType == FILE_TYPE_TGA ) // just TGA, since we don't do dds previews
 		{
-			sprintf(m_filePath,MAP_PREVIEW_DIR_PATH, TheGlobalData->getPath_UserData().str());
+			snprintf(m_filePath, sizeof(m_filePath),MAP_PREVIEW_DIR_PATH, TheGlobalData->getPath_UserData().str());
 			strlcat(m_filePath, filename, ARRAY_SIZE(m_filePath));
 
 		}
@@ -343,7 +345,7 @@ char const * GameFileClass::Set_Name( char const *filename )
 
 			// Replay lookup chain with alternate extension (localized path first)
 			static const char *localizedPathFormat = "Data/%s/Art/Textures/";
-			sprintf(m_filePath, localizedPathFormat, GetRegistryLanguage().str());
+			snprintf(m_filePath, sizeof(m_filePath), localizedPathFormat, GetRegistryLanguage().str());
 			strlcat(m_filePath, altFilename, ARRAY_SIZE(m_filePath));
 			m_fileExists = TheFileSystem->doesFileExist(m_filePath);
 

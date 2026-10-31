@@ -46,6 +46,8 @@
 //----------------------------------------------------------------------------
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include "GameClient/DebugDisplay.h"
 
@@ -202,7 +204,7 @@ void	DebugDisplay::printf( const Char *format, ...)
 	static char text[5*1024];
 
   va_start( args, format );
-	result = vsprintf( text, format, args );
+	result = vsnprintf(text, sizeof(text), format, args );
   va_end( args );
 
 	if ( result < 0 )

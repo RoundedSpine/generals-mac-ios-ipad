@@ -29,6 +29,8 @@
 #define INSTANTIATE_WELL_KNOWN_KEYS
 
 #include "windows.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include "stdlib.h"
 #include "Common/STLTypedefs.h"
 
@@ -2132,7 +2134,7 @@ TextureClass *WorldHeightMap::getTerrainTexture()
 		m_terrainTex = MSGNEW("WorldHeightMap_getTerrainTexture") TerrainTextureClass(pow2Height);
 		m_terrainTexHeight = m_terrainTex->update(this);
 		char buf[64];
-		sprintf(buf, "Base tex height %d", pow2Height);
+		snprintf(buf, sizeof(buf), "Base tex height %d", pow2Height);
 		DEBUG_LOG((buf));
 		REF_PTR_RELEASE(m_alphaTerrainTex);
 		m_alphaTerrainTex = MSGNEW("WorldHeightMap_getTerrainTexture") AlphaTerrainTextureClass(m_terrainTex);

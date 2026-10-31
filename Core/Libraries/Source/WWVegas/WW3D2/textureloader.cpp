@@ -884,6 +884,9 @@ void TextureLoader::Update(void (*network_callback)())
 		UPDATE_NETWORK;
 		// dispatch to proper task handler
 		switch (task->Get_Type()) {
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case TextureLoadTaskClass::TASK_THUMBNAIL:
 				Process_Foreground_Thumbnail(task);
 				break;
@@ -912,6 +915,9 @@ void TextureLoader::Continue_Texture_Load()
 void TextureLoader::Process_Foreground_Thumbnail(TextureLoadTaskClass *task)
 {
 	switch (task->Get_State()) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case TextureLoadTaskClass::STATE_NONE:
 			Load_Thumbnail(task->Peek_Texture());
 			FALLTHROUGH; // NOTE: fall-through is intentional
@@ -935,6 +941,9 @@ void TextureLoader::Process_Foreground_Load(TextureLoadTaskClass *task)
 	// otherwise, must be a low-priority task.
 
 	switch (task->Get_State()) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case TextureLoadTaskClass::STATE_NONE:
 			Begin_Load_And_Queue(task);
 			break;
@@ -1166,6 +1175,9 @@ void TextureLoadTaskClass::Init(TextureBaseClass* tc, TaskType type, PriorityTyp
 
 	switch (Type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case TASK_THUMBNAIL:
 			WWASSERT(Texture->ThumbnailLoadTask == nullptr);
 			Texture->ThumbnailLoadTask = this;
@@ -1193,6 +1205,9 @@ void TextureLoadTaskClass::Deinit()
 
 	if (Texture) {
 		switch (Type) {
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case TASK_THUMBNAIL:
 				WWASSERT(Texture->ThumbnailLoadTask == this);
 				Texture->ThumbnailLoadTask = nullptr;
@@ -2186,6 +2201,9 @@ void CubeTextureLoadTaskClass::Init(TextureBaseClass* tc, TaskType type, Priorit
 
 	switch (Type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case TASK_THUMBNAIL:
 		WWASSERT(Texture->ThumbnailLoadTask == nullptr);
 		Texture->ThumbnailLoadTask = this;
@@ -2219,6 +2237,9 @@ void CubeTextureLoadTaskClass::Deinit()
 	{
 		switch (Type)
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case TASK_THUMBNAIL:
 				WWASSERT(Texture->ThumbnailLoadTask == this);
 				Texture->ThumbnailLoadTask = nullptr;
@@ -2596,6 +2617,9 @@ void VolumeTextureLoadTaskClass::Init(TextureBaseClass* tc, TaskType type, Prior
 
 	switch (Type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case TASK_THUMBNAIL:
 		WWASSERT(Texture->ThumbnailLoadTask == nullptr);
 		Texture->ThumbnailLoadTask = this;

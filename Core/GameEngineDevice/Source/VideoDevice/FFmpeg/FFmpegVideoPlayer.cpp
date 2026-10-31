@@ -499,7 +499,7 @@ void FFmpegVideoStream::frameRender( VideoBuffer *buffer )
 		return;
 	}
 
-	if (m_frame->data == nullptr) {
+	if (m_frame->data[0] == nullptr) {
 		return;
 	}
 

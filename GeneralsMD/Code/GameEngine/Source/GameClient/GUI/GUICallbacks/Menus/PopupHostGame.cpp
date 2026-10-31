@@ -51,6 +51,8 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "Common/GlobalData.h"
 #include "Common/NameKeyGenerator.h"
@@ -177,7 +179,7 @@ void PopulateCustomLadderListBox( GameWindow *win )
 	{
 		usedLadders.insert(info);
 		index = GadgetListBoxAddEntryText( win, info->name, favoriteColor, -1 );
-		GadgetListBoxSetItemData( win, (void *)(info->index), index );
+		GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		selectedPos = index;
 	}
 
@@ -196,7 +198,7 @@ void PopulateCustomLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, favoriteColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -210,7 +212,7 @@ void PopulateCustomLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, localColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -223,7 +225,7 @@ void PopulateCustomLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, specialColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -236,7 +238,7 @@ void PopulateCustomLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, normalColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -274,7 +276,7 @@ void PopulateCustomLadderComboBox()
 	{
 		usedLadders.insert(info);
 		index = GadgetComboBoxAddEntry( comboBoxLadderName, info->name, specialColor );
-		GadgetComboBoxSetItemData( comboBoxLadderName, index, (void *)(info->index) );
+		GadgetComboBoxSetItemData( comboBoxLadderName, index, (void*)(intptr_t)(info->index) );
 		selectedPos = index;
 	}
 
@@ -292,7 +294,7 @@ void PopulateCustomLadderComboBox()
 		{
 			usedLadders.insert(info);
 			index = GadgetComboBoxAddEntry( comboBoxLadderName, info->name, normalColor );
-			GadgetComboBoxSetItemData( comboBoxLadderName, index, (void *)(info->index) );
+			GadgetComboBoxSetItemData( comboBoxLadderName, index, (void*)(intptr_t)(info->index) );
 		}
 	}
 

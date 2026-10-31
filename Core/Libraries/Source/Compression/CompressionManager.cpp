@@ -132,6 +132,12 @@ Int CompressionManager::getMaxCompressedSize( Int uncompressedLen, CompressionTy
 {
 	switch (compType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
+		// GeneralsX @build Codex 31/10/2026 Preserve the existing no-compression size fallback explicitly.
+		case COMPRESSION_NONE:
+			return 0;
 		case COMPRESSION_NOXLZH:
 			return CalcNewSize(uncompressedLen) + 8;
 
@@ -162,6 +168,11 @@ Int CompressionManager::getUncompressedSize( const void *mem, Int len )
 	CompressionType compType = getCompressionType( mem, len );
 	switch (compType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
+		case COMPRESSION_NONE:
+			return len;
 		case COMPRESSION_NOXLZH:
 		case COMPRESSION_ZLIB1:
 		case COMPRESSION_ZLIB2:

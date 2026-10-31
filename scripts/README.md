@@ -474,3 +474,10 @@ covering persistent no-context errors, pause/resume, failed queries, EOF and ref
 Run `python3 scripts/qa/test_csf_reserved_header.py` for reserved CSF words, allocation
 count bounds, malformed lengths, truncation and table bounds. Packaging tests also
 reject arm64 host/Simulator inputs and propagate real framework-rpath failures.
+
+Run `python3 scripts/qa/test_build_warning_fixes.py` (or add `--asan`) for allocation,
+bounded file formatting, callback pointer width, sampler sentinels, compression,
+ref-owner semantics and pinned patch/build setup/report contracts. CMake must be
+on PATH. The iOS workflow preserves its raw logs and publishes a warning-count
+report with a completion flag; see
+[the warning cleanup audit](../docs/WORKDIR/audit/IOS_BUILD_WARNING_CLEANUP_2026-10-31.md).

@@ -3181,6 +3181,9 @@ void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel ne
 
 	switch (newLevel)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case LEVEL_REGULAR:
 			clearWeaponSetFlag(WEAPONSET_VETERAN);
 			clearWeaponSetFlag(WEAPONSET_ELITE);

@@ -326,6 +326,9 @@ static void gameTooltip(GameWindow *window,
 			++numPlayers;
 			switch(slot->getState())
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case SLOT_EASY_AI:
 				tooltip.concat(L'\n');
 				tooltip.concat(TheGameText->fetch("GUI:EasyAI"));

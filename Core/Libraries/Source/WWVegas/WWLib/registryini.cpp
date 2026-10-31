@@ -1,4 +1,6 @@
 #include "registryini.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -446,7 +448,7 @@ namespace RegistryIni {
 	bool WriteUnsignedInt(const char *root, const char *path, const char *key, unsigned int value)
 	{
 		char buffer[32];
-		sprintf(buffer, "%u", value);
+		snprintf(buffer, sizeof(buffer), "%u", value);
 		return WriteString(root, path, key, buffer);
 	}
 

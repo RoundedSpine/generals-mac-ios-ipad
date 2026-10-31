@@ -25,6 +25,8 @@
 // GeneralsX @build fbraz 11/02/2026
 // Must include class declaration BEFORE implementation
 #include "WWDownload/ftp.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 // GeneralsX @build fbraz 10/02/2026
 // Platform headers with socket_compat.h providing Winsock → POSIX mapping
@@ -1184,7 +1186,7 @@ int Cftp::SendNewPort()
 			return( FTP_FAILED );
 		}
 
-		sprintf( command, "PORT %d,%d,%d,%d,%d,%d\r\n",
+		snprintf(command, sizeof(command), "PORT %d,%d,%d,%d,%d,%d\r\n",
 				 i & 0xFF,
 				 ( i >> 8 ) & 0xFF,
 				 ( i >> 16 ) & 0xFF,
@@ -1458,7 +1460,7 @@ HRESULT  Cftp::GetNextFileBlock( LPCSTR szLocalFileName, int * piTotalRead )
 
 	if( m_iStatus == FTPSTAT_SENTFILEPORT )
 	{
-		sprintf( command, "TYPE I\r\n");
+		snprintf(command, sizeof(command), "TYPE I\r\n");
 
 		if( SendCommand( command, strlen( command ) ) < 0 )
 		{
@@ -1491,7 +1493,7 @@ HRESULT  Cftp::GetNextFileBlock( LPCSTR szLocalFileName, int * piTotalRead )
 		}
 		else
 		{
-			sprintf( command, "REST %d\r\n", m_iFilePos );
+			snprintf(command, sizeof(command), "REST %d\r\n", m_iFilePos );
 
 			if( SendCommand( command, strlen( command ) ) < 0 )
 			{
@@ -1848,7 +1850,7 @@ bool Prepare_Directories(const char *rootdir, const char *filename)
 	char newdir[256];
 
 	const char *cptr=filename;
-	while(cptr=strchr(cptr,'\\'))
+	while((cptr=strchr(cptr,'\\')))
 	{
 		strlcpy(tempstr,filename,cptr-filename + 1);
 		snprintf(newdir, ARRAY_SIZE(newdir), "%s\\%s", rootdir, tempstr);

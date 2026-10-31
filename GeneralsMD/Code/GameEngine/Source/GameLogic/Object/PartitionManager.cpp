@@ -48,6 +48,8 @@
 //         Includes
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "Common/ActionManager.h"
 #include "Common/DiscreteCircle.h"
@@ -2119,6 +2121,9 @@ void PartitionData::updateCellsTouched()
 	{
 		switch(geom)
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case GEOMETRY_SPHERE:
 			case GEOMETRY_CYLINDER:
 			{
@@ -4061,7 +4066,7 @@ void PartitionManager::doShroudReveal(Real centerX, Real centerY, Real radius, P
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitIsSet( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineAddLooker, (void*)currentIndex);
+			circle.drawCircle(hLineAddLooker, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -4126,7 +4131,7 @@ void PartitionManager::undoShroudReveal(Real centerX, Real centerY, Real radius,
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitIsSet( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineRemoveLooker, (void*)currentIndex);
+			circle.drawCircle(hLineRemoveLooker, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -4165,7 +4170,7 @@ void PartitionManager::doShroudCover(Real centerX, Real centerY, Real radius, Pl
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitIsSet( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineAddShrouder, (void*)currentIndex);
+			circle.drawCircle(hLineAddShrouder, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -4187,7 +4192,7 @@ void PartitionManager::undoShroudCover(Real centerX, Real centerY, Real radius, 
 		const Player *currentPlayer = ThePlayerList->getNthPlayer( currentIndex );
 		if( BitIsSet( playerMask, currentPlayer->getPlayerMask() ) )
 		{
-			circle.drawCircle(hLineRemoveShrouder, (void*)currentIndex);
+			circle.drawCircle(hLineRemoveShrouder, (void*)(intptr_t)currentIndex);
 		}
 	}
 }
@@ -5169,6 +5174,9 @@ Bool PartitionFilterPlayerAffiliation::allow( Object *other )
 	Relationship rel = m_player->getRelationship(other->getTeam());
 	switch (rel)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case ENEMIES:
 			if (m_affiliation & ALLOW_ENEMIES) {
 				return m_match;

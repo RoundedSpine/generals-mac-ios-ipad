@@ -619,6 +619,9 @@ void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage::Type m
 				{
 					switch( *info->m_weaponSlot )
 					{
+						// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+						default: break;
+
 						case PRIMARY_WEAPON:
 							soundToPlayPtr = templ->getPerUnitSound( "VoicePrimaryWeaponMode" );
 							break;
@@ -680,6 +683,9 @@ void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage::Type m
 				{
 					switch( weapon->getDamageType() )
 					{
+						// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+						default: break;
+
 // this stays, even if ALLOW_SURRENDER is not defed, since flashbangs still use 'em
 						case DAMAGE_SURRENDER:
 							if( target && target->isKindOf( KINDOF_STRUCTURE ) )
@@ -848,6 +854,9 @@ void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage::Type m
 			//Additional sounds for terrorists in cars.
 			switch (msgType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case GameMessage::MSG_DO_FORCE_ATTACK_GROUND:
 				case GameMessage::MSG_DO_FORCE_ATTACK_OBJECT:
 				case GameMessage::MSG_DO_ATTACK_OBJECT:
@@ -1663,6 +1672,9 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 				Relationship relationship = ThePlayerList->getLocalPlayer()->getRelationship( obj->getTeam() );
 				switch( relationship )
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 					case ALLIES:
 						if( !BitIsSet( command->getOptions(), NEED_TARGET_ALLY_OBJECT ) )
 						{
@@ -1691,6 +1703,9 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			ObjectID objectID = obj ? obj->getID() : INVALID_ID;
 			switch( command->getCommandType() )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				//Kris: June 06, 2002
 				//This is a GUI command button that triggers a mode. In any of these modes, only one specific action
 				//can occur. If the mouse isn't over a valid target, then the conditions aren't met and the code will
@@ -1735,6 +1750,9 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 				{
 					switch( command->getCommandType() )
 					{
+						// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+						default: break;
+
 						case GUICOMMANDMODE_CONVERT_TO_CARBOMB:
 						case GUICOMMANDMODE_HIJACK_VEHICLE:
 						case GUICOMMANDMODE_SABOTAGE_BUILDING:
@@ -1796,6 +1814,9 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			{
 				switch( command->getCommandType() )
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 					case GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT:
 					{
 						Object* unit = ThePlayerList->getLocalPlayer()->findMostReadyShortcutSpecialPowerOfType( command->getSpecialPowerTemplate()->getSpecialPowerType() );
@@ -2488,6 +2509,9 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 	switch (t)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_SELECT_MATCHING_UNITS:
 		{
@@ -2517,7 +2541,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				{
 				}
 				// temp is the last drawable
-				for( temp; temp != nullptr; temp = temp->getPrevDrawable() )
+				for( ; temp != nullptr; temp = temp->getPrevDrawable() )
 				{
 					const Object *object = temp->getObject();
 					// if you've reached the end of the list, don't select anything
@@ -2623,7 +2647,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			{
 				// get the first drawable
 				temp = TheGameClient->firstDrawable();
-				for( temp; temp != nullptr; temp = temp->getPrevDrawable() )
+				for( ; temp != nullptr; temp = temp->getPrevDrawable() )
 				{
 					const Object *object = temp->getObject();
 					// if you've reached the end of the list, don't select anything
@@ -2661,7 +2685,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					// find the next selectable drawable
 					temp = selectedDrawable->getNextDrawable();
 					//temp = selectedDrawable;
-					for( temp; temp != selectedDrawable; temp = temp->getNextDrawable() )
+					for( ; temp != selectedDrawable; temp = temp->getNextDrawable() )
 					{
 						if( hack == TRUE )
 						{
@@ -2743,7 +2767,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				{
 				}
 				// temp is the last drawable
-				for( temp; temp != nullptr; temp = temp->getPrevDrawable() )
+				for( ; temp != nullptr; temp = temp->getPrevDrawable() )
 				{
 					const Object *object = temp->getObject();
 					// if you've reached the end of the list, don't select anything
@@ -2850,7 +2874,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			{
 				// get the first drawable
 				temp = TheGameClient->firstDrawable();
-				for( temp; temp != nullptr; temp = temp->getPrevDrawable() )
+				for( ; temp != nullptr; temp = temp->getPrevDrawable() )
 				{
 					const Object *object = temp->getObject();
 					// if you've reached the end of the list, don't select anything
@@ -2888,7 +2912,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					// find the next selectable drawable
 					temp = selectedDrawable->getNextDrawable();
 					//temp = selectedDrawable;
-					for( temp; temp != selectedDrawable; temp = temp->getNextDrawable() )
+					for( ; temp != selectedDrawable; temp = temp->getNextDrawable() )
 					{
 						if( hack == TRUE )
 						{
@@ -5534,6 +5558,9 @@ static Bool isSystemMessage( const GameMessage *msg )
 
 	switch (msgType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GameMessage::MSG_DESTROY_SELECTED_GROUP:
 		case GameMessage::MSG_LOGIC_CRC:
 		case GameMessage::MSG_SET_REPLAY_CAMERA:

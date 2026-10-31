@@ -241,6 +241,9 @@ unsigned DDSFileClass::Calculate_DXTC_Surface_Size
 	unsigned level_size=(width/4)*(height/4);
 	switch (format)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case WW3D_FORMAT_DXT1:
 		level_size*=8;
 		break;
@@ -919,6 +922,9 @@ unsigned DDSFileClass::Get_Pixel(unsigned level,unsigned x,unsigned y) const
 	WWASSERT(y<Get_Height(level));
 
 	switch (Format) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	// Note that we don't currently really support alpha on DXT1 - all alpha textures should use DXT5.
 	// The reason for this is that when converting from DXT1 to 16 bit uncompressed texture we want
 	// to be able to use RGB565 format instead of ARGB4444. As the alpha is encoded in DXT1 per-block
@@ -1064,6 +1070,9 @@ bool DDSFileClass::Get_4x4_Block(
 
 	bool has_hsv_shift = hsv_shift[0]!=0.0f || hsv_shift[1]!=0.0f || hsv_shift[2]!=0.0f;
 	switch (Format) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	// Note that we don't currently really support alpha on DXT1 - all alpha textures should use DXT5.
 	// The reason for this is that when converting from DXT1 to 16 bit uncompressed texture we want
 	// to be able to use RGB565 format instead of ARGB4444. As the alpha is encoded in DXT1 per-block

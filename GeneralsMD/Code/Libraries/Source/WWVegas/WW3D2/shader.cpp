@@ -281,6 +281,9 @@ void ShaderClass::Enable_Fog (const char *source)
 {
 	// Enable the appropriate fog mode based on shader's source and destination blends.
 	switch (Get_Src_Blend_Func()) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		case ShaderClass::SRCBLEND_ZERO:
 			if (Get_Dst_Blend_Func() == ShaderClass::DSTBLEND_SRC_COLOR) {
@@ -963,8 +966,7 @@ void ShaderClass::Apply()
 				ShaderDirty=true;
 			}
 		} else {
-
-#pragma message("(gth) Generals added a feature here WW3D::Is_Coloring_Enabled() which needs to be merged properly")
+// Legacy implementation note: "(gth) Generals added a feature here WW3D::Is_Coloring_Enabled() which needs to be merged properly"
 #if 0
 			if (WW3D::Is_Coloring_Enabled())
 			{
@@ -1186,6 +1188,9 @@ const StringClass& ShaderClass::Get_Description(StringClass& str) const
 	}
 
 	switch (Get_Dst_Blend_Func()) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case DSTBLEND_ZERO: str+="DSTBLEND_ZERO | "; break;
   	case DSTBLEND_ONE: str+="DSTBLEND_ONE | "; break;
  	case DSTBLEND_SRC_COLOR: str+="DSTBLEND_SRC_COLOR | "; break;
@@ -1216,6 +1221,9 @@ const StringClass& ShaderClass::Get_Description(StringClass& str) const
 	}
 
 	switch (Get_Src_Blend_Func()) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
   	case SRCBLEND_ZERO: str+="SRCBLEND_ZERO | "; break;
   	case SRCBLEND_ONE: str+="SRCBLEND_ONE | "; break;
  	case SRCBLEND_SRC_ALPHA: str+="SRCBLEND_SRC_ALPHA | "; break;

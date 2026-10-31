@@ -107,7 +107,7 @@ void Get_WW3D_ZFormat_Name(WW3DZFormat format, StringClass& name)
 	switch (format)
 	{
 	default:
-	case WW3D_FORMAT_UNKNOWN		: name="Unknown"; break;
+	case WW3D_ZFORMAT_UNKNOWN		: name="Unknown"; break;
 	case WW3D_ZFORMAT_D16_LOCKABLE: name="D16Lockable"; break; // 16-bit z-buffer bit depth. This is an application-lockable surface format.
 	case WW3D_ZFORMAT_D32			: name="D32"; break; // 32-bit z-buffer bit depth.
 	case WW3D_ZFORMAT_D15S1			: name="D15S1"; break; // 16-bit z-buffer bit depth where 15 bits are reserved for the depth channel and 1 bit is reserved for the stencil channel.
@@ -323,6 +323,9 @@ WW3DFormat Get_Valid_Texture_Format(WW3DFormat format, bool is_compression_allow
 	}
 	else {
 		switch (format) {
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 		case WW3D_FORMAT_DXT1:
 			// NVidia hack - switch to DXT2 is there is no DXT1 support (which is disabled on NVidia cards)
 			if (!current_caps->Support_Texture_Format(WW3D_FORMAT_DXT1) &&
@@ -530,6 +533,9 @@ unsigned Get_Num_Depth_Bits(WW3DZFormat zformat)
 {
 	switch (zformat)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case WW3D_ZFORMAT_D16_LOCKABLE: return 16; break;
 	case WW3D_ZFORMAT_D32			: return 32; break;
 	case WW3D_ZFORMAT_D15S1			: return 15; break;
@@ -545,6 +551,9 @@ unsigned Get_Num_Stencil_Bits(WW3DZFormat zformat)
 {
 	switch (zformat)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case WW3D_ZFORMAT_D16_LOCKABLE: return 0; break;
 	case WW3D_ZFORMAT_D32			: return 0; break;
 	case WW3D_ZFORMAT_D15S1			: return 1; break;

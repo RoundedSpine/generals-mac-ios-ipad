@@ -112,7 +112,7 @@ void CaveSystem::unregisterCave( Int theIndex )
 {
 	// Doesn't need to do a thing.  ContainModule logic knows how to say goodbye, and a TunnelTracker
 	// knows how to exist while having no entry points.
-	theIndex;
+	(void)theIndex;
 }
 
 TunnelTracker *CaveSystem::getTunnelTrackerForCaveIndex( Int theIndex )

@@ -943,7 +943,7 @@ ControlBar::ControlBar()
 	m_rightHUDWindow = nullptr;
 	m_rightHUDCameoWindow = nullptr;
 	for( i = 0; i < MAX_RIGHT_HUD_UPGRADE_CAMEOS; i++ )
-		m_rightHUDUpgradeCameos[i];
+		m_rightHUDUpgradeCameos[i] = nullptr;
 	m_rightHUDUnitSelectParent = nullptr;
 	m_communicatorButton = nullptr;
 	m_currentSelectedDrawable = nullptr;
@@ -1053,7 +1053,8 @@ ControlBar::~ControlBar()
 
 	if (m_rightHUDCameoWindow && m_rightHUDCameoWindow->winGetUserData())
 	{
-		delete m_rightHUDCameoWindow->winGetUserData();
+		// GeneralsX @build Codex 31/10/2026 Explicitly release the existing opaque allocation.
+		::operator delete(m_rightHUDCameoWindow->winGetUserData());
 		m_rightHUDCameoWindow->winSetUserData(nullptr);
 	}
 
@@ -1595,6 +1596,9 @@ void ControlBar::update()
 
 	switch( m_currContext )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		//---------------------------------------------------------------------------------------------
 		case CB_CONTEXT_NONE:
@@ -3307,8 +3311,7 @@ void ControlBar::populateSpecialPowerShortcut( Player *player)
 	const CommandSet *commandSet;
 	Int i;
 	if(!player || !player->getPlayerTemplate()
-			|| !player->isLocalPlayer() || m_currentlyUsedSpecialPowersButtons == 0
-			|| m_specialPowerShortcutButtons == nullptr || m_specialPowerShortcutButtonParents == nullptr)
+			|| !player->isLocalPlayer() || m_currentlyUsedSpecialPowersButtons == 0)
 		return;
 	for( i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; ++i )
 	{
@@ -3581,7 +3584,7 @@ Bool ControlBar::canShowSpecialPowerShortcut() const
 //-------------------------------------------------------------------------------------------------
 void ControlBar::updateSpecialPowerShortcut()
 {
-	if(!m_specialPowerShortcutParent || !m_specialPowerShortcutButtons
+	if(!m_specialPowerShortcutParent
 	   || !ThePlayerList || !ThePlayerList->getLocalPlayer())
 		return;
 
@@ -3786,7 +3789,7 @@ void ControlBar::animateSpecialPowerShortcut( Bool isOn )
 void ControlBar::showSpecialPowerShortcut()
 {
 	if(TheScriptEngine->isGameEnding() || !m_specialPowerShortcutParent
-		||!m_specialPowerShortcutButtons || !ThePlayerList || !ThePlayerList->getLocalPlayer())
+		|| !ThePlayerList || !ThePlayerList->getLocalPlayer())
 		return;
 	Bool dontAnimate = TRUE;
 	for( Int i = 0; i < m_currentlyUsedSpecialPowersButtons; ++i )

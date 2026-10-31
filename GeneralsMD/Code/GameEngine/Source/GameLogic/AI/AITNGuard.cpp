@@ -459,8 +459,8 @@ void AITNGuardOuterState::xfer( Xfer *xfer )
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
 void AITNGuardOuterState::loadPostProcess()
-{						 AITNGuardOuterState
-	onEnter();
+{
+	// GeneralsX @build Codex 31/10/2026 Preserve the existing no-op; a local function declaration never invoked onEnter.
 }
 
 // ------------------------------------------------------------------------------------------------

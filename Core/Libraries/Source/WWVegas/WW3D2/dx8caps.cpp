@@ -830,6 +830,9 @@ void DX8Caps::Check_Driver_Version_Status()
 	DriverVersionStatus=DRIVER_STATUS_UNKNOWN;
 
 	switch (VendorId) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	// All 3Dfx drivers are bad
 	case VENDOR_3DFX:
 		DriverVersionStatus=DRIVER_STATUS_BAD;

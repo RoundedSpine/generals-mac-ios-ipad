@@ -160,6 +160,9 @@ GameMessage *NetGameCommandMsg::constructGameMessage() const
 	for (size_t i = 0; i < m_argList.size(); ++i) {
 		const GameMessageArgument* arg = m_argList[i];
 		switch (arg->m_type) {
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 
 		case ARGUMENTDATATYPE_INTEGER:
 			retval->appendIntegerArgument(arg->m_data.integer);

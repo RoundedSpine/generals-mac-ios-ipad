@@ -134,6 +134,9 @@ UpdateSleepTime DeployStyleAIUpdate::update()
 	{
 		switch( m_state )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case DEPLOY:
 				setMyState( READY_TO_ATTACK );
 				break;

@@ -87,6 +87,9 @@ NetCommandRef * NetPacket::ConstructNetCommandMsgFromRawData(UnsignedByte *data,
 			++offset;
 
 			switch (commandType) {
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 
 			case NETCOMMANDTYPE_GAMECOMMAND:
 				msg = readGameMessage(data, offset);
@@ -577,6 +580,9 @@ NetCommandList * NetPacket::getCommandList() {
 
 			switch((NetCommandType)commandType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case NETCOMMANDTYPE_GAMECOMMAND:
 				msg = readGameMessage(m_packet, i);
 				//DEBUG_LOG_LEVEL(DEBUG_LEVEL_NET, ("read game command from player %d for frame %d", playerID, frame));
@@ -889,6 +895,9 @@ void NetPacket::readGameMessageArgumentFromPacket(GameMessageArgumentDataType ty
 	GameMessageArgumentType arg;
 
 	switch (type) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 	case ARGUMENTDATATYPE_INTEGER:
 		Int theint;

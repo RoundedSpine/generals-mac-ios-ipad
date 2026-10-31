@@ -28,6 +28,8 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include <stdio.h>
 
@@ -1314,7 +1316,7 @@ void InGameUI::init()
 
 	INI ini;
 	ini.loadFileDirectory( "Data\\INI\\InGameUI", INI_LOAD_OVERWRITE, nullptr );
-	sprintf(log_buffer, "[GX-ISSUE144] InGameUI init loaded Data\\INI\\InGameUI");
+	snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] InGameUI init loaded Data\\INI\\InGameUI");
 	fprintf(stderr, "%s\\n", log_buffer);
 
 	//override INI values with language localized values:
@@ -1376,7 +1378,7 @@ void InGameUI::init()
 			m_namedTimerReadyBold = TheGlobalLanguageData->m_namedTimerCountdownReadyFont.bold;
 		}
 
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] InGameUI font override drawableCaption=%s size=%d bold=%d defaultWindow=%s size=%d bold=%d unicode=%s",
 			m_drawableCaptionFont.str(),
 			m_drawableCaptionPointSize,
@@ -1389,7 +1391,7 @@ void InGameUI::init()
 	}
 	else
 	{
-		sprintf(log_buffer, "[GX-ISSUE144] InGameUI init without TheGlobalLanguageData");
+		snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] InGameUI init without TheGlobalLanguageData");
 		fprintf(stderr, "%s\\n", log_buffer);
 	}
 
@@ -1476,6 +1478,9 @@ void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTe
 	const Weapon* w = nullptr;
 	switch (cursorType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		// already handled
 		//case RADIUSCURSOR_NONE:
 		//	return;
@@ -2919,6 +2924,9 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 				}
 				switch (t)
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 					case GameMessage::MSG_DO_MOVETO_HINT:
 					{
 						if( !drawSelectable && srcObj && srcObj->isLocallyControlled() && srcObj->isKindOf(KINDOF_STRUCTURE))
@@ -3019,6 +3027,9 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 				}
 				switch (t)
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 					case GameMessage::MSG_DO_MOVETO_HINT:
 					case GameMessage::MSG_DO_ATTACKMOVETO_HINT:
 					case GameMessage::MSG_ADD_WAYPOINT:
@@ -4657,6 +4668,9 @@ Bool InGameUI::canSelectedObjectsDoAction( ActionType action, const Object *obje
 
 		switch( action )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case ACTIONTYPE_NONE:
 				//However strange this might be, it is always possible to do "nothing"
 				//although I can't think of why this would be needed...

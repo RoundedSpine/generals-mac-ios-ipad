@@ -207,13 +207,14 @@ public:
 	virtual Int	 getTimeMultiplier() override {return m_timeMultiplier;};///< Get the time multiplier.
 	virtual void setTimeMultiplier(Int multiple) override {m_timeMultiplier = multiple;}; ///< Set the time multiplier.
 	virtual void setDefaultView(Real pitch, Real angle, Real maxHeight) override;
-	virtual void setCameraHeightAboveGroundLimitsToDefault(Real heightScale = 1.0f);
+	// GeneralsX @build Codex 31/10/2026 Make the existing virtual overrides explicit.
+	virtual void setCameraHeightAboveGroundLimitsToDefault(Real heightScale = 1.0f) override;
 	virtual void zoomCamera( Real finalZoom, Int milliseconds, Real easeIn, Real easeOut ) override;
 	virtual void pitchCamera( Real finalPitch, Int milliseconds, Real easeIn, Real easeOut ) override;
 
 	virtual void setHeightAboveGround(Real z) override;
 	virtual void setZoom(Real z) override;
-	virtual void setZoomToMax();
+	virtual void setZoomToMax() override;
 	virtual void setZoomToDefault() override;									///< Set zoom to default value
 
 	virtual void setFieldOfView( Real angle ) override;							///< Set the horizontal field of view angle

@@ -147,7 +147,8 @@ enum { K_SCRIPT_LIST_DATA_VERSION_1 = 1,
 			end_of_the_enumeration
 };
 
-static Condition::ConditionType ParameterChangesVer2[] =
+// GeneralsX @bugfix Codex 31/10/2026 The legacy terminator is an integer sentinel, not a ConditionType enumerator.
+static const Int ParameterChangesVer2[] =
 {
 	// Seven Changed from version 1.
 	Condition::TEAM_INSIDE_AREA_PARTIALLY,
@@ -157,7 +158,7 @@ static Condition::ConditionType ParameterChangesVer2[] =
 	Condition::TEAM_ENTERED_AREA_ENTIRELY,
 	Condition::TEAM_EXITED_AREA_ENTIRELY,
 	Condition::TEAM_EXITED_AREA_PARTIALLY,
-	(Condition::ConditionType) -1,
+	-1,
 };
 
 enum { AT_END = 0x00FFFFFF };
@@ -1701,6 +1702,9 @@ Bool Condition::ParseConditionDataChunk(DataChunkInput &file, DataChunkInfo *inf
 	// heal old files.
 	switch (pCondition->getConditionType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case SKIRMISH_SPECIAL_POWER_READY:
 			if (pCondition->m_numParms == 1)
 			{
@@ -2462,6 +2466,9 @@ ScriptAction *ScriptAction::ParseAction(DataChunkInput &file, DataChunkInfo *inf
 	// heal old files.
 	switch (pScriptAction->getActionType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case SKIRMISH_FIRE_SPECIAL_POWER_AT_MOST_COST:
 			if (pScriptAction->m_numParms == 1)
 			{

@@ -1007,7 +1007,8 @@ Bool Keyboard::isAlt()
 
 WideChar Keyboard::getPrintableKey( KeyDefType key, Int state )
 {
-	if((key < 0 || key >= ARRAY_SIZE(m_keyNames)) || ( state < 0 || state >= MAX_KEY_STATES))
+	// GeneralsX @build Codex 31/10/2026 The byte-sized key indexes all 256 table entries; only state can be out of range.
+	if( state < 0 || state >= MAX_KEY_STATES)
 		return L'\0';
 	if(state == 0)
 		return m_keyNames[key].stdKey;

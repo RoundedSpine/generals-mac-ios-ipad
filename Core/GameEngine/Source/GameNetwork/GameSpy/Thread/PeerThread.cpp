@@ -337,6 +337,9 @@ void PeerThreadClass::trackStatsForPlayer(RoomType roomType, const char *nick, c
 {
 	switch (roomType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GroupRoom:
 			m_groupRoomStats[packStatKey(nick, key)] = atoi(val);
 			break;
@@ -359,6 +362,9 @@ int PeerThreadClass::lookupStatForPlayer(RoomType roomType, const char *nick, co
 	PlayerStatMap::const_iterator it;
 	switch (roomType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GroupRoom:
 			it = m_groupRoomStats.find(fullKey);
 			if (it != m_groupRoomStats.end())
@@ -377,6 +383,9 @@ void PeerThreadClass::clearPlayerStats(RoomType roomType)
 {
 	switch (roomType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GroupRoom:
 			m_groupRoomStats.clear();
 			break;
@@ -708,6 +717,9 @@ static const char * KeyTypeToString(qr2_key_type type)
 {
 	switch(type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case key_server:
 		return "server";
 	case key_player:
@@ -723,6 +735,9 @@ static const char * ErrorTypeToString(qr2_error_t error)
 {
 	switch(error)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case e_qrnoerror:
 		return "noerror";
 	case e_qrwsockerror:
@@ -937,6 +952,9 @@ static void QRKeyListCallback
 	// register the keys we use
 	switch(type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case key_server:
 		qr2_keybuffer_add(keyBuffer, HOSTNAME_KEY);
 		qr2_keybuffer_add(keyBuffer, GAMEVER_KEY);
@@ -1301,7 +1319,7 @@ void PeerThreadClass::Thread_Function()
 	gameName[8]='l';gameName[9]='s';gameName[10]='b';gameName[11]='\0';
 	secretKey[0]='g';secretKey[1]='3';secretKey[2]='T';secretKey[3]='9';
 	secretKey[4]='s';secretKey[5]='2';secretKey[6]='\0';
-	/**/
+	/ **/
 #if RTS_GENERALS
 	gameName[0]='c';gameName[1]='c';gameName[2]='g';gameName[3]='e';
 	gameName[4]='n';gameName[5]='e';gameName[6]='r';gameName[7]='a';
@@ -1361,6 +1379,9 @@ void PeerThreadClass::Thread_Function()
 			DEBUG_LOG(("TheGameSpyPeerMessageQueue->getRequest() got request of type %d", incomingRequest.peerRequestType));
 			switch (incomingRequest.peerRequestType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case PeerRequest::PEERREQUEST_LOGIN:
 				{
 				m_isConnecting = true;
@@ -1950,6 +1971,9 @@ void PeerThreadClass::doQuickMatch( PEER peer )
 				// do the next bit of QM
 				switch (m_qmStatus)
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 				case QM_JOININGQMCHANNEL:
 					{
 						PeerResponse resp;
@@ -2156,6 +2180,9 @@ static void joinRoomCallback(PEER peer, PEERBool success, PEERJoinResult result,
 
 	switch (roomType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GroupRoom:
 			{
 #ifdef USE_BROADCAST_KEYS
@@ -2358,6 +2385,9 @@ void disconnectedCallback(PEER peer, const char * reason, void * param)
 	SerialAuthResult res = TheGameSpyPeerMessageQueue->getSerialAuthResult();
 	switch (res)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case SERIAL_NONEXISTENT:
 			resp.discon.reason = DISCONNECT_SERIAL_NOT_PRESENT;
 			break;

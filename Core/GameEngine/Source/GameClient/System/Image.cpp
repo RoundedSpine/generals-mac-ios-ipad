@@ -32,6 +32,8 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #define DEFINE_IMAGE_STATUS_NAMES
 #include "Lib/BaseType.h"
@@ -271,7 +273,7 @@ void ImageCollection::load( Int textureSize )
 	}
 
 	// construct path to the mapped images folder of the correct texture size
-	sprintf( buffer, "Data\\INI\\MappedImages\\TextureSize_%d", textureSize );
+	snprintf(buffer, sizeof(buffer), "Data\\INI\\MappedImages\\TextureSize_%d", textureSize );
 
 	// load all the ine files in that directory
 

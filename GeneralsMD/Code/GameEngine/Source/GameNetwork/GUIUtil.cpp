@@ -26,6 +26,8 @@
 // Author: Matthew D. Campbell, Sept 2002
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "GameNetwork/GUIUtil.h"
 #include "GameNetwork/NetworkDefs.h"
@@ -224,7 +226,7 @@ void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myG
 
 		colorName = TheGameText->fetch(def->getTooltipName().str());
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], colorName, def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void*)(intptr_t)c);
 	}
 	if (wasObserver)
 		GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
@@ -275,7 +277,7 @@ void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], Game
 		seenSides.insert(side);
 
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], TheGameText->fetch(side), def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void*)(intptr_t)c);
 	}
 	seenSides.clear();
 
@@ -315,7 +317,7 @@ void PopulateTeamComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGa
 		teamStr.format("Team:%d", c + 1);
 		teamName = TheGameText->fetch(teamStr.str());
 		newIndex = GadgetComboBoxAddEntry(comboArray[comboBox], teamName, def->getColor());
-		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboArray[comboBox], newIndex, (void*)(intptr_t)c);
 	}
 	GadgetComboBoxSetSelectedPos(comboArray[comboBox], 0);
 }

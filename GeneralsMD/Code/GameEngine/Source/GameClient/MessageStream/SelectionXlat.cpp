@@ -387,6 +387,9 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 	GameMessage::Type t = msg->getType();
 	switch (t)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GameMessage::MSG_META_BEGIN_FORCEATTACK:
 			TheInGameUI->setForceAttackMode( true );
 			break;

@@ -29,6 +29,8 @@
 
 // GeneralsX @bugfix BenderAI 13/02/2026 Fix include path (fighter19 pattern)
 #include "SDL3Device/GameClient/SDL3Mouse.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include <cstdio>
 #include <cstring>
@@ -433,9 +435,9 @@ void SDL3Mouse::initCursorResources(void)
 				char resourcePath[256];
 				//Check if this is a directional cursor
 				if (m_cursorInfo[cursor].numDirections > 1)
-					sprintf(resourcePath,"Data/Cursors/%s%d.ani",m_cursorInfo[cursor].textureName.str(),direction);
+					snprintf(resourcePath, sizeof(resourcePath),"Data/Cursors/%s%d.ani",m_cursorInfo[cursor].textureName.str(),direction);
 				else
-					sprintf(resourcePath,"Data/Cursors/%s.ani",m_cursorInfo[cursor].textureName.str());
+					snprintf(resourcePath, sizeof(resourcePath),"Data/Cursors/%s.ani",m_cursorInfo[cursor].textureName.str());
 
 				cursorResources[cursor][direction]=loadCursorFromFile(resourcePath);
 				DEBUG_ASSERTCRASH(cursorResources[cursor][direction], ("MissingCursor %s\n",resourcePath));

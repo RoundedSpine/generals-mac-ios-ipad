@@ -1950,7 +1950,7 @@ void GarrisonContain::loadPostProcess()
 			m_garrisonPointData[ i ].object = nullptr;
 
 		// drawable effect pointer
-		if( m_garrisonPointData[ i ].effectID != INVALID_ID )
+		if( m_garrisonPointData[ i ].effectID != INVALID_DRAWABLE_ID )
 		{
 
 			m_garrisonPointData[ i ].effect = TheGameClient->findDrawableByID( m_garrisonPointData[ i ].effectID );

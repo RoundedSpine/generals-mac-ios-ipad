@@ -120,7 +120,8 @@ protected:
   /// Manager for display strings
 	virtual DisplayStringManager *createDisplayStringManager() override { return NEW W3DDisplayStringManager; }
 #ifdef RTS_HAS_FFMPEG
-	virtual VideoPlayerInterface *createVideoPlayer() { return NEW FFmpegVideoPlayer; }
+	// GeneralsX @build Codex 31/10/2026 Make the existing virtual overrides explicit.
+	virtual VideoPlayerInterface *createVideoPlayer() override { return NEW FFmpegVideoPlayer; }
 #else
 	virtual VideoPlayerInterface *createVideoPlayer() override { return NEW BinkVideoPlayer; }
 #endif

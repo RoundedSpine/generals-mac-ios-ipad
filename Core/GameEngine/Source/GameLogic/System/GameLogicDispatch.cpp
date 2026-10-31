@@ -439,6 +439,9 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 	GameMessage::Type msgType = msg->getType();
 	switch( msgType )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GameMessage::MSG_NEW_GAME:
 		{
 			onNewGame(msg);

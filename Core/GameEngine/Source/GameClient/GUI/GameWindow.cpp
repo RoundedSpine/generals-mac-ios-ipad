@@ -124,7 +124,8 @@ GameWindow::GameWindow()
 GameWindow::~GameWindow()
 {
 
-	delete m_inputData;
+	// GeneralsX @build Codex 31/10/2026 The opaque gadget payload has no statically known destructor.
+	::operator delete(m_inputData);
 	m_inputData = nullptr;
 
 	delete m_editData;

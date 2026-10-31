@@ -1063,7 +1063,7 @@ bool CollisionMath::Collide
 
 exit:
 
-#pragma message ("(gth) disabling an assert in obb->tri collision, investigate later\n")
+// Legacy implementation note: "(gth) disabling an assert in obb->tri collision, investigate later\n"
 #if 0
 	WWASSERT((context.AxisId != INTERSECTION) || (context.StartBad));
 #else

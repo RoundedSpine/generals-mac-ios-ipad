@@ -47,6 +47,8 @@
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include <stdio.h>
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 //-----------------------------------------------------------------------------
 // USER INCLUDES //////////////////////////////////////////////////////////////
@@ -132,7 +134,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 {
 	// GeneralsX @tweak GitHubCopilot 27/05/2026 Trace command tooltip population and cost-line visibility decisions.
 	char log_buffer[512];
-	sprintf(log_buffer,
+	snprintf(log_buffer, sizeof(log_buffer),
 		"[GX-ISSUE144] Tooltip show request cmdWindow=%p prevWindow=%p hidden=%d",
 		cmdButton,
 		prevWindow,
@@ -141,7 +143,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 
 	if (TheInGameUI->areTooltipsDisabled() 	|| TheScriptEngine->isGameEnding())
 	{
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Tooltip show blocked tooltipsDisabled=%d gameEnding=%d",
 			TheInGameUI->areTooltipsDisabled(),
 			TheScriptEngine->isGameEnding());
@@ -196,7 +198,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 
 	if(!cmdButton)
 	{
-		sprintf(log_buffer, "[GX-ISSUE144] Tooltip show aborted null cmdButton");
+		snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] Tooltip show aborted null cmdButton");
 		fprintf(stderr, "%s\n", log_buffer);
 		return;
 	}
@@ -206,7 +208,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 
 		if(!commandButton)
 		{
-			sprintf(log_buffer, "[GX-ISSUE144] Tooltip show aborted missing CommandButton window=%p", cmdButton);
+			snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] Tooltip show aborted missing CommandButton window=%p", cmdButton);
 			fprintf(stderr, "%s\n", log_buffer);
 			return;
 		}
@@ -234,7 +236,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 		//	m_buildToolTipLayout = TheWindowManager->winCreateLayout( "ControlBarPopupDescription.wnd" );
 		//	m_buildToolTipLayout->setUpdate(ControlBarPopupDescriptionUpdateFunc);
 
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Tooltip show command=%s textLabel=%s descriptionLabel=%s",
 			commandButton->getName().str(),
 			commandButton->getTextLabel().str(),
@@ -248,7 +250,7 @@ void ControlBar::showBuildTooltipLayout( GameWindow *cmdButton )
 		// we're a generic window
 		if(!BitIsSet(cmdButton->winGetStyle(), GWS_USER_WINDOW) && !BitIsSet(cmdButton->winGetStyle(), GWS_STATIC_TEXT))
 			return;
-		sprintf(log_buffer, "[GX-ISSUE144] Tooltip show generic window style=0x%x", cmdButton->winGetStyle());
+		snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] Tooltip show generic window style=0x%x", cmdButton->winGetStyle());
 		fprintf(stderr, "%s\n", log_buffer);
 		populateBuildTooltipLayout(nullptr, cmdButton);
 	}
@@ -270,14 +272,14 @@ void ControlBar::repopulateBuildTooltipLayout()
 	char log_buffer[512];
 	if(!m_buildToolTipLayout)
 	{
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Tooltip repopulate skipped layout=null");
 		fprintf(stderr, "%s\n", log_buffer);
 		return;
 	}
 	if(!prevWindow)
 	{
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Tooltip repopulate skipped prevWindow=null layout=%p hidden=%d",
 			m_buildToolTipLayout,
 			m_buildToolTipLayout->isHidden());
@@ -286,7 +288,7 @@ void ControlBar::repopulateBuildTooltipLayout()
 	}
 	if(m_buildToolTipLayout->isHidden())
 	{
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Tooltip repopulate skipped layout-hidden prevWindow=%p",
 			prevWindow);
 		fprintf(stderr, "%s\n", log_buffer);
@@ -294,12 +296,12 @@ void ControlBar::repopulateBuildTooltipLayout()
 	}
 	if(!BitIsSet(prevWindow->winGetStyle(), GWS_PUSH_BUTTON))
 	{
-		sprintf(log_buffer, "[GX-ISSUE144] Tooltip repopulate skipped non-push style=0x%x", prevWindow->winGetStyle());
+		snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] Tooltip repopulate skipped non-push style=0x%x", prevWindow->winGetStyle());
 		fprintf(stderr, "%s\n", log_buffer);
 		return;
 	}
 	const CommandButton *commandButton = (const CommandButton *)GadgetButtonGetData(prevWindow);
-	sprintf(log_buffer,
+	snprintf(log_buffer, sizeof(log_buffer),
 		"[GX-ISSUE144] Tooltip repopulate command=%s",
 		commandButton ? commandButton->getName().str() : "<null>");
 	fprintf(stderr, "%s\n", log_buffer);
@@ -311,7 +313,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 	char log_buffer[512];
 	if(!m_buildToolTipLayout)
 	{
-		sprintf(log_buffer, "[GX-ISSUE144] Tooltip populate skipped missing layout");
+		snprintf(log_buffer, sizeof(log_buffer), "[GX-ISSUE144] Tooltip populate skipped missing layout");
 		fprintf(stderr, "%s\n", log_buffer);
 		return;
 	}
@@ -326,7 +328,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 
 	if(commandButton)
 	{
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Tooltip populate command=%s type=%d textLabel=%s descriptionLabel=%s",
 			commandButton->getName().str(),
 			commandButton->getCommandType(),
@@ -418,6 +420,9 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 					CanMakeType makeType = TheBuildAssistant->canMakeUnit( selectedObject, commandButton->getThingTemplate() );
 					switch( makeType )
 					{
+						// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+						default: break;
+
 						case CANMAKE_NO_MONEY:
 							descrip.concat( L"\n\n" );
 							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipNotEnoughMoneyToBuild" ) );

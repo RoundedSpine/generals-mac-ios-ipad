@@ -57,6 +57,9 @@ ParameterClass::Construct (Type type, void *data, const char *name)
 {
 	ParameterClass *new_param = nullptr;
 	switch (type) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		case TYPE_INT:
 			new_param = W3DNEW IntParameterClass (data, name);

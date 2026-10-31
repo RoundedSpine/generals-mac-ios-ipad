@@ -75,6 +75,11 @@ class	GenericSLNode : public AutoPoolClass<GenericSLNode, 256>
 };
 
 
+// GeneralsX @build Codex 31/10/2026 This specialization is defined once in slnode.cpp.
+#if !defined(_MSC_VER) || _MSC_VER >= 1300
+template<> ObjectPoolClass<GenericSLNode,256> AutoPoolClass<GenericSLNode,256>::Allocator;
+#endif
+
 template	<class T>
 class	SLNode : public GenericSLNode
 {

@@ -226,6 +226,9 @@ void SceneClass::Render(RenderInfoClass & rinfo)
 		DX8Wrapper::Set_DX8_Render_State (D3DRS_ZBIAS, 0);
 		Customized_Render(rinfo);
 		switch (Get_Extra_Pass_Polygon_Mode()) {
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 		case EXTRA_PASS_LINE:
 			WW3D::Enable_Texturing(false);
 			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_WIREFRAME);

@@ -371,6 +371,9 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 
 	switch( damageInfo->in.m_damageType )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DAMAGE_HEALING:
 		{
 			if( !damageInfo->in.m_kill )
@@ -906,6 +909,9 @@ void ActiveBody::setMaxHealth( Real maxHealth, MaxHealthChangeType healthChangeT
 
 	switch( healthChangeType )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case PRESERVE_RATIO:
 		{
 			//400/500 (80%) + 100 becomes 480/600 (80%)
@@ -1441,6 +1447,9 @@ void ActiveBody::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLeve
 			AudioEventRTS veterancyChanged;
 			switch (newLevel)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case LEVEL_VETERAN:
 					veterancyChanged = *getObject()->getTemplate()->getSoundPromotedVeteran();
 					break;
@@ -1498,6 +1507,9 @@ void ActiveBody::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLeve
 
 	switch (newLevel)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case LEVEL_REGULAR:
 			clearArmorSetFlag(ARMORSET_VETERAN);
 			clearArmorSetFlag(ARMORSET_ELITE);

@@ -3623,6 +3623,9 @@ void W3DView::shake( const Coord3D *epicenter, CameraShakeType shakeType )
 	Real intensity = 0.0f;
 	switch( shakeType )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case SHAKE_SUBTLE:
 			intensity = TheGlobalData->m_shakeSubtleIntensity;
 			break;

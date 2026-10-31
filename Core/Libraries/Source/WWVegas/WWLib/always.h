@@ -82,10 +82,11 @@
 	#define _OPERATOR_NEW_DEFINED_
 
 	extern void * __cdecl operator new		(size_t size);
-	extern void __cdecl operator delete		(void *p);
+	// GeneralsX @bugfix Codex 31/10/2026 Match the standard nonthrowing deallocation declarations.
+	extern void __cdecl operator delete		(void *p) throw();
 
 	extern void * __cdecl operator new[]	(size_t size);
-	extern void __cdecl operator delete[]	(void *p);
+	extern void __cdecl operator delete[]	(void *p) throw();
 
 	// additional overloads to account for VC/MFC funky versions
 	extern void* __cdecl operator new			(size_t nSize, const char *, int);
@@ -104,6 +105,9 @@
 
 #endif
 
+// GeneralsX @build Codex 31/10/2026 Preserve identity-expression semantics without unused-value warnings in release calls.
+template<class T> inline T WWReleaseRefOwner(T value) { return value; }
+
 #if defined(RTS_DEBUG)
 	#define MSGW3DNEW(MSG)					new( MSG, 0 )
 	#define MSGW3DNEWARRAY(MSG)			new( MSG, 0 )
@@ -119,7 +123,7 @@
 	#define W3DNEWARRAY							new
 
 	#define NEW_REF( C, P )					( W3DNEW C P )
-	#define SET_REF_OWNER( P )			P
+	#define SET_REF_OWNER( P )			WWReleaseRefOwner(P)
 #endif
 
 
@@ -155,7 +159,7 @@ public: \
 	#define W3DNEWARRAY							new
 
 	#define NEW_REF( C, P )					( W3DNEW C P )
-	#define SET_REF_OWNER( P )			P
+	#define SET_REF_OWNER( P )			WWReleaseRefOwner(P)
 
 	#define W3DMPO_CODE(ARGCLASS)
 

@@ -695,6 +695,9 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 //	DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueShader);	//good for debugging, draws without alpha
 	switch (type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case SHADOW_DECAL:
 			DX8Wrapper::Set_Shader(ShaderClass::_PresetMultiplicativeShader);
 			break;

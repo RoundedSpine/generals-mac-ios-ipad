@@ -136,6 +136,9 @@ void StatsCollector::collectMsgStats( const GameMessage *msg )
 
 	switch (msg->getType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GameMessage::MSG_QUEUE_UNIT_CREATE:
 		case GameMessage::MSG_DOZER_CONSTRUCT:
 		case GameMessage::MSG_DOZER_CONSTRUCT_LINE:

@@ -45,6 +45,8 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/Language.h"
@@ -90,7 +92,7 @@ WindowMsgHandledType GadgetProgressBarSystem( GameWindow *window, UnsignedInt ms
       if (newPos < 0 || newPos > 100)
         break;
 
-      window->winSetUserData( (void *)newPos );
+      window->winSetUserData( (void*)(intptr_t)newPos );
 
 			break;
 

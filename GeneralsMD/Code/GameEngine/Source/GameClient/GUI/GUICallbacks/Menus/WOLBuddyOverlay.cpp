@@ -30,6 +30,8 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "Common/AudioEventRTS.h"
 #include "Common/PlayerList.h"
@@ -449,7 +451,7 @@ void updateBuddyInfo()
 			formatStr = info.m_statusString;
 		}
 		GadgetListBoxAddEntryText(buddyControls.listboxBuddies, formatStr, GameSpyColor[GSCOLOR_DEFAULT], index, 1);
-		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(profileID), index, 0 );
+		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void*)(intptr_t)(profileID), index, 0 );
 		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(ITEM_BUDDY), index, 1 );
 
 		if (profileID == selectedProfile)
@@ -467,7 +469,7 @@ void updateBuddyInfo()
 		UnicodeString formatStr;
 		formatStr.translate(info.m_name.str());
 		int index = GadgetListBoxAddEntryText(buddyControls.listboxBuddies, formatStr, GameSpyColor[GSCOLOR_DEFAULT], -1, -1);
-		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void *)(profileID), index, 0 );
+		GadgetListBoxSetItemData(buddyControls.listboxBuddies, (void*)(intptr_t)(profileID), index, 0 );
 
 		// insert status into box
 		formatStr = TheGameText->fetch("GUI:BuddyAddReq");
@@ -1419,7 +1421,7 @@ void refreshIgnoreList()
 		UnicodeString name;
 		name.translate(it->second);
 		Int pos = GadgetListBoxAddEntryText(listboxIgnore, name, GameMakeColor(255,100,100,255),-1);
-		GadgetListBoxSetItemData(listboxIgnore, (void *)it->first,pos );
+		GadgetListBoxSetItemData(listboxIgnore, (void*)(intptr_t)it->first,pos );
 		++it;
 	}
 	IgnoreList tempList;

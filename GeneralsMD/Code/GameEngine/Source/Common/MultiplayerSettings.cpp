@@ -81,8 +81,7 @@ MultiplayerSettings::MultiplayerSettings()
 	m_showRandomPlayerTemplate = TRUE;
 	m_showRandomStartPos = TRUE;
 	m_showRandomColor = TRUE;
-	m_observerColor;
-	m_randomColor;
+	// GeneralsX @build Codex 31/10/2026 Removed two side-effect-free expressions.
 
   m_gotDefaultStartingMoney = false;
 	// GeneralsX @tweak fbraz 30/03/2026 Add larger starting money options to the default list

@@ -557,7 +557,7 @@ void W3DSnowManager::renderAsQuads(RenderInfoClass &rinfo, Int cubeOriginX, Int 
 				cubeOriginXRemainder = cubeOriginX;	//reset to normal amount
 			}
 flush_particles:
-			numberInBatch;	//need something at goto destination - stupid c compiler.
+			(void)numberInBatch;	//need something at goto destination - stupid c compiler.
 		}
 
 		//Render any particles that may be queued up.

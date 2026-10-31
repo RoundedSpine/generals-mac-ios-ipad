@@ -2186,6 +2186,9 @@ void ScriptActions::doTeamHuntWithCommandButton(const AsciiString& teamName, con
 
 		switch( commandButton->getCommandType() )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 
 			case GUI_COMMAND_FIRE_WEAPON:
 			case GUI_COMMAND_SWITCH_WEAPON:
@@ -5086,7 +5089,7 @@ void ScriptActions::doForceObjectSelection(const AsciiString& teamName, const As
 
 void* __cdecl killTheObject( Object *obj, void* userObj )
 {
-	userObj;
+	(void)userObj;
 	if (obj)
 		obj->kill();
 	return nullptr;

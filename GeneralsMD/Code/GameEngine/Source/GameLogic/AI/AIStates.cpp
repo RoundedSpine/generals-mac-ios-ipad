@@ -5984,6 +5984,9 @@ Object *AIAttackSquadState::chooseVictim()
 
 	switch(difficulty)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DIFFICULTY_EASY:
 		{
 			// pick a random unit
@@ -6732,6 +6735,9 @@ StateReturnType AIGuardState::onEnter()
 	// tell the guarding machine what it is guarding with
 	switch(ai->getGuardTargetType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GUARDTARGET_LOCATION: m_guardMachine->setTargetPositionToGuard( ai->getGuardLocation() ); break;
 		case GUARDTARGET_OBJECT: m_guardMachine->setTargetToGuard( TheGameLogic->findObjectByID(ai->getGuardObject()) ); break;
 		case GUARDTARGET_AREA: m_guardMachine->setAreaToGuard( ai->getAreaToGuard() ); break;

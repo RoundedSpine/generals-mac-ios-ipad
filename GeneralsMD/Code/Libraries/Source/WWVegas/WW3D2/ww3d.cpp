@@ -82,6 +82,8 @@
 
 
 #include "ww3d.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include "win.h"  // GeneralsX @build fbraz 10/02/2026 - For MMRESULT/timeBeginPeriod/BITMAP structures
 #include "rinfo.h"
 #include "assetmgr.h"
@@ -1326,10 +1328,10 @@ void WW3D::Make_Screen_Shot( const char * filename_base , const float gamma, con
 	char ext[4];
 	switch (format) {
 		case TGA:
-			sprintf(ext,"tga");
+			snprintf(ext, sizeof(ext),"tga");
 			break;
 		case BMP:
-			sprintf(ext,"bmp");
+			snprintf(ext, sizeof(ext),"bmp");
 			break;
 		default:
 			WWASSERT(0);

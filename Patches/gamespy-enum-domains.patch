@@ -1,0 +1,42 @@
+--- a/src/gp/gpiconnect.c
++++ b/src/gp/gpiconnect.c
+@@ -424,7 +424,7 @@
+     gpiAppendIntToBuffer(connection, &iconnection->outputBuffer, iconnection->partnerID);
+     gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, "\\response\\");
+     gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, response);
+-    if (iconnection->firewall == GP_FIREWALL)
++    if (iconnection->firewall == GPITrue)
+         gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, "\\firewall\\1");
+     gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, "\\port\\");
+     gpiAppendIntToBuffer(connection, &iconnection->outputBuffer, iconnection->peerPort);
+--- a/src/gp/gpisearch.c
++++ b/src/gp/gpisearch.c
+@@ -460,7 +460,7 @@
+     int index;
+     int oldIndex;
+     GPIBool loop;
+-    GPIBool more;
++    GPEnum more;
+     GPICallback callback;
+     GPIConnection* iconnection = (GPIConnection*)*connection;
+     int len;
+@@ -828,7 +828,7 @@
+ 
+                     // Save the more state.
+                     ///////////////////////
+-                    more = (GPIBool)arg.more;
++                    more = arg.more;
+ 
+                     // Get the callback.
+                     ////////////////////
+--- a/src/serverbrowsing/sb_serverbrowsing.c
++++ b/src/serverbrowsing/sb_serverbrowsing.c
+@@ -299,7 +299,7 @@
+     while (sb->triggerIP != 0 && err == sbe_noerror) {
+         msleep(10);
+         err = ServerBrowserThink(sb);
+-        if (viaMaster && sb->list.state == sb_disconnected) //we were supposed to get from master, and it's disconnected
++        if (viaMaster && sb->list.state == sl_disconnected) //we were supposed to get from master, and it's disconnected
+             break;
+     }
+     return err;

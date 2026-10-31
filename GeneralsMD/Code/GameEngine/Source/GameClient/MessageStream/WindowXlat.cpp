@@ -84,6 +84,9 @@ static GameWindowMessage rawMouseToWindowMessage( const GameMessage *msg )
 
 	switch( msg->getType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		// ------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_POSITION:
 			gwm = GWM_MOUSE_POS;

@@ -252,6 +252,9 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 			texture->Release_Ref();//release reference since it's held by streakline
 			switch( sys->getShaderType() )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case ParticleSystemInfo::ADDITIVE:
 					m_streakLine->Set_Shader( ShaderClass::_PresetAdditiveSpriteShader );
 					break;
@@ -302,6 +305,9 @@ void W3DParticleSystemManager::doParticles(RenderInfoClass &rinfo)
 
 				switch( sys->getShaderType() )
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 					case ParticleSystemInfo::ADDITIVE:
 						m_pointGroup->Set_Shader( ShaderClass::_PresetAdditiveSpriteShader );
 						break;

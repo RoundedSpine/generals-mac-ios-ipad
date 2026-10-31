@@ -450,6 +450,9 @@ void SlavedUpdate::doRepairLogic()
 		//Now drive the repairing states.
 		switch( m_repairState )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case REPAIRSTATE_NONE:
 				setRepairState( REPAIRSTATE_READY );
 				break;
@@ -571,6 +574,9 @@ void SlavedUpdate::setRepairState( RepairStates repairState )
 
 	switch( repairState )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case REPAIRSTATE_UNPACKING:
 			setRepairModelConditionStates( MODELCONDITION_UNPACKING );
 			m_framesToWait = 15;

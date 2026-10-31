@@ -212,7 +212,7 @@ static const char *getCurrentTimeString()
 static const char *getCurrentTickString()
 {
 	static char TheTickString[32];
-	snprintf(TheTickString, ARRAY_SIZE(TheTickString), "(T=%08lx)", ::GetTickCount());
+	snprintf(TheTickString, ARRAY_SIZE(TheTickString), "(T=%08lx)", static_cast<unsigned long>(::GetTickCount()));
 	return TheTickString;
 }
 
@@ -880,7 +880,7 @@ void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
 	}
 	#else
 	// Linux: Output to stderr (game will crash anyway after this)
-	fprintf(stderr, "FATAL ERROR: %s\n%s\n", prompt.str(), mesg.str());
+	fprintf(stderr, "FATAL ERROR: %ls\n%ls\n", prompt.str(), mesg.str());
 	#endif
 
 	char prevbuf[ _MAX_PATH ];

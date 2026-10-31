@@ -188,6 +188,9 @@ void OCLSpecialPower::doSpecialPowerAtLocation( const Coord3D *loc, Real angle, 
 	Coord3D creationCoord;
 	switch (modData->m_createLoc)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case CREATE_AT_EDGE_NEAR_SOURCE:
 			creationCoord = TheTerrainLogic->findClosestEdgePoint( getObject()->getPosition() );
 			ObjectCreationList::create( ocl, getObject(), &creationCoord, &targetCoord, angle );

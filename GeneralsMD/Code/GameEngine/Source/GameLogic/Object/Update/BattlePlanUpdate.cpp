@@ -301,6 +301,9 @@ CommandOption BattlePlanUpdate::getCommandOption() const
 {
 	switch( m_desiredPlan )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case PLANSTATUS_BOMBARDMENT:
 			return OPTION_ONE;
 		case PLANSTATUS_HOLDTHELINE:
@@ -467,6 +470,9 @@ void BattlePlanUpdate::setStatus( TransitionStatus newStatus )
 		case TRANSITIONSTATUS_UNPACKING:
 			switch( m_currentPlan )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case PLANSTATUS_BOMBARDMENT:
 					obj->clearModelConditionState( MODELCONDITION_DOOR_1_OPENING );
 					TheAudio->removeAudioEvent( m_bombardmentUnpack.getPlayingHandle() );
@@ -485,6 +491,9 @@ void BattlePlanUpdate::setStatus( TransitionStatus newStatus )
 		case TRANSITIONSTATUS_ACTIVE:
 			switch( m_currentPlan )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case PLANSTATUS_BOMBARDMENT:
 					obj->clearModelConditionState( MODELCONDITION_DOOR_1_WAITING_TO_CLOSE );
 					break;
@@ -501,6 +510,9 @@ void BattlePlanUpdate::setStatus( TransitionStatus newStatus )
 		case TRANSITIONSTATUS_PACKING:
 			switch( m_currentPlan )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case PLANSTATUS_BOMBARDMENT:
 					obj->clearModelConditionState( MODELCONDITION_DOOR_1_CLOSING );
 					TheAudio->removeAudioEvent( m_bombardmentPack.getPlayingHandle() );
@@ -542,6 +554,9 @@ void BattlePlanUpdate::setStatus( TransitionStatus newStatus )
 
 			switch( m_currentPlan )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case PLANSTATUS_BOMBARDMENT:
 					obj->setModelConditionState( MODELCONDITION_DOOR_1_OPENING );
 					obj->getDrawable()->setAnimationLoopDuration( data->m_bombardmentPlanAnimationFrames );
@@ -611,6 +626,9 @@ void BattlePlanUpdate::setStatus( TransitionStatus newStatus )
 
 			switch( m_currentPlan )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case PLANSTATUS_BOMBARDMENT:
 					obj->setModelConditionState( MODELCONDITION_DOOR_1_WAITING_TO_CLOSE );
 					break;
@@ -634,6 +652,9 @@ void BattlePlanUpdate::setStatus( TransitionStatus newStatus )
 
 			switch( m_currentPlan )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case PLANSTATUS_BOMBARDMENT:
 					obj->setModelConditionState( MODELCONDITION_DOOR_1_CLOSING );
 					obj->getDrawable()->setAnimationLoopDuration( data->m_bombardmentPlanAnimationFrames );
@@ -738,6 +759,9 @@ void BattlePlanUpdate::setBattlePlan( BattlePlanStatus plan )
 	{
 		switch( m_planAffectingArmy )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case PLANSTATUS_BOMBARDMENT:
 			{
 				//Remove the previous plan!

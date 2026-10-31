@@ -1,0 +1,121 @@
+--- a/src/IMG_ImageIO.m
++++ b/src/IMG_ImageIO.m
+@@ -31,7 +31,12 @@
+ #include <Foundation/Foundation.h>
+ 
+ #if (TARGET_OS_IPHONE == 1) || (TARGET_IPHONE_SIMULATOR == 1)
++// GeneralsX @bugfix Codex 31/10/2026 Use modern UTI conformance on supported iOS deployment targets.
++#if __IPHONE_OS_VERSION_MIN_REQUIRED >= 140000
++#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
++#else
+ #import <MobileCoreServices/MobileCoreServices.h> // for UTCoreTypes.h
++#endif
+ #import <ImageIO/ImageIO.h>
+ #import <UIKit/UIImage.h>
+ #else
+@@ -404,7 +409,15 @@
+     //  CFShow(uti_type);
+ 
+     // Unsure if we really want conformance or equality
++#if TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED >= 140000
++    @autoreleasepool {
++        UTType *requested_type = [UTType typeWithIdentifier:(__bridge NSString *)uti_string_to_test];
++        UTType *image_type = [UTType typeWithIdentifier:(__bridge NSString *)uti_type];
++        is_type = requested_type && image_type && [requested_type conformsToType:image_type];
++    }
++#else
+     is_type = UTTypeConformsTo(uti_string_to_test, uti_type);
++#endif
+ 
+     CFRelease(image_source);
+ 
+@@ -423,19 +436,19 @@
+ 
+ bool IMG_isICO(SDL_IOStream *src)
+ {
+-    return Internal_isType(src, kUTTypeICO);
++    return Internal_isType(src, CFSTR("com.microsoft.ico"));
+ }
+ 
+ bool IMG_isBMP(SDL_IOStream *src)
+ {
+-    return Internal_isType(src, kUTTypeBMP);
++    return Internal_isType(src, CFSTR("com.microsoft.bmp"));
+ }
+ 
+ #endif /* BMP_USES_IMAGEIO */
+ 
+ bool IMG_isGIF(SDL_IOStream *src)
+ {
+-    return Internal_isType(src, kUTTypeGIF);
++    return Internal_isType(src, CFSTR("com.compuserve.gif"));
+ }
+ 
+ #ifdef JPG_USES_IMAGEIO
+@@ -443,7 +456,7 @@
+ // Note: JPEG 2000 is kUTTypeJPEG2000
+ bool IMG_isJPG(SDL_IOStream *src)
+ {
+-    return Internal_isType(src, kUTTypeJPEG);
++    return Internal_isType(src, CFSTR("public.jpeg"));
+ }
+ 
+ #endif /* JPG_USES_IMAGEIO */
+@@ -456,7 +469,7 @@
+ 
+ bool IMG_isTIF(SDL_IOStream *src)
+ {
+-    return Internal_isType(src, kUTTypeTIFF);
++    return Internal_isType(src, CFSTR("public.tiff"));
+ }
+ 
+ static SDL_Surface *LoadImageFromIOStream(SDL_IOStream *rw_ops, CFStringRef uti_string_hint)
+@@ -514,26 +527,26 @@
+ 
+ SDL_Surface* IMG_LoadICO_IO (SDL_IOStream *src)
+ {
+-    return LoadImageFromIOStream(src, kUTTypeICO);
++    return LoadImageFromIOStream(src, CFSTR("com.microsoft.ico"));
+ }
+ 
+ SDL_Surface* IMG_LoadBMP_IO (SDL_IOStream *src)
+ {
+-    return LoadImageFromIOStream(src, kUTTypeBMP);
++    return LoadImageFromIOStream(src, CFSTR("com.microsoft.bmp"));
+ }
+ 
+ #endif /* BMP_USES_IMAGEIO */
+ 
+ SDL_Surface* IMG_LoadGIF_IO (SDL_IOStream *src)
+ {
+-    return LoadImageFromIOStream (src, kUTTypeGIF);
++    return LoadImageFromIOStream (src, CFSTR("com.compuserve.gif"));
+ }
+ 
+ #ifdef JPG_USES_IMAGEIO
+ 
+ SDL_Surface* IMG_LoadJPG_IO (SDL_IOStream *src)
+ {
+-    return LoadImageFromIOStream (src, kUTTypeJPEG);
++    return LoadImageFromIOStream (src, CFSTR("public.jpeg"));
+ }
+ 
+ #endif /* JPG_USES_IMAGEIO */
+@@ -542,7 +555,7 @@
+ 
+ SDL_Surface* IMG_LoadPNG_ImageIO (SDL_IOStream *src)
+ {
+-    return LoadImageFromIOStream (src, kUTTypePNG);
++    return LoadImageFromIOStream (src, CFSTR("public.png"));
+ }
+ 
+ #endif /* PNG_USES_IMAGEIO */
+@@ -554,7 +567,7 @@
+ 
+ SDL_Surface* IMG_LoadTIF_IO (SDL_IOStream *src)
+ {
+-    return LoadImageFromIOStream(src, kUTTypeTIFF);
++    return LoadImageFromIOStream(src, CFSTR("public.tiff"));
+ }
+ 
+ // Since UIImage doesn't really support streams well, we should optimize for the file case.

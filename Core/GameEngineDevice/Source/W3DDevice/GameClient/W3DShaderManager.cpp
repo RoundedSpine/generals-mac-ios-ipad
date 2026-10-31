@@ -54,6 +54,8 @@
 //-----------------------------------------------------------------------------
 
 #include "dx8wrapper.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include "quadlist.h"
 #include "assetmgr.h"
 #include "Lib/BaseType.h"
@@ -1136,6 +1138,9 @@ Bool ScreenMotionBlurFilter::setup(FilterModes mode)
 	m_decrement = false;
 	m_skipRender = false;
 	switch (mode) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case FM_VIEW_MB_OUT_SATURATE:
 		case FM_VIEW_MB_OUT_ALPHA:
 			m_maxCount = MAX_COUNT;
@@ -3033,7 +3038,7 @@ ChipsetType W3DShaderManager::getChipset()
 		char buf[256];
 
 		//Convert version to Real
-		sprintf(buf,"%d.%d",DX8Wrapper::Get_Current_Caps()->Get_Pixel_Shader_Major_Version(),DX8Wrapper::Get_Current_Caps()->Get_Pixel_Shader_Minor_Version());
+		snprintf(buf, sizeof(buf),"%d.%d",DX8Wrapper::Get_Current_Caps()->Get_Pixel_Shader_Major_Version(),DX8Wrapper::Get_Current_Caps()->Get_Pixel_Shader_Minor_Version());
 		sscanf(buf,"%f",&pixelShaderVersion);
 
 		if (maxTextures >= 4)

@@ -35,6 +35,8 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "render2dsentence.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include "surfaceclass.h"
 #include "texture.h"
 #include "wwprofile.h"
@@ -766,14 +768,14 @@ void	Render2DSentenceClass::Build_Sentence_Centered (const WCHAR *text, int *hkX
 					if (word_width != 0 )
 					{
 						const WCHAR *word_back = word;
-						*word_back--;
+						--word_back;
 						if (*word_back == L' ')
 						{
 							line_width -= word_width;
 							offset =-1;
 						}
 					}
-					*word++;
+					++word;
 					calcHotKeyX = true;
 				}
 
@@ -1044,7 +1046,7 @@ Vector2	Render2DSentenceClass::Build_Sentence_Not_Centered (const WCHAR *text, i
 					float word_width	= char_spacing;
 					while ((*word != 0) && (*word > L' ')) {
 						if(ParseHotKey && (*word == L'&') && (*word+1 != 0) && (*word+1 > L' ') && (*word+1 != L'\n'))
-							*word++;
+							++word;
 						word_width += Font->Get_Char_Spacing (*word++);
 					}
 
@@ -1230,7 +1232,7 @@ FontCharsClass::Get_Char_Data (WCHAR ch)
 		// GeneralsX @bugfix fbraz 03/06/2026 Log ALL Cyrillic delegations for diagnostics
 		if (ch >= 0x0400 && ch <= 0x04FF) {
 			char log_buffer[512];
-			sprintf(log_buffer,
+			snprintf(log_buffer, sizeof(log_buffer),
 				"[GX-ISSUE144] Get_Char_Data delegate U+%04X from=%s to=%s",
 				(unsigned int)ch,
 				GDIFontName.str(),
@@ -1843,7 +1845,7 @@ FontCharsClass::Create_Freetype_Font (const char *font_name)
 	// GeneralsX @bugfix fbraz 03/06/2026 Log FreeType font details for Cyrillic font issue
 	{
 		char log_buffer[512];
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Freetype path=%s name=%s family=%s num_glyphs=%ld has_Cyrillic_Caps=%s",
 			font_path,
 			font_name,
@@ -1885,7 +1887,7 @@ FontCharsClass::Store_Freetype_Char (WCHAR ch)
 	// GeneralsX @bugfix fbraz 03/06/2026 Log ALL Cyrillic character rendering attempts
 	if (ch >= 0x0400 && ch <= 0x04FF) {
 		char log_buffer[512];
-		sprintf(log_buffer,
+		snprintf(log_buffer, sizeof(log_buffer),
 			"[GX-ISSUE144] Store_Freetype_Char U+%04X glyph_idx=%u font=%s",
 			(unsigned int)ch,
 			(unsigned int)glyph_index,

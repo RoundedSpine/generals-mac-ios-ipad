@@ -210,7 +210,7 @@ void WWDebug_Printf(const char * format,...)
 		char buffer[4096];
 
 		va_start(va, format);
-		vsprintf(buffer, format, va);
+		vsnprintf(buffer, sizeof(buffer), format, va);
 		WWASSERT((strlen(buffer) < sizeof(buffer)));
 
 		_CurMessageHandler(WWDEBUG_TYPE_INFORMATION, buffer);
@@ -240,7 +240,7 @@ void WWDebug_Printf_Warning(const char * format,...)
 		char buffer[4096];
 
 		va_start(va, format);
-		vsprintf(buffer, format, va);
+		vsnprintf(buffer, sizeof(buffer), format, va);
 		WWASSERT((strlen(buffer) < sizeof(buffer)));
 
 		_CurMessageHandler(WWDEBUG_TYPE_WARNING, buffer);
@@ -270,7 +270,7 @@ void WWDebug_Printf_Error(const char * format,...)
 		char buffer[4096];
 
 		va_start(va, format);
-		vsprintf(buffer, format, va);
+		vsnprintf(buffer, sizeof(buffer), format, va);
 		WWASSERT((strlen(buffer) < sizeof(buffer)));
 
 		_CurMessageHandler(WWDEBUG_TYPE_ERROR, buffer);
@@ -297,7 +297,7 @@ void WWDebug_Assert_Fail(const char * expr,const char * file, int line)
 	if (_CurAssertHandler != nullptr) {
 
 		char buffer[4096];
-		sprintf(buffer,"%s (%d) Assert: %s\n",file,line,expr);
+		snprintf(buffer, sizeof(buffer),"%s (%d) Assert: %s\n",file,line,expr);
 		_CurAssertHandler(buffer);
 
 	} else {
@@ -310,7 +310,7 @@ void WWDebug_Assert_Fail(const char * expr,const char * file, int line)
 		}
 
       char assertbuf[4096];
-		sprintf(assertbuf, "Assert failed\n\n. File %s Line %d", file, line);
+		snprintf(assertbuf, sizeof(assertbuf), "Assert failed\n\n. File %s Line %d", file, line);
 
       int code = MessageBoxA(nullptr, assertbuf, "WWDebug_Assert_Fail", MB_ABORTRETRYIGNORE|MB_ICONHAND|MB_SETFOREGROUND|MB_TASKMODAL);
 
@@ -377,7 +377,7 @@ void WWDebug_Assert_Fail_Print(const char * expr,const char * file, int line,con
 	if (_CurAssertHandler != nullptr) {
 
 		char buffer[4096];
-		sprintf(buffer,"%s (%d) Assert: %s %s\n",file,line,expr, string);
+		snprintf(buffer, sizeof(buffer),"%s (%d) Assert: %s %s\n",file,line,expr, string);
 		_CurAssertHandler(buffer);
 
 	} else {

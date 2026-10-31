@@ -606,6 +606,9 @@ Bool Particle::isInvisible()
 {
 	switch (m_system->getShaderType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case ParticleSystemInfo::ADDITIVE:
 			// if color is black, this particle is invisible
 
@@ -930,6 +933,9 @@ void ParticleSystemInfo::xfer( Xfer *xfer )
 	// emission velocity
 	switch( m_emissionVelocityType )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		// --------------------------------------------------------------------------------------------
 		case ORTHO:
@@ -968,6 +974,9 @@ void ParticleSystemInfo::xfer( Xfer *xfer )
 	// emission volume
 	switch( m_emissionVolumeType )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		// --------------------------------------------------------------------------------------------
 		case POINT:
@@ -1478,6 +1487,9 @@ const Coord3D *ParticleSystem::computeParticleVelocity( const Coord3D *pos )
 
 			switch( m_emissionVolumeType )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case CYLINDER:
 					Coord2D disk;
 

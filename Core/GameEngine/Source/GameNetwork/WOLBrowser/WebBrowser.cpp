@@ -314,8 +314,7 @@ STDMETHODIMP WebBrowser::TestMethod(Int num1)
 #else
 
 // Linux stub - WOL (Westwood Online) servers offline since 2010
-#pragma message("WebBrowser is stubbed on this platform!")
-
+// Legacy implementation note: "WebBrowser is stubbed on this platform!"
 WebBrowser *TheWebBrowser = nullptr;
 
 #endif // _WIN32

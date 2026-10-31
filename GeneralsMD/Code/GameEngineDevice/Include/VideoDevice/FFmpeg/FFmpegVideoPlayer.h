@@ -87,17 +87,18 @@ class FFmpegVideoStream : public VideoStream
 		static void onFrame(AVFrame *frame, int stream_idx, int stream_type, void *user_data);
 	public:																							
 																											
-		virtual void update( void );											///< Update bink stream
+		// GeneralsX @build Codex 31/10/2026 Make the existing virtual overrides explicit.
+		virtual void update( void ) override;											///< Update bink stream
 
-		virtual Bool	isFrameReady( void );								///< Is the frame ready to be displayed
-		virtual void	frameDecompress( void );						///< Render current frame in to buffer
-		virtual void	frameRender( VideoBuffer *buffer ); ///< Render current frame in to buffer
-		virtual void	frameNext( void );									///< Advance to next frame
-		virtual Int		frameIndex( void );									///< Returns zero based index of current frame
-		virtual Int		frameCount( void );									///< Returns the total number of frames in the stream
-		virtual void	frameGoto( Int index );							///< Go to the spcified frame index
-		virtual Int		height( void );											///< Return the height of the video
-		virtual Int		width( void );											///< Return the width of the video
+		virtual Bool	isFrameReady( void ) override;								///< Is the frame ready to be displayed
+		virtual void	frameDecompress( void ) override;						///< Render current frame in to buffer
+		virtual void	frameRender( VideoBuffer *buffer ) override; ///< Render current frame in to buffer
+		virtual void	frameNext( void ) override;									///< Advance to next frame
+		virtual Int		frameIndex( void ) override;									///< Returns zero based index of current frame
+		virtual Int		frameCount( void ) override;									///< Returns the total number of frames in the stream
+		virtual void	frameGoto( Int index ) override;							///< Go to the spcified frame index
+		virtual Int		height( void ) override;											///< Return the height of the video
+		virtual Int		width( void ) override;											///< Return the width of the video
 };
 
 //===============================
@@ -118,24 +119,24 @@ class FFmpegVideoPlayer : public VideoPlayer
 	public:
 
 		// subsytem requirements
-		virtual void	init( void );														///< Initialize video playback code
-		virtual void	reset( void );													///< Reset video playback
-		virtual void	update( void );													///< Services all audio tasks. Should be called frequently
+		virtual void	init( void ) override;														///< Initialize video playback code
+		virtual void	reset( void ) override;													///< Reset video playback
+		virtual void	update( void ) override;													///< Services all audio tasks. Should be called frequently
 																													
-		virtual void	deinit( void );													///< Close down player
+		virtual void	deinit( void ) override;													///< Close down player
 																														
 																													
 		FFmpegVideoPlayer();																				
 		~FFmpegVideoPlayer();																				
 																													
 		// service																						
-		virtual void	loseFocus( void );											///< Should be called when application loses focus
-		virtual void	regainFocus( void );										///< Should be called when application regains focus
+		virtual void	loseFocus( void ) override;											///< Should be called when application loses focus
+		virtual void	regainFocus( void ) override;										///< Should be called when application regains focus
 																												
-		virtual VideoStreamInterface*	open( AsciiString movieTitle );	///< Open video file for playback
-		virtual VideoStreamInterface*	load( AsciiString movieTitle );	///< Load video file in to memory for playback
+		virtual VideoStreamInterface*	open( AsciiString movieTitle ) override;	///< Open video file for playback
+		virtual VideoStreamInterface*	load( AsciiString movieTitle ) override;	///< Load video file in to memory for playback
 
-		virtual void notifyVideoPlayerOfNewProvider( Bool nowHasValid );
+		virtual void notifyVideoPlayerOfNewProvider( Bool nowHasValid ) override;
 		virtual void initializeBinkWithMiles( void );
 };
 

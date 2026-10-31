@@ -466,6 +466,9 @@ void AudioEventRTS::advanceNextPlayPortion()
 {
 	switch (m_portionToPlayNext)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case PP_Attack:
 			m_portionToPlayNext = PP_Sound;
 			break;
@@ -726,6 +729,9 @@ const Coord3D *AudioEventRTS::getCurrentPosition()
 {
 	switch (m_ownerType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case OT_Positional:
 		return &m_positionOfAudio;
 

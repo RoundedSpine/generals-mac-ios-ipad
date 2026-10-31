@@ -620,6 +620,9 @@ void W3DMouse::setRedrawMode(RedrawMode mode)
 
 	switch (mode)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case RM_WINDOWS:
 		{	//Windows mouse doesn't need an update thread.
 			if (thread.Is_Running())

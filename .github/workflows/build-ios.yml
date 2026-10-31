@@ -49,6 +49,7 @@ jobs:
               "test_zone_merges.py", "test_frozen_occupancy_cache.py", "test_reused_path_contexts.py", "test_path_lookahead.py",
               "test_joined_search_pool.py", "test_participant_path_pool.py",
               "test_four_request_path_pool.py",
+              "test_build_warning_fixes.py",
           ]
           for test in tests:
               result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)
@@ -90,14 +91,34 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
-          brew install cmake ninja meson pkg-config xcodegen glslang autoconf autoconf-archive automake libtool
+          # GeneralsX @build Codex 31/10/2026 Hosted images already contain some tools; install only missing formulae.
+          missing_tools=()
+          missing_tools_count=0
+          for tool in cmake ninja meson pkg-config xcodegen glslang autoconf autoconf-archive automake libtool; do
+            if ! brew list --versions "$tool" >/dev/null 2>&1; then
+              missing_tools+=("$tool")
+              missing_tools_count=$((missing_tools_count + 1))
+            fi
+          done
+          if (( missing_tools_count )); then
+            brew install "${missing_tools[@]}"
+          fi
           mkdir -p logs "$VCPKG_DEFAULT_BINARY_CACHE"
 
       # This revision includes the manifest's FFmpeg 8.1.1#2 override.
       - name: Set up vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: '08098dce081e9411889686fc3f4aecbde95fc2b1'
+        run: |
+          # GeneralsX @build Codex 31/10/2026 Bootstrap the same pinned checkout directly, avoiding the action's deprecated Node dependencies.
+          set -euo pipefail
+          vcpkg_revision=08098dce081e9411889686fc3f4aecbde95fc2b1
+          vcpkg_root="$RUNNER_TEMP/generals-ios-vcpkg"
+          git init "$vcpkg_root"
+          git -C "$vcpkg_root" remote add origin https://github.com/microsoft/vcpkg.git
+          git -C "$vcpkg_root" fetch --depth 1 origin "$vcpkg_revision"
+          git -C "$vcpkg_root" -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          test "$(git -C "$vcpkg_root" rev-parse HEAD)" = "$vcpkg_revision"
+          "$vcpkg_root/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$vcpkg_root" >> "$GITHUB_ENV"
 
       - name: Cache iOS dependency binaries
         id: vcpkg-cache
@@ -109,7 +130,7 @@ jobs:
 
       - name: Use the persistent dependency cache
         run: |
-          # run-vcpkg sets its own cache environment; point it at the restored directory.
+          # Point vcpkg at the restored binary cache before manifest configuration.
           echo "VCPKG_DEFAULT_BINARY_CACHE=$GITHUB_WORKSPACE/.vcpkg-cache" >> "$GITHUB_ENV"
           echo "VCPKG_BINARY_SOURCES=clear;files,$GITHUB_WORKSPACE/.vcpkg-cache,readwrite" >> "$GITHUB_ENV"
 
@@ -158,6 +179,7 @@ jobs:
             2>&1 | tee logs/configure_ios.log
 
       - name: Build Zero Hour for iPhone and iPad
+        id: build
         run: |
           set -euo pipefail
           # DXVK's external Meson build links the in-tree SDL3 library.
@@ -178,7 +200,7 @@ jobs:
           test -f build/ios-package/GeneralsXZH.entitlements
 
       - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: GeneralsXZH-iOS-unsigned
           path: |
@@ -188,13 +210,23 @@ jobs:
           compression-level: 0
           retention-days: 14
 
+      - name: Summarize native build warnings
+        if: always()
+        run: |
+          mkdir -p logs
+          python3 scripts/build/ios/report-build-warnings.py \
+            --outcome '${{ steps.build.outcome }}' \
+            --output logs/ios-warning-summary.json \
+            logs/configure_ios.log logs/build_sdl_ios.log logs/build_ios.log
+
       - name: Upload build diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios-build-logs
           path: |
             logs/*ios.log
+            logs/ios-warning-summary.json
             build/ios-vulkan/vcpkg-manifest-install.log
             build/ios-vulkan/_deps/dxvk-build-macos/meson-logs/meson-log.txt
           if-no-files-found: ignore

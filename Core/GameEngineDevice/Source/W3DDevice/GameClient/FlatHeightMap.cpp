@@ -357,6 +357,9 @@ void FlatHeightMapRenderObjClass::On_Frame_Update()
 	BaseHeightMapRenderObjClass::On_Frame_Update();
 
 	switch(m_updateState) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case STATE_IDLE: return;
 		case STATE_MOVING : m_updateState = STATE_MOVING2; return;
 		case STATE_MOVING2: {

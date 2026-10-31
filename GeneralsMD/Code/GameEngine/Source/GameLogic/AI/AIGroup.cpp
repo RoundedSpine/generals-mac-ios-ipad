@@ -870,7 +870,7 @@ Bool AIGroup::friend_moveInfantryToPos( const Coord3D *pos, CommandSourceType cm
 
 		ai->setTmpValue( (fiveColumnDelta<<16)|(columnDelta&0x00ffff));
 		// Sort next pass by the dot product of start vector.
-		dx, dy;
+		// GeneralsX @build Codex 31/10/2026 Removed a side-effect-free expression.
 		dx = theUnit->getPosition()->x - center.x;
 		dy = theUnit->getPosition()->y - center.y;
 		Int adjust = 0;

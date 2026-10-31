@@ -663,7 +663,7 @@ relative to the ray so we can early exit as soon as we have a hit.
 //=============================================================================
 // BaseHeightMapRenderObjClass::Cast_Ray
 //=============================================================================
-/** Return intersection of a ray with the heightmap mesh.
+/ ** Return intersection of a ray with the heightmap mesh.
 This is a quick version that just checks every polygon inside
 a 2D bounding rectangle of the ray projected onto the heightfield plane.
 For most of our view-picking cases the ray is almost perpendicular to the

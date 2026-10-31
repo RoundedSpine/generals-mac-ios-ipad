@@ -2215,6 +2215,9 @@ Bool Locomotor::handleBehaviorZ(Object* obj, PhysicsBehavior *physics, const Coo
 	// keep the agent aligned on the terrain
 	switch(m_template->m_behaviorZ)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case Z_NO_Z_MOTIVE_FORCE:
 			// nothing to do.
 			requiresConstantCalling = FALSE;

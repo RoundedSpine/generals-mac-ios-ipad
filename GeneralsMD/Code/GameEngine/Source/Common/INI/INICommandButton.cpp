@@ -79,6 +79,9 @@ void ControlBar::parseCommandButtonDefinition( INI *ini )
 	// TheSuperHackers @tweak Make sure Special Power buttons have a Special Power template.
 	switch (button->getCommandType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case GUI_COMMAND_SPECIAL_POWER:
 	case GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT:
 	case GUI_COMMAND_SPECIAL_POWER_CONSTRUCT:

@@ -716,6 +716,9 @@ void CPUDetectClass::Init_Processor_Family()
 	Init_Cache();
 
 	switch (ProcessorManufacturer) {
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case MANUFACTURER_INTEL:
 		Init_Intel_Processor_Type();
 		break;
@@ -919,7 +922,7 @@ void CPUDetectClass::Init_Memory()
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 
 #else
-#warning FIX Init_Memory()
+// Non-Windows builds retain zero for these unused legacy diagnostic counters.
 #endif // WIN32
 }
 
@@ -967,7 +970,7 @@ void CPUDetectClass::Init_OS()
     OSVersionExtraInfo = "";
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 #else
-#warning FIX Init_OS()
+// Non-Windows OS identification belongs to the platform layer, not these legacy counters.
 #endif
 }
 

@@ -123,7 +123,8 @@ class SoundSceneObjClass : public MultiListObjectClass, public PersistClass, pub
 		//////////////////////////////////////////////////////////////////////
 		//	Event handling
 		//////////////////////////////////////////////////////////////////////
-		virtual void			On_Event (AudioCallbackClass::EVENTS event, uint32 param1 = 0, uint32 param2 = 0);
+		// GeneralsX @bugfix Codex 31/10/2026 Logical-heard events carry object pointers on 64-bit platforms.
+		virtual void			On_Event (AudioCallbackClass::EVENTS event, uintptr_t param1 = 0, uintptr_t param2 = 0);
 		virtual void			Register_Callback (AudioCallbackClass::EVENTS events, AudioCallbackClass *callback);
 
 		//////////////////////////////////////////////////////////////////////
@@ -225,14 +226,17 @@ __inline void
 SoundSceneObjClass::On_Event
 (
 	AudioCallbackClass::EVENTS	event,
-	uint32							param1,
-	uint32							param2
+	uintptr_t							param1,
+	uintptr_t							param2
 )
 {
 	if ((m_pCallback != nullptr) && (m_RegisteredEvents & event)) {
 
 		switch (event)
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case AudioCallbackClass::EVENT_SOUND_STARTED:
 				m_pCallback->On_Sound_Started (this);
 				break;

@@ -635,7 +635,7 @@ void MainMenuInit( WindowLayout *layout, void *userData )
 		getUpdate->winHide( TRUE );
 		//getUpdate->winEnable( FALSE );
 	}
-	/**/
+	/ **/
 
 	// GeneralsX @feature BenderAI 21/04/2026 Start background GitHub release check for tagged builds
 #ifdef SAGE_UPDATE_CHECK

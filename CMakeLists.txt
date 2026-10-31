@@ -15,6 +15,14 @@ if(POLICY CMP0092)
     cmake_policy(SET CMP0092 NEW)
 endif()
 
+# GeneralsX @build Codex 31/10/2026 Let capable linkers deduplicate archives while preserving required rescans on other platforms.
+if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+endif()
+if(POLICY CMP0179)
+    cmake_policy(SET CMP0179 NEW)
+endif()
+
 # Allow specifying MSVC debug configurations.
 #if(POLICY CMP0141)
 #    cmake_policy(SET CMP0141 NEW)

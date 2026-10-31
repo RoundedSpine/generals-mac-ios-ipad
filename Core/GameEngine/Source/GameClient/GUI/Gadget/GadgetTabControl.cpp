@@ -45,6 +45,8 @@
 
 // SYSTEM INCLUDES ////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "Common/Language.h"
@@ -313,7 +315,7 @@ void GadgetTabControlCreateSubPanes( GameWindow *tabControl )///< Create User Wi
 			WinInstanceData *instData = tabData->subPanes[paneIndex]->winGetInstanceData();
 			BitSet( instData->m_style, GWS_TAB_PANE  );
 			char buffer[20];
-			sprintf( buffer, "Pane %d", paneIndex );
+			snprintf(buffer, sizeof(buffer), "Pane %d", paneIndex );
 			instData->m_decoratedNameString = buffer;
 			//set enabled status to that of Parent
 			tabData->subPanes[paneIndex]->winEnable( BitIsSet(tabControl->winGetStatus(), WIN_STATUS_ENABLED) );

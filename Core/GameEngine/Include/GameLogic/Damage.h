@@ -120,6 +120,9 @@ inline Bool IsSubdualDamage( DamageType type )
 {
 	switch( type )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DAMAGE_SUBDUAL_MISSILE:
 		case DAMAGE_SUBDUAL_VEHICLE:
 		case DAMAGE_SUBDUAL_BUILDING:
@@ -137,6 +140,9 @@ inline Bool IsHealthDamagingDamage( DamageType type )
 	// Health Damage should be one type of WeaponEffect.  Thinking "Weapons can only do damage" is why AoE is boring.
 	switch( type )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DAMAGE_STATUS:
 		case DAMAGE_SUBDUAL_MISSILE:
 		case DAMAGE_SUBDUAL_VEHICLE:

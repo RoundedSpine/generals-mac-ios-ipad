@@ -185,8 +185,8 @@ struct Pathfinder {
     source = source.replace('struct PathfindMovementInput;\nstruct Pathfinder', 'struct PathfindExclusiveWorker;\nvoid observeParallelCorridor(std::size_t,Bool);\nstruct PathfindMovementInput;\nstruct Pathfinder', 1)
     source += '\n' + block(SOURCE, 'struct PathfindMovementInput {') + '\n' + block(SOURCE, 'struct ExamineCellsStruct\n')
     source += '\n'.join(function(m) for m in [
-        'void PathfindCell::setType(', 'inline Bool PathfindCell::isObstaclePresent(', 'inline Bool PathfindCell::isObstacleFence(',
-        'inline Bool PathfindCell::isObstacleTransparent(', 'inline ObjectID PathfindCell::getObstacleID(',
+        'void PathfindCell::setType(', 'inline Bool PathfindCell::isObstaclePresent(', 'Bool PathfindCell::isObstacleFence(',
+        'Bool PathfindCell::isObstacleTransparent(', 'ObjectID PathfindCell::getObstacleID(',
         'inline PathfindCell *Pathfinder::getCell( PathfindLayerEnum layer, Int x, Int y )',
     ] if not m.startswith('inline PathfindCell *Pathfinder'))
     # getCell is inline in the header.
@@ -2749,8 +2749,8 @@ int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();
         source='#define GENERALS_ZH_PARALLEL_PATH_BATCH 1\nstruct PathfindParallelReads;\n'+engine_fixture()
         source=source.replace('using ObjectID=unsigned;', 'enum ObjectID : int {INVALID_ID=0};')
         source=source.replace('constexpr ObjectID INVALID_ID=0;', '')
-        source+='\n'.join(function(m) for m in ['inline Bool PathfindCell::isObstacleFence(',
-            'inline Bool PathfindCell::isObstacleTransparent(', 'inline ObjectID PathfindCell::getObstacleID('])
+        source+='\n'.join(function(m) for m in ['Bool PathfindCell::isObstacleFence(',
+            'Bool PathfindCell::isObstacleTransparent(', 'ObjectID PathfindCell::getObstacleID('])
         # GeneralsX @test Codex 29/10/2026 Link the real allocation observer and dependency log in the signed-ID fixture too.
         source+='\n#include "pathoccupancyquery.h"\n#include "boundedsearchreads.h"\n#include "boundedobservationlog.h"\n#include <cstring>\n#include <memory>\nusing Real=float;\n'
         source+=block(SOURCE,'struct PathfindParallelReads {')+'\n'+function('void observeParallelAllocationCell(')

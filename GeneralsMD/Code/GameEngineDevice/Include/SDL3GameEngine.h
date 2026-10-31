@@ -80,13 +80,14 @@ public:
 	virtual ~SDL3GameEngine();
 
 	// GameEngine interface
-	virtual void init(void);
-	virtual void reset(void);
-	virtual void update(void);
-	virtual void execute(void);
-	virtual void serviceWindowsOS(void);
-	virtual Bool isActive(void);
-	virtual void setIsActive(Bool isActive);
+	// GeneralsX @build Codex 31/10/2026 Make the existing virtual overrides explicit.
+	virtual void init(void) override;
+	virtual void reset(void) override;
+	virtual void update(void) override;
+	virtual void execute(void) override;
+	virtual void serviceWindowsOS(void) override;
+	virtual Bool isActive(void) override;
+	virtual void setIsActive(Bool isActive) override;
 
 	// GeneralsX @feature Codex 25/10/2026 SDL_AppEvent and native iteration share the existing event handler.
 	void processSDL3Event(SDL_Event event);
@@ -96,18 +97,18 @@ public:
 	Bool nativeFrameReady();
 
 	// Factory methods (override GameEngine)
-	virtual LocalFileSystem *createLocalFileSystem(void);
-	virtual ArchiveFileSystem *createArchiveFileSystem(void);
-	virtual GameLogic *createGameLogic(void);
-	virtual GameClient *createGameClient(void);
-	virtual ModuleFactory *createModuleFactory(void);
-	virtual ThingFactory *createThingFactory(void);
-	virtual FunctionLexicon *createFunctionLexicon(void);
+	virtual LocalFileSystem *createLocalFileSystem(void) override;
+	virtual ArchiveFileSystem *createArchiveFileSystem(void) override;
+	virtual GameLogic *createGameLogic(void) override;
+	virtual GameClient *createGameClient(void) override;
+	virtual ModuleFactory *createModuleFactory(void) override;
+	virtual ThingFactory *createThingFactory(void) override;
+	virtual FunctionLexicon *createFunctionLexicon(void) override;
 	// GeneralsX @bugfix Copilot 15/04/2026 Match upstream GameEngine pure-virtual signatures after sync.
-	virtual Radar *createRadar(Bool dummy);
-	virtual WebBrowser *createWebBrowser(void);
-	virtual ParticleSystemManager* createParticleSystemManager(Bool dummy);
-	virtual AudioManager *createAudioManager(Bool dummy);
+	virtual Radar *createRadar(Bool dummy) override;
+	virtual WebBrowser *createWebBrowser(void) override;
+	virtual ParticleSystemManager* createParticleSystemManager(Bool dummy) override;
+	virtual AudioManager *createAudioManager(Bool dummy) override;
 
 	// SDL3 specific
 	virtual SDL_Window* getSDLWindow(void) const { return m_SDLWindow; }

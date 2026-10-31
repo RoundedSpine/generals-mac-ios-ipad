@@ -35,6 +35,19 @@
 #include <cstring>
 #include <Utility/stdio_adapter.h>
 
+// GeneralsX @build Codex 31/10/2026 Match integer output widths while retaining legacy MSVC format support.
+#if defined(_MSC_VER) && _MSC_VER < 1900
+#define GX_PROFILE_I64 "I64i"
+#define GX_PROFILE_HEX64 "016I64x"
+typedef __int64 ProfileOutputInt;
+typedef unsigned __int64 ProfileOutputUInt;
+#else
+#define GX_PROFILE_I64 "lli"
+#define GX_PROFILE_HEX64 "016llx"
+typedef long long ProfileOutputInt;
+typedef unsigned long long ProfileOutputUInt;
+#endif
+
 //////////////////////////////////////////////////////////////////////////////
 // ProfileResultFileCSV
 
@@ -47,7 +60,7 @@ void ProfileResultFileCSV::WriteThread(ProfileFuncLevel::Thread &thread)
 {
   char help[40];
 
-  sprintf(help,"prof%08x-all.csv",thread.GetId());
+  snprintf(help, sizeof(help),"prof%" GX_PROFILE_HEX64 "-all.csv",static_cast<ProfileOutputUInt>(thread.GetId()));
   FILE *f=fopen(help,"wt");
 
   // CSV file header
@@ -77,19 +90,19 @@ void ProfileResultFileCSV::WriteThread(ProfileFuncLevel::Thread &thread)
       }
 
       // call count
-      fprintf(f,"\t%I64i",id.GetCalls(i));
+      fprintf(f,"\t%" GX_PROFILE_I64,static_cast<ProfileOutputInt>(id.GetCalls(i)));
 
       // pure total time
-      fprintf(f,"\t%I64i",id.GetFunctionTime(i));
+      fprintf(f,"\t%" GX_PROFILE_I64,static_cast<ProfileOutputInt>(id.GetFunctionTime(i)));
 
       // global total time
-      fprintf(f,"\t%I64i",id.GetTime(i));
+      fprintf(f,"\t%" GX_PROFILE_I64,static_cast<ProfileOutputInt>(id.GetTime(i)));
 
       // pure time per call
-      fprintf(f,"\t%I64i",id.GetFunctionTime(i)/id.GetCalls(i));
+      fprintf(f,"\t%" GX_PROFILE_I64,static_cast<ProfileOutputInt>(id.GetFunctionTime(i)/id.GetCalls(i)));
 
       // global time per call
-      fprintf(f,"\t%I64i",id.GetTime(i)/id.GetCalls(i));
+      fprintf(f,"\t%" GX_PROFILE_I64,static_cast<ProfileOutputInt>(id.GetTime(i)/id.GetCalls(i)));
 
       // list of callers
       ProfileFuncLevel::IdList idlist=id.GetCaller(i);

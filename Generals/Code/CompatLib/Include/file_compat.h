@@ -286,6 +286,9 @@ inline int GetDateFormat(unsigned long locale, unsigned long flags, const SYSTEM
   return (result > 0) ? static_cast<int>(result) : 0;
 }
 
+// GeneralsX @build Codex 31/10/2026 Supply the fallback only when the platform SDK has not defined it.
+#ifndef INVALID_HANDLE_VALUE
 #define INVALID_HANDLE_VALUE ((void*)-1)
+#endif
 
 #endif // !_WIN32

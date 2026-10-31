@@ -146,9 +146,10 @@ public:
 class WebBrowser : public SubsystemInterface
 {
 public:
-	void init( void ) {}
-	void reset( void ) {}
-	void update( void ) {}
+	// GeneralsX @build Codex 31/10/2026 Make the existing virtual overrides explicit.
+	void init( void ) override {}
+	void reset( void ) override {}
+	void update( void ) override {}
 
 	virtual Bool createBrowserWindow(const char *tag, GameWindow *win) { return false; }
 	virtual void closeBrowserWindow(GameWindow *win) {}

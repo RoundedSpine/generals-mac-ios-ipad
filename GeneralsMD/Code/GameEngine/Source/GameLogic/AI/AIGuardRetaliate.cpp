@@ -478,8 +478,8 @@ void AIGuardRetaliateOuterState::xfer( Xfer *xfer )
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
 void AIGuardRetaliateOuterState::loadPostProcess()
-{						 AIGuardRetaliateOuterState
-	onEnter();
+{
+	// GeneralsX @build Codex 31/10/2026 Preserve the existing no-op; a local function declaration never invoked onEnter.
 }
 
 // ------------------------------------------------------------------------------------------------

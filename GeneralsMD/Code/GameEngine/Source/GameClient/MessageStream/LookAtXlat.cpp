@@ -203,6 +203,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 	GameMessage::Type t = msg->getType();
 	switch (t)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_KEY_DOWN:
 		case GameMessage::MSG_RAW_KEY_UP:
@@ -452,6 +455,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 				switch (m_scrollType)
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 				case SCROLL_RMB:
 					{
 						if (TheInGameUI->shouldMoveRMBScrollAnchor())

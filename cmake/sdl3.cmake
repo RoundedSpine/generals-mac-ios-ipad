@@ -108,6 +108,11 @@ if(SAGE_USE_SDL3)
         SDL3_image
         URL ${SDL3_IMAGE_URL}
         URL_HASH ${SDL3_IMAGE_URL_HASH}
+        # GeneralsX @bugfix Codex 31/10/2026 Keep the pinned decoder while replacing deprecated iOS UTI declarations.
+        PATCH_COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_DIR=<SOURCE_DIR>
+            -DPATCH_FILE=${CMAKE_SOURCE_DIR}/Patches/sdl-image-ios-uti.patch
+            -P ${CMAKE_SOURCE_DIR}/cmake/apply-vendored-patch.cmake
     )
     
     # Configure SDL3_image build options
@@ -122,6 +127,11 @@ if(SAGE_USE_SDL3)
     set(SDL3IMAGE_XCUR ON CACHE BOOL "Enable X cursor support" FORCE)
     
     FetchContent_MakeAvailable(SDL3_image)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_GREATER_EQUAL "14.0")
+        get_target_property(image_target SDL3_image::SDL3_image ALIASED_TARGET)
+        target_link_libraries(${image_target} PRIVATE "-framework UniformTypeIdentifiers")
+    endif()
     
     # Create unified interface library for linking
     add_library(sdl3lib INTERFACE)

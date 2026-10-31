@@ -51,6 +51,8 @@
 #endif
 
 #include "dx8wrapper.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -1038,7 +1040,7 @@ void DX8Wrapper::Enumerate_Devices()
 			desc.set_driver_name(id.Driver);
 
 			char buf[64];
-			sprintf(buf,"%d.%d.%d.%d", //"%04x.%04x.%04x.%04x",
+			snprintf(buf, sizeof(buf),"%d.%d.%d.%d", //"%04x.%04x.%04x.%04x",
 				HIWORD(id.DriverVersion.HighPart),
 				LOWORD(id.DriverVersion.HighPart),
 				HIWORD(id.DriverVersion.LowPart),
@@ -1065,6 +1067,9 @@ void DX8Wrapper::Enumerate_Devices()
 					int bits = 0;
 					switch (d3dmode.Format)
 					{
+						// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+						default: break;
+
 						case D3DFMT_R8G8B8:
 						case D3DFMT_A8R8G8B8:
 						case D3DFMT_X8R8G8B8:		bits = 32; break;
@@ -1609,7 +1614,7 @@ bool DX8Wrapper::Set_Device_Resolution(int width,int height,int bits,int windowe
 
 		// Release pillarbox RT before device reset
 		Pillarbox_Cleanup();
-#pragma message("TODO: support changing windowed status and changing the bit depth")
+// Legacy implementation note: "TODO: support changing windowed status and changing the bit depth"
 		WWDEBUG_SAY(("DX8Wrapper::Set_Device_Resolution is resetting the device."));
 		bool ok = Reset_Device();
 		if (ok) Pillarbox_Setup(ResolutionWidth, ResolutionHeight);
@@ -2141,7 +2146,7 @@ void DX8Wrapper::Flip_To_Primary()
 //**********************************************************************************************
 //! Clear current render device
 /*! KM
-/* 5/17/02 KM Fixed support for render to texture with depth/stencil buffers
+/ * 5/17/02 KM Fixed support for render to texture with depth/stencil buffers
 */
 void DX8Wrapper::Clear(bool clear_color, bool clear_z_stencil, const Vector3 &color, float dest_alpha, float z, unsigned int stencil)
 {

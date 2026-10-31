@@ -1,0 +1,246 @@
+# GeneralsX iOS adapter warning fixes for the pinned DXVK revision.
+# Keep SDK sentinels in an integer domain; preserve valid sampler mappings.
+diff --git a/meson.build b/meson.build
+index 26afed45..7c5493dd 100644
+--- a/meson.build
++++ b/meson.build
+@@ -154,34 +154,37 @@ else
+     compiler_args += ['-DDXVK_WSI_SDL3']
+   endif
+   if lib_sdl2.found()
+     compiler_args += ['-DDXVK_WSI_SDL2']
+   endif
+   if lib_glfw.found()
+     compiler_args += ['-DDXVK_WSI_GLFW']
+   endif
+   if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found())
+     error('SDL3, SDL2, or GLFW are required to build dxvk-native')
+   endif
+   
+   dxvk_name_prefix = 'dxvk_'
+   dxvk_pkg_prefix = 'dxvk-'
+ 
+-  link_args += [
+-    '-static-libgcc',
+-    '-static-libstdc++',
+-  ]
++  # GeneralsX @build Codex 31/10/2026 Darwin uses the system C++ runtime, not GCC's static runtime switches.
++  if platform != 'darwin'
++    link_args += [
++      '-static-libgcc',
++      '-static-libstdc++',
++    ]
++  endif
+ endif
+ 
+ dxvk_include_path = include_directories(dxvk_include_dirs)
+ 
+ add_project_arguments(cpp.get_supported_arguments(compiler_args), language: 'cpp')
+ add_project_arguments(cc.get_supported_arguments(compiler_args), language: 'c')
+ add_project_link_arguments(cpp.get_supported_link_arguments(link_args), language: 'cpp')
+ add_project_link_arguments(cc.get_supported_link_arguments(link_args), language: 'c')
+ 
+ exe_ext = ''
+ def_spec_ext = '.def'
+ 
+ glsl_compiler = find_program('glslang', 'glslangValidator')
+ glsl_args = [
+   '--quiet',
+diff --git a/src/d3d8/d3d8_d3d9_util.h b/src/d3d8/d3d8_d3d9_util.h
+index 8d8677a4..052ed31a 100644
+--- a/src/d3d8/d3d8_d3d9_util.h
++++ b/src/d3d8/d3d8_d3d9_util.h
+@@ -161,34 +161,35 @@ namespace dxvk {
+ 
+   // (8<-9) Convert D3DVOLUME_DESC
+   inline void ConvertVolumeDesc8(const d3d9::D3DVOLUME_DESC* pVol9, D3DVOLUME_DESC* pVol8) {
+     pVol8->Format = D3DFORMAT(pVol9->Format);
+     pVol8->Type   = D3DRESOURCETYPE(pVol9->Type);
+     pVol8->Usage  = pVol9->Usage;
+     pVol8->Pool   = D3DPOOL(pVol9->Pool);
+     pVol8->Size   = getSurfaceSize(pVol8->Format, pVol9->Width, pVol9->Height) * pVol9->Depth;
+     pVol8->Width  = pVol9->Width;
+     pVol8->Height = pVol9->Height;
+     pVol8->Depth  = pVol9->Depth;
+   }
+ 
+   // If this D3DTEXTURESTAGESTATETYPE has been remapped to a d3d9::D3DSAMPLERSTATETYPE
+   // it will be returned, otherwise returns -1u
+-  inline d3d9::D3DSAMPLERSTATETYPE GetSamplerStateType9(const D3DTEXTURESTAGESTATETYPE StageType) {
++  // GeneralsX @bugfix Codex 31/10/2026 Keep the invalid UINT32_MAX sentinel outside the sampler enum domain.
++  inline DWORD GetSamplerStateType9(const D3DTEXTURESTAGESTATETYPE StageType) {
+     switch (StageType) {
+       // 13-21:
+       case D3DTSS_ADDRESSU:       return d3d9::D3DSAMP_ADDRESSU;
+       case D3DTSS_ADDRESSV:       return d3d9::D3DSAMP_ADDRESSV;
+       case D3DTSS_BORDERCOLOR:    return d3d9::D3DSAMP_BORDERCOLOR;
+       case D3DTSS_MAGFILTER:      return d3d9::D3DSAMP_MAGFILTER;
+       case D3DTSS_MINFILTER:      return d3d9::D3DSAMP_MINFILTER;
+       case D3DTSS_MIPFILTER:      return d3d9::D3DSAMP_MIPFILTER;
+       case D3DTSS_MIPMAPLODBIAS:  return d3d9::D3DSAMP_MIPMAPLODBIAS;
+       case D3DTSS_MAXMIPLEVEL:    return d3d9::D3DSAMP_MAXMIPLEVEL;
+       case D3DTSS_MAXANISOTROPY:  return d3d9::D3DSAMP_MAXANISOTROPY;
+       // 25:
+       case D3DTSS_ADDRESSW:       return d3d9::D3DSAMP_ADDRESSW;
+-      default:                    return d3d9::D3DSAMPLERSTATETYPE(-1u);
++      default:                    return DWORD(-1u);
+     }
+   }
+ 
+ }
+diff --git a/src/d3d8/d3d8_device.cpp b/src/d3d8/d3d8_device.cpp
+index 8ef95630..f3708895 100644
+--- a/src/d3d8/d3d8_device.cpp
++++ b/src/d3d8/d3d8_device.cpp
+@@ -1399,58 +1399,58 @@ namespace dxvk {
+       return D3D_OK;
+ 
+     StateChange();
+     HRESULT res = GetD3D9()->SetTexture(Stage, D3D8Texture2D::GetD3D9Nullable(tex));
+ 
+     if (likely(SUCCEEDED(res)))
+       m_textures[Stage] = tex;
+ 
+     return res;
+   }
+ 
+   HRESULT STDMETHODCALLTYPE D3D8Device::GetTextureStageState(
+           DWORD                    Stage,
+           D3DTEXTURESTAGESTATETYPE Type,
+           DWORD*                   pValue) {
+-    d3d9::D3DSAMPLERSTATETYPE stateType = GetSamplerStateType9(Type);
++    DWORD stateType = GetSamplerStateType9(Type);
+ 
+     if (stateType != -1u) {
+       // if the type has been remapped to a sampler state type:
+-      return GetD3D9()->GetSamplerState(Stage, stateType, pValue);
++      return GetD3D9()->GetSamplerState(Stage, static_cast<d3d9::D3DSAMPLERSTATETYPE>(stateType), pValue);
+     }
+     else {
+       return GetD3D9()->GetTextureStageState(Stage, d3d9::D3DTEXTURESTAGESTATETYPE(Type), pValue);
+     }
+   }
+ 
+   HRESULT STDMETHODCALLTYPE D3D8Device::SetTextureStageState(
+           DWORD                    Stage,
+           D3DTEXTURESTAGESTATETYPE Type,
+           DWORD                    Value) {
+-    d3d9::D3DSAMPLERSTATETYPE stateType = GetSamplerStateType9(Type);
++    DWORD stateType = GetSamplerStateType9(Type);
+ 
+     if (unlikely(m_d3d8Options.shadowPerspectiveDivide && Type == D3DTSS_TEXTURETRANSFORMFLAGS)) {
+       // Splinter Cell: Ignore requests to change texture transform flags
+       // to 0 while shadow mapping perspective divide mode is enabled
+       if (m_shadowPerspectiveDivide && (Stage == 0 || Stage == 1))
+         return D3D_OK;
+     }
+ 
+     StateChange();
+     if (stateType != -1u) {
+       // if the type has been remapped to a sampler state type:
+-      return GetD3D9()->SetSamplerState(Stage, stateType, Value);
++      return GetD3D9()->SetSamplerState(Stage, static_cast<d3d9::D3DSAMPLERSTATETYPE>(stateType), Value);
+     } else {
+       return GetD3D9()->SetTextureStageState(Stage, d3d9::D3DTEXTURESTAGESTATETYPE(Type), Value);
+     }
+   }
+ 
+   HRESULT STDMETHODCALLTYPE D3D8Device::ValidateDevice(DWORD* pNumPasses) {
+     return GetD3D9()->ValidateDevice(pNumPasses);
+   }
+ 
+   HRESULT STDMETHODCALLTYPE D3D8Device::SetPaletteEntries(UINT PaletteNumber, const PALETTEENTRY* pEntries) {
+     StateChange();
+     return GetD3D9()->SetPaletteEntries(PaletteNumber, pEntries);
+   }
+ 
+   HRESULT STDMETHODCALLTYPE D3D8Device::GetPaletteEntries(UINT PaletteNumber, PALETTEENTRY* pEntries) {
+diff --git a/src/d3d8/d3d8_resource.h b/src/d3d8/d3d8_resource.h
+index 4966adec..8baefe7f 100644
+--- a/src/d3d8/d3d8_resource.h
++++ b/src/d3d8/d3d8_resource.h
+@@ -67,42 +67,42 @@ namespace dxvk {
+           return D3DERR_INVALIDCALL;
+       }
+ 
+       return D3D_OK;
+     }
+ 
+     HRESULT STDMETHODCALLTYPE FreePrivateData(REFGUID refguid) final {
+       HRESULT hr = m_privateData.setData(refguid, 0, nullptr);
+ 
+       if (unlikely(FAILED(hr)))
+         return D3DERR_INVALIDCALL;
+ 
+       return D3D_OK;
+     }
+ 
+-    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) {
++    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) override {
+       // Priority can only be set for D3DPOOL_MANAGED resources
+       if (likely(m_pool == D3DPOOL_MANAGED)) {
+         DWORD oldPriority = m_priority;
+         m_priority = PriorityNew;
+         return oldPriority;
+       }
+ 
+       return m_priority;
+     }
+ 
+-    DWORD STDMETHODCALLTYPE GetPriority() {
++    DWORD STDMETHODCALLTYPE GetPriority() override {
+       return m_priority;
+     }
+ 
+     virtual IUnknown* GetInterface(REFIID riid) override try {
+       return D3D8DeviceChild<D3D9, D3D8>::GetInterface(riid);
+     } catch (const DxvkError& e) {
+       if (riid == __uuidof(IDirect3DResource8))
+         return this;
+ 
+       throw e;
+     }
+ 
+   protected:
+ 
+     const D3DPOOL        m_pool;
+diff --git a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
+index d4df654d..a9b4e35b 100644
+--- a/src/dxso/dxso_compiler.cpp
++++ b/src/dxso/dxso_compiler.cpp
+@@ -3289,35 +3289,33 @@ void DxsoCompiler::emitControlFlowGenericLoop(
+       // regardless of the mask in the DCL used.
+       //
+       // I imagine this is because at one point D3D9 ASM was very literal to GPUs,
+       // and the input's mask from the PS didn't correspond to anything and the
+       // physical output register was filled with the extra data from the VS not
+       // included in the mask on the PS, so it just worked(tm).
+       //
+       // Fixes a bug in Test Drive Unlimited's shadow code where it outputs o8.xyz, but the PS
+       // has a decl for v8.xy and it tries to do 2D Shadow sampling (needs 3 elements .xyz) in the PS.
+       // This likely occured because the compiler was not aware of shadow sampling when generating
+       // the writemask for the PS.
+       if (m_programInfo.type() == DxsoProgramType::PixelShader)
+         mask = DxsoRegMask(true, true, true, true);
+ 
+       std::array<uint32_t, 4> indices = { 0, 1, 2, 3 };
+-      uint32_t count = 0;
+       for (uint32_t i = 0; i < 4; i++) {
+         if (mask[i]) {
+           indices[i] = i + 4;
+-          count++;
+         }
+       }
+ 
+       workingReg.id = m_module.opVectorShuffle(getVectorTypeId(workingReg.type),
+         workingReg.id, indexVal.id, 4, indices.data());
+ 
+       // We need to replace TEXCOORD inputs with gl_PointCoord
+       // if D3DRS_POINTSPRITEENABLE is set.
+       if (m_programInfo.type() == DxsoProgramType::PixelShader && elem.semantic.usage == DxsoUsage::Texcoord)
+         workingReg.id = m_module.opSelect(getVectorTypeId(workingReg.type), pointInfo.isSprite, pointCoord, workingReg.id);
+ 
+       if (m_programInfo.type() == DxsoProgramType::PixelShader && elem.semantic.usage == DxsoUsage::Color) {
+         if (elem.semantic.usageIndex < 2)
+           m_ps.flatShadingMask |= 1u << slot;
+       }

@@ -60,6 +60,9 @@ void Dict::DictPair::copyFrom(DictPair* that)
 
 	switch(newType)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DICT_BOOL:
 		case DICT_INT:
 		case DICT_REAL:
@@ -81,6 +84,9 @@ void Dict::DictPair::clear()
 {
 	switch (getType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DICT_BOOL:
 		case DICT_INT:
 		case DICT_REAL:

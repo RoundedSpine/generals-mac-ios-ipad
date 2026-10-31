@@ -32,9 +32,10 @@
 #include <direct.h>
 #else
 #include <string.h>
-#define SEVERITY_ERROR 1
-#define FACILITY_ITF 2
+// GeneralsX @build Codex 31/10/2026 Do not replace SDK HRESULT constants; the other legacy facility macros were unused.
+#ifndef E_FAIL
 #define E_FAIL 0x80004005
+#endif
 #endif
 
 /////////////////////////////////////////////////////////////////////////////

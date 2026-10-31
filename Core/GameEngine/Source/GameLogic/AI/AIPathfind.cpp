@@ -1767,7 +1767,8 @@ void PathfindCell::setPosUnit(ObjectID unitID, const ICoord2D &pos )
 /**
  * Return the relevant obstacle ID.
  */
-inline ObjectID PathfindCell::getObstacleID() const
+// GeneralsX @bugfix Codex 31/10/2026 Out-of-line accessors must have external linkage in every caller translation unit.
+ObjectID PathfindCell::getObstacleID() const
 {
 #if RETAIL_COMPATIBLE_PATHFINDING_ALLOCATION
 	if (s_useFixedPathfinding) {
@@ -2275,7 +2276,8 @@ inline Bool PathfindCell::isObstaclePresent(ObjectID objID) const
 /**
  * return true if the obstacle in the cell is KINDOF_CAN_SEE_THROUGHT_STRUCTURE
  */
-inline Bool PathfindCell::isObstacleTransparent() const
+// GeneralsX @bugfix Codex 31/10/2026 Out-of-line accessors must have external linkage in every caller translation unit.
+Bool PathfindCell::isObstacleTransparent() const
 {
 #if RETAIL_COMPATIBLE_PATHFINDING_ALLOCATION
 	if (s_useFixedPathfinding) {
@@ -2291,7 +2293,8 @@ inline Bool PathfindCell::isObstacleTransparent() const
 /**
  * return true if the given obstacle in the cell is a fence.
  */
-inline Bool PathfindCell::isObstacleFence() const
+// GeneralsX @bugfix Codex 31/10/2026 Out-of-line accessors must have external linkage in every caller translation unit.
+Bool PathfindCell::isObstacleFence() const
 {
 #if RETAIL_COMPATIBLE_PATHFINDING_ALLOCATION
 	if (s_useFixedPathfinding) {
@@ -5189,6 +5192,9 @@ void Pathfinder::internal_classifyObjectFootprint( Object *obj, Bool insert )
 
 	switch(obj->getGeometryInfo().getGeomType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GEOMETRY_BOX:
 		{
 			m_zoneManager.markZonesDirty();
@@ -5759,9 +5765,7 @@ Bool Pathfinder::validMovementTerrain( PathfindLayerEnum layer, const Locomotor*
 	// Only do terrain, not obstacle cells.  jba.
 	if (toCell->getType()==PathfindCell::CELL_OBSTACLE) return true;
 	if (toCell->getType()==PathfindCell::CELL_IMPASSABLE) return true;
-	if (toCell->getLayer()!=LAYER_GROUND && toCell->getLayer() == PathfindCell::CELL_CLEAR) {
-		return true;
-	}
+	// GeneralsX @build Codex 31/10/2026 The removed mixed-enum predicate required both layer != 0 and layer == 0; preserve its no-op behavior.
 	// check validity of destination cell
 	LocomotorSurfaceTypeMask acceptableSurfaces = validLocomotorSurfacesForCellType(toCell->getType());
 	if ((locomotor->getLegalSurfaces() & acceptableSurfaces) == 0)
@@ -6616,6 +6620,9 @@ Bool Pathfinder::checkForLanding(Int cellX, Int cellY, PathfindLayerEnum layer,
 	if (cellP==nullptr) return false;
 	switch (cellP->getType())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case PathfindCell::CELL_CLIFF:
 		case PathfindCell::CELL_WATER:
 		case PathfindCell::CELL_IMPASSABLE:

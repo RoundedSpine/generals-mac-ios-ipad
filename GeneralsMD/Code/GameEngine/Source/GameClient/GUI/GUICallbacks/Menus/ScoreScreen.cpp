@@ -51,6 +51,8 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include "Common/AudioAffect.h"
 #include "Common/AudioEventRTS.h"
@@ -871,7 +873,7 @@ void finishSinglePlayerInit()
 				for (int i = 0; i < MAX_GLOBAL_GENERAL_TYPES; ++i)
 				{
 					char campaignName[128];
-					sprintf(campaignName, "CHALLENGE_%d", i);
+					snprintf(campaignName, sizeof(campaignName), "CHALLENGE_%d", i);
 					if (campaign->m_name.compareNoCase(campaignName) == 0)
 					{
 						stats.setChallengeCampaignComplete(i, difficulty);

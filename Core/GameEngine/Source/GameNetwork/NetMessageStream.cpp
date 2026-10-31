@@ -63,7 +63,7 @@ static CommandMsg *CommandTail[MAX_SLOTS] = {
 	nullptr
 };
 
-/**
+/ **
  * AddToNetCommandList adds a CommandMsg to a list of commands.
  *
 static Bool AddToNetCommandList(GameMessage *msg, UnsignedInt timestamp, CommandMsg *& CommandHead, CommandMsg *& CommandTail)
@@ -90,7 +90,7 @@ static Bool AddToNetCommandList(GameMessage *msg, UnsignedInt timestamp, Command
 	return true;
 }
 
-/**
+/ **
  * AddToRemoteNetCommandList is used by TheNetwork to queue up commands received from other players.
  *
 Bool AddToNetCommandList(Int playerNum, GameMessage *msg, UnsignedInt timestamp)
@@ -102,7 +102,7 @@ Bool AddToNetCommandList(Int playerNum, GameMessage *msg, UnsignedInt timestamp)
 	return AddToNetCommandList(msg, timestamp, CommandHead[playerNum], CommandTail[playerNum]);
 }
 
-/**
+/ **
  * GetCommandMsg returns a GameMessage (deleting its CommandMsg wrapper) that is valid
  * for the current frame, or nullptr.
  *
@@ -137,7 +137,7 @@ static GameMessage * GetCommandMsg(UnsignedInt timestamp, CommandMsg *& CommandH
 	return msg;
 }
 
-/**
+/ **
  * GetCommandMsg returns a message from the command list.
  *
 GameMessage * GetCommandMsg(UnsignedInt timestamp, Int playerNum)
@@ -158,7 +158,7 @@ GameMessage * GetCommandMsg(UnsignedInt timestamp, Int playerNum)
 static unsigned char commandBuf[sizeof(CommandPacket)+1];
 static CommandPacket *commandPacket = (CommandPacket *)(commandBuf+1);
 
-/**
+/ **
  * ClearCommandPacket clears the command packet at the start of the frame.
  *
 void ClearCommandPacket(UnsignedInt frame)
@@ -167,7 +167,7 @@ void ClearCommandPacket(UnsignedInt frame)
 	commandPacket->m_numCommands = 0;
 }
 
-/**
+/ **
  * AddCommandToPacket creates a packet containing all move/attack/etc commands
  * for the current frame.
  *
@@ -213,7 +213,7 @@ Bool AddCommandToPacket(const GameMessage *msg)
 	return true;
 }
 
-/**
+/ **
  * TheNetwork calls GetCommandPacket to get commands to send.
  *
 CommandPacket *GetCommandPacket()

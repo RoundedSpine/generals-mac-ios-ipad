@@ -254,6 +254,9 @@ Object* CommandButtonHuntUpdate::scanClosestTarget()
 	Bool isEnter = FALSE;
 	switch( m_commandButton->getCommandType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case GUICOMMANDMODE_CONVERT_TO_CARBOMB:
 			relationship = PartitionFilterRelationship::ALLOW_NEUTRAL; //Only neutrals.
 			isEnter = TRUE;
@@ -370,6 +373,9 @@ Object* CommandButtonHuntUpdate::scanClosestTarget()
 		{
 			switch( m_commandButton->getCommandType() )
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 				case GUICOMMANDMODE_HIJACK_VEHICLE:
 					valid = TheActionManager->canHijackVehicle( me, other, CMD_FROM_AI );
 					break;

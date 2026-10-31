@@ -29,6 +29,8 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include <stdio.h>
 
@@ -62,8 +64,8 @@ void ControlBar::updateConstructionTextDisplay( Object *obj )
 	text.format( TheGameText->fetch( "CONTROLBAR:UnderConstructionDesc" ),
 							 obj->getConstructionPercent() );
 	GadgetStaticTextSetText( descWindow, text );
-	sprintf(log_buffer,
-		"[GX-ISSUE144] UnderConstruction text update obj=%p percent=%d textLen=%d descWindow=%p",
+	snprintf(log_buffer, sizeof(log_buffer),
+		"[GX-ISSUE144] UnderConstruction text update obj=%p percent=%.3f textLen=%d descWindow=%p",
 		obj,
 		obj->getConstructionPercent(),
 		text.getLength(),

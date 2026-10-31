@@ -3458,6 +3458,9 @@ void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, const BattlePla
 	Bool removeBonus = false;
 	switch( plan )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case PLANSTATUS_BOMBARDMENT:
 		{
 			m_bombardBattlePlans += delta;
@@ -3531,6 +3534,9 @@ Int Player::getBattlePlansActiveSpecific( BattlePlanStatus plan ) const
 {
 	switch( plan )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case PLANSTATUS_BOMBARDMENT:
 		{
 			return m_bombardBattlePlans;

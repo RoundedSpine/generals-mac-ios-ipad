@@ -81,6 +81,9 @@ UpdateSleepTime AnimationSteeringUpdate::update()
 
 		switch( m_currentTurnAnim )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case MODELCONDITION_INVALID:
 				//We're currently going straight. Check if we want to turn.
 				if( currentTurn == TURN_NEGATIVE )

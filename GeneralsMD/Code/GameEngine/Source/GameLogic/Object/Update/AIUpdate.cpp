@@ -4798,6 +4798,9 @@ void AIUpdateInterface::evaluateMoraleBonus( Bool inHorde, Bool allowNationalism
 
 	switch (type)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 	case HORDEACTION_HORDE:
 		evaluateNationalismBonusClassic(inHorde, allowNationalism);
 		break;

@@ -30,6 +30,8 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "Common/GameEngine.h"
 #include "Common/QuickmatchPreferences.h"
@@ -275,7 +277,7 @@ static void populateQMColorComboBox(QuickMatchPreferences& pref)
 
 		colorName = TheGameText->fetch(def->getTooltipName().str());
 		newIndex = GadgetComboBoxAddEntry(comboBoxColor, colorName, def->getColor());
-		GadgetComboBoxSetItemData(comboBoxColor, newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboBoxColor, newIndex, (void*)(intptr_t)c);
 	}
 	GadgetComboBoxSetSelectedPos(comboBoxColor, pref.getColor());
 }
@@ -329,7 +331,7 @@ static void populateQMSideComboBox(Int favSide, const LadderInfo *li = nullptr)
 		seenSides.insert(side);
 
 		newIndex = GadgetComboBoxAddEntry(comboBoxSide, TheGameText->fetch(side), def->getColor());
-		GadgetComboBoxSetItemData(comboBoxSide, newIndex, (void *)c);
+		GadgetComboBoxSetItemData(comboBoxSide, newIndex, (void*)(intptr_t)c);
 
 		if (c == favSide)
 			entryToSelect = newIndex;
@@ -424,7 +426,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 	{
 		usedLadders.insert(info);
 		index = GadgetListBoxAddEntryText( win, info->name, favoriteColor, -1 );
-		GadgetListBoxSetItemData( win, (void *)(info->index), index );
+		GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		selectedPos = index;
 	}
 
@@ -443,7 +445,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, favoriteColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -457,7 +459,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, specialColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -470,7 +472,7 @@ void PopulateQMLadderListBox( GameWindow *win )
 		{
 			usedLadders.insert(info);
 			index = GadgetListBoxAddEntryText( win, info->name, normalColor, -1 );
-			GadgetListBoxSetItemData( win, (void *)(info->index), index );
+			GadgetListBoxSetItemData( win, (void*)(intptr_t)(info->index), index );
 		}
 	}
 
@@ -516,7 +518,7 @@ void PopulateQMLadderComboBox()
 	{
 		usedLadders.insert(info);
 		index = GadgetComboBoxAddEntry( comboBoxLadder, info->name, specialColor );
-		GadgetComboBoxSetItemData( comboBoxLadder, index, (void *)(info->index) );
+		GadgetComboBoxSetItemData( comboBoxLadder, index, (void*)(intptr_t)(info->index) );
 		selectedPos = index;
 
 		// we selected a ladder?  No game size choice for us...
@@ -542,7 +544,7 @@ void PopulateQMLadderComboBox()
 		{
 			usedLadders.insert(info);
 			index = GadgetComboBoxAddEntry( comboBoxLadder, info->name, normalColor );
-			GadgetComboBoxSetItemData( comboBoxLadder, index, (void *)(info->index) );
+			GadgetComboBoxSetItemData( comboBoxLadder, index, (void*)(intptr_t)(info->index) );
 		}
 	}
 
@@ -1047,6 +1049,9 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 			{
 				switch (resp.peerResponseType)
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 				case PeerResponse::PEERRESPONSE_DISCONNECT:
 					{
 						sawImportantMessage = TRUE;
@@ -1116,6 +1121,9 @@ void WOLQuickMatchMenuUpdate( WindowLayout * layout, void *userData)
 #endif // PERF_TEST
 			switch (resp.peerResponseType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case PeerResponse::PEERRESPONSE_PLAYERUTM:
 				{
 					if (stricmp(resp.command.c_str(), "STATS") == 0)

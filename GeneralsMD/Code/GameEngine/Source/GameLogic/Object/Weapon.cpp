@@ -2388,6 +2388,9 @@ Real Weapon::getPercentReadyToFire() const
 {
 	switch (getStatus())
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case OUT_OF_AMMO:
 		case PRE_ATTACK:
 			return 0.0f;
@@ -2588,6 +2591,9 @@ Bool Weapon::privateFireWeapon(
 	//Special case damage type overrides requiring special handling.
 	switch( m_template->getDamageType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DAMAGE_DEPLOY:
 		{
 			const AIUpdateInterface *ai = sourceObj->getAI();
@@ -2891,6 +2897,9 @@ Bool Weapon::isDamageWeapon() const
 	//user to mouseover a target and think it can attack it using these types.
 	switch( m_template->getDamageType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case DAMAGE_DEPLOY:
 			//Kris @todo
 			//Evaluate a better way to handle this weapon type... doesn't fit being a damage weapon.

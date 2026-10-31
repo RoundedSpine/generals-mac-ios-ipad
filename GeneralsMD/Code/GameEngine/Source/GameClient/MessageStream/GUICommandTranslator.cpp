@@ -362,6 +362,9 @@ GameMessageDisposition GUICommandTranslator::translateGameMessage(const GameMess
 
 	switch( msg->getType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
@@ -392,6 +395,9 @@ GameMessageDisposition GUICommandTranslator::translateGameMessage(const GameMess
 			{
 				switch( command->getCommandType() )
 				{
+					// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+					default: break;
+
 
 					//---------------------------------------------------------------------------------------
 					case GUI_COMMAND_FIRE_WEAPON:

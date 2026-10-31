@@ -173,6 +173,9 @@ enum KindOfType CPP_11(: Int)
 };
 
 typedef BitFlags<KINDOF_COUNT>	KindOfMaskType;
+// GeneralsX @build Codex 31/10/2026 Declare the name-table specialization supplied by KindOf.cpp.
+template<> const char* const KindOfMaskType::s_bitNameList[];
+
 
 #define MAKE_KINDOF_MASK(k) KindOfMaskType(KindOfMaskType::kInit, (k))
 

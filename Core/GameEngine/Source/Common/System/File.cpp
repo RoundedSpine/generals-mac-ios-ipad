@@ -46,6 +46,8 @@
 //----------------------------------------------------------------------------
 
 #include "PreRTS.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -249,10 +251,10 @@ Bool	File::print ( const Char *format, ...)
 
 	va_list args;
 	va_start( args, format );     /* Initialize variable arguments. */
-	len = vsprintf( buffer, format, args );
+	len = vsnprintf(buffer, sizeof(buffer), format, args );
 	va_end( args );
 
-	if ( len >= sizeof(buffer) )
+	if ( len < 0 || static_cast<size_t>(len) >= sizeof(buffer) )
 	{
 		// Big Problem
 		assert( FALSE );

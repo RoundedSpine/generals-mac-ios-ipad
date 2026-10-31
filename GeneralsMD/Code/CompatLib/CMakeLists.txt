@@ -76,7 +76,8 @@ else()
     endif()
     if(APPLE)
         # macOS: DXVK built from git source -- Wine-style include/native layout
-        target_include_directories(d3d8lib INTERFACE
+        # GeneralsX @build Codex 31/10/2026 DirectX compatibility declarations are external SDK headers, not engine implementations.
+        target_include_directories(d3d8lib SYSTEM INTERFACE
             ${dxvk_SOURCE_DIR}/include/native
             ${dxvk_SOURCE_DIR}/include/native/windows
             ${dxvk_SOURCE_DIR}/include/native/directx
@@ -84,7 +85,7 @@ else()
         )
     else()
         # Linux: DXVK pre-built steamrt tarball -- all headers flat in include/dxvk/
-        target_include_directories(d3d8lib INTERFACE
+        target_include_directories(d3d8lib SYSTEM INTERFACE
             ${dxvk_SOURCE_DIR}/include/dxvk
         )
     endif()

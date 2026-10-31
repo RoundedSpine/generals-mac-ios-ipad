@@ -263,6 +263,9 @@ UpdateSleepTime SpecialAbilityUpdate::update()
         shouldAbort = TRUE;
       else switch (data->m_specialPowerTemplate->getSpecialPowerType())
       {
+        // GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+        default: break;
+
         case SPECIAL_INFANTRY_CAPTURE_BUILDING:
         case SPECIAL_BLACKLOTUS_CAPTURE_BUILDING:
         case SPECIAL_HACKER_DISABLE_BUILDING:
@@ -987,6 +990,9 @@ void SpecialAbilityUpdate::startPreparation()
 
   switch( spTemplate->getSpecialPowerType() )
   {
+    // GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+    default: break;
+
     case SPECIAL_MISSILE_DEFENDER_LASER_GUIDED_MISSILES:
     {
       Object *target = TheGameLogic->findObjectByID( m_targetID );
@@ -1156,6 +1162,9 @@ Bool SpecialAbilityUpdate::continuePreparation()
 
   switch( spTemplate->getSpecialPowerType() )
   {
+    // GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+    default: break;
+
     case SPECIAL_MISSILE_DEFENDER_LASER_GUIDED_MISSILES:
     case SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK:
     {
@@ -1290,6 +1299,9 @@ void SpecialAbilityUpdate::triggerAbilityEffect()
 
   switch( spTemplate->getSpecialPowerType() )
   {
+    // GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+    default: break;
+
     case SPECIAL_MISSILE_DEFENDER_LASER_GUIDED_MISSILES:
     {
       Object *target = TheGameLogic->findObjectByID( m_targetID );
@@ -1702,6 +1714,9 @@ void SpecialAbilityUpdate::killSpecialObjects()
 
   switch( spTemplate->getSpecialPowerType() )
   {
+    // GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+    default: break;
+
     case SPECIAL_MISSILE_DEFENDER_LASER_GUIDED_MISSILES:
       //The instant we remove the laser, reset the weaponset!
       Object *object = getObject();
@@ -1965,6 +1980,9 @@ void SpecialAbilityUpdate::endPreparation()
 	const SpecialPowerTemplate *spTemplate = data->m_specialPowerTemplate;
 	switch( spTemplate->getSpecialPowerType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case SPECIAL_TANKHUNTER_TNT_ATTACK:
 		case SPECIAL_TIMED_CHARGES:
 		case SPECIAL_BOOBY_TRAP:

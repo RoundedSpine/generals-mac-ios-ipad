@@ -46,6 +46,8 @@
 //----------------------------------------------------------------------------
 
 #include "Lib/BaseType.h"
+// GeneralsX @bugfix Codex 31/10/2026 Bound legacy formatted writes to the actual destination arrays.
+#include <Utility/stdio_adapter.h>
 #include "VideoDevice/FFmpeg/FFmpegVideoPlayer.h"
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
@@ -248,7 +250,7 @@ VideoStreamInterface*	FFmpegVideoPlayer::open( AsciiString movieTitle )
 		if (TheGlobalData->m_modDir.isNotEmpty())
 		{
 			char filePath[ _MAX_PATH ];
-			sprintf( filePath, "%s%s\\%s.%s", TheGlobalData->m_modDir.str(), VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
+			snprintf(filePath, sizeof(filePath), "%s%s\\%s.%s", TheGlobalData->m_modDir.str(), VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
 			File* file =  TheFileSystem->openFile(filePath);
             DEBUG_ASSERTLOG(!file, ("opened bink file %s\n", filePath));
             if (file)
@@ -258,13 +260,13 @@ VideoStreamInterface*	FFmpegVideoPlayer::open( AsciiString movieTitle )
 		}
 
 		char localizedFilePath[ _MAX_PATH ];
-		sprintf( localizedFilePath, VIDEO_LANG_PATH_FORMAT, GetRegistryLanguage().str(), pVideo->m_filename.str(), VIDEO_EXT );
+		snprintf(localizedFilePath, sizeof(localizedFilePath), VIDEO_LANG_PATH_FORMAT, GetRegistryLanguage().str(), pVideo->m_filename.str(), VIDEO_EXT );
         File* file =  TheFileSystem->openFile(localizedFilePath);
 		DEBUG_ASSERTLOG(!file, ("opened localized bink file %s\n", localizedFilePath));
 		if (!file)
 		{
 			char filePath[ _MAX_PATH ];
-			sprintf( filePath, "%s\\%s.%s", VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
+			snprintf(filePath, sizeof(filePath), "%s\\%s.%s", VIDEO_PATH, pVideo->m_filename.str(), VIDEO_EXT );
 			file = TheFileSystem->openFile(filePath);
 			DEBUG_ASSERTLOG(!file, ("opened bink file %s\n", filePath));
 		}
@@ -516,7 +518,7 @@ void FFmpegVideoStream::frameRender( VideoBuffer *buffer )
         return;
     }
 
-    if (m_frame->data == nullptr) {
+    if (m_frame->data[0] == nullptr) {
         return;
     }
 

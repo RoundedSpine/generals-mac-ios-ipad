@@ -1143,6 +1143,9 @@ void ThingTemplate::validate()
 		// no texture given, pick a default
 		switch (getTemplateGeometryInfo().getGeomType())
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case GEOMETRY_SPHERE:
 			case GEOMETRY_CYLINDER:
 				m_shadowTextureName = "shadow";

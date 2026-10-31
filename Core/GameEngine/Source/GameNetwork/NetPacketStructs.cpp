@@ -493,6 +493,9 @@ size_t NetPacketGameCommandData::getSize(const NetCommandMsg &msg)
 		const GameMessageArgumentDataType type = arg->getType();
 		switch (type)
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 		case ARGUMENTDATATYPE_INTEGER:
 			size += arg->getArgCount() * sizeof(Int);
 			break;
@@ -562,6 +565,9 @@ size_t NetPacketGameCommandData::copyBytes(UnsignedByte *buffer, const NetComman
 		GameMessageArgumentType arg = *gmsg->getArgument(i);
 		switch (type)
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 		case ARGUMENTDATATYPE_INTEGER:
 			size += network::writePrimitive(buffer + size, arg.integer);
 			break;

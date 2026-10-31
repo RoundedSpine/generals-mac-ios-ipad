@@ -425,6 +425,9 @@ PlayerMaskType PlayerList::getPlayersWithRelationship( Int srcPlayerIndex, Unsig
 
 		switch (srcPlayer->getRelationship(player->getDefaultTeam()))
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case ENEMIES:
 				if (BitIsSet(allowedRelationships, ALLOW_ENEMIES))
 					BitSet(retVal, player->getPlayerMask());

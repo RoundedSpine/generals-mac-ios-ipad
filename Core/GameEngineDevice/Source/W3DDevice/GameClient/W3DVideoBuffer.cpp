@@ -235,6 +235,9 @@ WW3DFormat W3DVideoBuffer::TypeToW3DFormat( VideoBuffer::Type format )
 	WW3DFormat w3dFormat = WW3D_FORMAT_UNKNOWN;
 	switch ( format )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case TYPE_X8R8G8B8:
 			w3dFormat = WW3D_FORMAT_X8R8G8B8;
 			break;
@@ -264,6 +267,9 @@ VideoBuffer::Type W3DVideoBuffer::W3DFormatToType( WW3DFormat w3dFormat )
 	Type format = TYPE_UNKNOWN;
 	switch ( w3dFormat )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		case WW3D_FORMAT_X8R8G8B8:
 				format = VideoBuffer::TYPE_X8R8G8B8;
 				break;

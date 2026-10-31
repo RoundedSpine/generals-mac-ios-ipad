@@ -827,6 +827,9 @@ bool SurfaceClass::Is_Monochrome()
 
 	switch (sd.Format)
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		// these formats are always monochrome
 		case WW3D_FORMAT_A8L8:
 		case WW3D_FORMAT_A8:

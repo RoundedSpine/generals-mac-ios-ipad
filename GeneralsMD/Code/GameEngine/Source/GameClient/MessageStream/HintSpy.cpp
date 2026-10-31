@@ -46,6 +46,9 @@ GameMessageDisposition HintSpyTranslator::translateGameMessage(const GameMessage
 	/// @todo Create an automated way to associate method callbacks with messages
 	switch( msg->getType() )
 	{
+		// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+		default: break;
+
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_MOUSEOVER_DRAWABLE_HINT:
 			{

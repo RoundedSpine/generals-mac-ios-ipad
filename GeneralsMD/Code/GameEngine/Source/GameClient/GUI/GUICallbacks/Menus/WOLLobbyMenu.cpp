@@ -30,6 +30,8 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "Common/GameEngine.h"
 #include "Common/GameState.h"
@@ -348,13 +350,13 @@ static void populateGroupRoomListbox(GameWindow *lb)
 			if (room.m_groupID == TheGameSpyInfo->getCurrentGroupRoom())
 			{
 				Int selected = GadgetComboBoxAddEntry(lb, room.m_translatedName, GameSpyColor[GSCOLOR_CURRENTROOM]);
-				GadgetComboBoxSetItemData(lb, selected, (void *)(room.m_groupID));
+				GadgetComboBoxSetItemData(lb, selected, (void*)(intptr_t)(room.m_groupID));
 				indexToSelect = selected;
 			}
 			else
 			{
 				Int selected = GadgetComboBoxAddEntry(lb, room.m_translatedName, GameSpyColor[GSCOLOR_ROOM]);
-				GadgetComboBoxSetItemData(lb, selected, (void *)(room.m_groupID));
+				GadgetComboBoxSetItemData(lb, selected, (void*)(intptr_t)(room.m_groupID));
 			}
 		}
 		else
@@ -956,6 +958,9 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 #endif // PERF_TEST
 			switch (resp.peerResponseType)
 			{
+				// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+				default: break;
+
 			case PeerResponse::PEERRESPONSE_JOINGROUPROOM:
 				sawImportantMessage = TRUE;
 				if (resp.joinGroupRoom.ok)
@@ -1821,7 +1826,7 @@ WindowMsgHandledType WOLLobbyMenuSystem( GameWindow *window, UnsignedInt msg,
 								rcMenu->winHide(FALSE);
 								rcMenu->winSetPosition(rc->mouseX, rc->mouseY);
 
-								rcMenu->winSetUserData((void *)selectedID);
+								rcMenu->winSetUserData((void*)(intptr_t)selectedID);
 								TheWindowManager->winSetLoneWindow(rcMenu);
 							}
 						}

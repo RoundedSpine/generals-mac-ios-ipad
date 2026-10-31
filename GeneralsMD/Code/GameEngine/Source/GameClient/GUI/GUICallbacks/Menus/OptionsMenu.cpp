@@ -29,6 +29,8 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
+// GeneralsX @bugfix Codex 31/10/2026 Store integer callback cookies through a pointer-width signed integer.
+#include <Utility/stdint_adapter.h>
 
 #include "gamespy/ghttp/ghttp.h"
 
@@ -1080,7 +1082,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 		count++;
 		str.translate(IPlist->getIPstring());
 		index = GadgetComboBoxAddEntry(comboBoxLANIP, str, color);
-		GadgetComboBoxSetItemData(comboBoxLANIP, index, (void *)(IPlist->getIP()));
+		GadgetComboBoxSetItemData(comboBoxLANIP, index, (void*)(intptr_t)(IPlist->getIP()));
 		if (selectedIP == IPlist->getIP())
 		{
 			selectedIndex = index;
@@ -1116,7 +1118,7 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 			count++;
 			str.translate(IPlist->getIPstring());
 			index = GadgetComboBoxAddEntry(comboBoxOnlineIP, str, color);
-			GadgetComboBoxSetItemData(comboBoxOnlineIP, index, (void *)(IPlist->getIP()));
+			GadgetComboBoxSetItemData(comboBoxOnlineIP, index, (void*)(intptr_t)(IPlist->getIP()));
 			if (selectedIP == IPlist->getIP())
 			{
 				selectedIndex = index;

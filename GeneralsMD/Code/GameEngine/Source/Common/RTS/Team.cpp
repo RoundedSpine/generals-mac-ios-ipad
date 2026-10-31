@@ -1155,6 +1155,9 @@ Bool TeamPrototype::evaluateProductionCondition()
 	if (pScript) {
 		// Check difficulty.
 		switch (getControllingPlayer()->getPlayerDifficulty() ) {
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case DIFFICULTY_EASY:
 				if (!pScript->isEasy()) {
 					m_productionConditionAlwaysFalse = true;

@@ -1497,6 +1497,9 @@ Bool ActionManager::canDoSpecialPowerAtLocation( const Object *obj, const Coord3
 		// First check terrain type, if it is cared about.  Don't return a true, since there are more checks.
 		switch( spTemplate->getSpecialPowerType() )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case SPECIAL_PARADROP_AMERICA:
 			case INFA_SPECIAL_PARADROP_AMERICA:
 			case SPECIAL_CRATE_DROP:
@@ -1510,6 +1513,9 @@ Bool ActionManager::canDoSpecialPowerAtLocation( const Object *obj, const Coord3
 		// Second check is shroudedness, if it is cared about
 		switch( spTemplate->getSpecialPowerType() )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case SPECIAL_DAISY_CUTTER:
 			case AIRF_SPECIAL_DAISY_CUTTER:
 			case SPECIAL_PARADROP_AMERICA:
@@ -1591,6 +1597,9 @@ Bool ActionManager::canDoSpecialPowerAtLocation( const Object *obj, const Coord3
 		// To avoid cheating, verify that it is legal to place this building.
 		switch( spTemplate->getSpecialPowerType() )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case SPECIAL_SNEAK_ATTACK:
 			{
 #if RETAIL_COMPATIBLE_CRC
@@ -1656,6 +1665,9 @@ Bool ActionManager::canDoSpecialPowerAtObject( const Object *obj, const Object *
 
 		switch( spTemplate->getSpecialPowerType() )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case SPECIAL_CASH_BOUNTY:
 				return false;
 
@@ -1907,6 +1919,9 @@ Bool ActionManager::canDoSpecialPower( const Object *obj, const SpecialPowerTemp
 
 		switch( spTemplate->getSpecialPowerType() )
 		{
+			// GeneralsX @build Codex 31/10/2026 Unhandled enum values retain the original no-op path.
+			default: break;
+
 			case SPECIAL_MISSILE_DEFENDER_LASER_GUIDED_MISSILES:
 			case SPECIAL_TANKHUNTER_TNT_ATTACK:
 			case SPECIAL_BOOBY_TRAP:
