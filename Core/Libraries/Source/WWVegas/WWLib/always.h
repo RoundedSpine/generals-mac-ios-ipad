@@ -75,6 +75,9 @@
 #endif	//_MSC_VER
 #endif	//RTS_DEBUG
 
+// GeneralsX @build Codex 31/10/2026 Both allocator configurations use this release identity helper.
+template<class T> inline T WWReleaseRefOwner(T value) { return value; }
+
 #if !defined(DISABLE_GAMEMEMORY) // (gth) killing the Generals Memory Manager!
 
 #ifndef _OPERATOR_NEW_DEFINED_
@@ -104,9 +107,6 @@
 #endif
 
 #endif
-
-// GeneralsX @build Codex 31/10/2026 Preserve identity-expression semantics without unused-value warnings in release calls.
-template<class T> inline T WWReleaseRefOwner(T value) { return value; }
 
 #if defined(RTS_DEBUG)
 	#define MSGW3DNEW(MSG)					new( MSG, 0 )

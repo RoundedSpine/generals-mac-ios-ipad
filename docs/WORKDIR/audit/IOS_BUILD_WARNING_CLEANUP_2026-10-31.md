@@ -152,3 +152,16 @@ at configuration, so its zero observed warnings were correctly marked incomplete
 The reporter now publishes bounded incomplete-build output and warning samples
 alongside counts, making subsequent native problems reviewable without private
 log access. All twelve warning/build checks pass after the change.
+
+### Allocator-configuration and registry verification
+
+Exercise the real ref-owner preprocessor block with and without
+DISABLE_GAMEMEMORY. This exposes a helper declaration inside only one branch;
+move it before the conditional. The strengthened case fails before the move and
+passes after it. All twelve checks pass normally and with ASan/UBSan, and eight
+production fragments pass the Clang frontend without diagnostics.
+
+The real pinned vcpkg checkout's complete manifest host dry run exits zero once
+history is restored (after installing the missing local Ninja tool). The registry
+contains both overridden FFmpeg 8.1.1#2 and ffmpeg-bin2c 8.1.1 port trees. This
+verifies dependency resolution, not local iOS compilation.

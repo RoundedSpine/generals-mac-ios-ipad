@@ -185,11 +185,14 @@ int main(){alignas(int) unsigned char bytes[16]={};
 
     def test_ref_owner_identity_evaluates_once_and_preserves_pointer_result(self):
         source=(ROOT/'Core/Libraries/Source/WWVegas/WWLib/always.h').read_text()
-        start=source.index('template<class T> inline T WWReleaseRefOwner');end=source.index('\n',start)
-        run_cpp('#include <cassert>\n'+source[start:end]+r'''
+        start=source.index('#endif\t//RTS_DEBUG')+len('#endif\t//RTS_DEBUG')
+        end=source.index('#endif // (gth) removing the generals memory stuff from W3D')
+        block=source[start:end]+'\n#endif\n'
+        for flags in [(),('-DDISABLE_GAMEMEMORY',)]:
+            run_cpp('#include <cassert>\n#include <new>\nusing std::size_t;\n#define __cdecl\n'+block+r'''
 int main(){int value=7,calls=0;auto make=[&]{++calls;return &value;};
- WWReleaseRefOwner(make());assert(calls==1);auto*p=WWReleaseRefOwner(make());assert(p==&value&&calls==2);}
-''',extra_flags=('-Werror','-Wunused-value'))
+ SET_REF_OWNER(make());assert(calls==1);auto*p=SET_REF_OWNER(make());assert(p==&value&&calls==2);}
+''',extra_flags=('-Werror','-Wunused-value',*flags))
 
     def test_patch_application_is_idempotent_inside_a_parent_git_checkout_and_rejects_conflicts(self):
         with tempfile.TemporaryDirectory(prefix='warning patches ') as directory:
