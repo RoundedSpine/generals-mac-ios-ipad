@@ -114,7 +114,8 @@ jobs:
           vcpkg_root="$RUNNER_TEMP/generals-ios-vcpkg"
           git init "$vcpkg_root"
           git -C "$vcpkg_root" remote add origin https://github.com/microsoft/vcpkg.git
-          git -C "$vcpkg_root" fetch --depth 1 origin "$vcpkg_revision"
+          # Versioned manifests also need historical port trees from the registry.
+          git -C "$vcpkg_root" fetch origin "$vcpkg_revision"
           git -C "$vcpkg_root" -c advice.detachedHead=false checkout --detach FETCH_HEAD
           test "$(git -C "$vcpkg_root" rev-parse HEAD)" = "$vcpkg_revision"
           "$vcpkg_root/bootstrap-vcpkg.sh" -disableMetrics

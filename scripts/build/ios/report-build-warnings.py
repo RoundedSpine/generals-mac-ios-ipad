@@ -13,11 +13,13 @@ COMPILER=re.compile(r'^(?:.+?:\d+(?::\d+)?: |(?:clang\+\+|clang|gcc|g\+\+|cc|c\+
 
 
 def summarize(paths,outcome):
-    groups=Counter();samples={};missing=[]
+    groups=Counter();samples={};missing=[];tails=[]
     for name in paths:
         path=Path(name)
         if not path.is_file():missing.append(str(path));continue
-        for raw in path.read_text(errors='replace').splitlines():
+        content=path.read_text(errors='replace')
+        if content.strip():tails.append(str(path)+':\n'+ANSI.sub('',content[-6000:]))
+        for raw in content.splitlines():
             line=ANSI.sub('',raw)
             line=re.sub(r'^\d{4}-\d\d-\d\dT\S+\s+','',line).removeprefix('##[warning]')
             matched=COMPILER.match(line)
@@ -30,8 +32,10 @@ def summarize(paths,outcome):
             groups[group]+=1
             examples=samples.setdefault(group,[])
             if line not in examples and len(examples)<4:examples.append(line)
-    return dict(complete=outcome=='success' and not missing,outcome=outcome or 'unknown',
-                observed_warnings=sum(groups.values()),groups=dict(sorted(groups.items())),samples=samples,missing_logs=missing)
+    complete=outcome=='success' and not missing
+    return dict(complete=complete,outcome=outcome or 'unknown',
+                observed_warnings=sum(groups.values()),groups=dict(sorted(groups.items())),samples=samples,missing_logs=missing,
+                incomplete_build_output='\n'.join(tails)[-10000:] if not complete else '')
 
 
 def main():
@@ -41,6 +45,12 @@ def main():
     label='complete' if result['complete'] else 'incomplete'
     message=f"native_build={label} observed_warnings={result['observed_warnings']} groups={json.dumps(result['groups'],sort_keys=True)}"
     print('::notice title=iOS build warning summary::'+message.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
+    # GeneralsX @build Codex 31/10/2026 Make real native failures and residual warnings reviewable without authenticated log downloads.
+    for group,examples in result['samples'].items():
+        detail='\n'.join(examples)
+        print('::notice title=iOS warning samples ('+group+')::'+detail.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
+    if result['incomplete_build_output']:
+        print('::notice title=iOS incomplete build output::'+result['incomplete_build_output'].replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
     summary=os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
         with open(summary,'a') as output:

@@ -137,6 +137,18 @@ The added compile case fails against the original misspelling and passes with
 the corrected production CMake option; it verifies the actual offset within a
 polymorphic object under `-Werror`. All twelve warning/build cases now pass;
 seven compiled production fragments have no Clang frontend diagnostics.
-The preceding native run passed regular QA and all TSan checks, but is superseded
-before native compilation by the correction. Keep null opaque GUI deletion a
+The preceding native run passed regular QA and all TSan checks, but failed in
+CMake configuration before native compilation. Keep null opaque GUI deletion a
 no-op, including avoiding custom allocator initialization for null payloads.
+
+### Versioned-registry provisioning follow-up
+
+Reproduce the depth-one vcpkg failure locally with the real pinned checkout and
+manifest: `vcpkg install --dry-run` cannot read the builtin-baseline commit
+533a5fda5c0646d1771345fb572e759283444d5f. The previous setup action fetched full
+history. Restore that history in direct provisioning, keeping checkout verification
+and the pin; extend the fixture to reject `--depth`. Native run 41171230812 failed
+at configuration, so its zero observed warnings were correctly marked incomplete.
+The reporter now publishes bounded incomplete-build output and warning samples
+alongside counts, making subsequent native problems reviewable without private
+log access. All twelve warning/build checks pass after the change.

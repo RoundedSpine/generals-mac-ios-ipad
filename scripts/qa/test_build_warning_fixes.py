@@ -64,7 +64,11 @@ printf("warning: a source string is not a compiler diagnostic");
             self.assertEqual(2,result['groups']['-Wenum-compare']);self.assertEqual(1,len(result['samples']['-Wenum-compare']))
             self.assertFalse(module.summarize([log],'failure')['complete'])
             self.assertFalse(module.summarize([Path(directory)/'missing'],'success')['complete'])
-            log.write_text('Build completed\n');self.assertEqual(0,module.summarize([log],'success')['observed_warnings'])
+            log.write_text('CMake Error: a missing registry tree\n')
+            incomplete=module.summarize([log],'skipped')
+            self.assertFalse(incomplete['complete']);self.assertIn('missing registry tree',incomplete['incomplete_build_output'])
+            log.write_text('Build completed\n');clean=module.summarize([log],'success')
+            self.assertEqual(0,clean['observed_warnings']);self.assertEqual('',clean['incomplete_build_output'])
 
     def test_forbidden_pool_new_throws_before_construction_and_failed_placement_frees(self):
         header=(ROOT/'Core/GameEngine/Include/Common/GameMemory.h').read_text()
@@ -232,6 +236,7 @@ if 'rev-parse' in args:print(os.environ['GX_TEST_REVISION'])
                     self.assertIn('VCPKG_ROOT='+str(root/'runner temp/generals-ios-vcpkg'),envfile.read_text())
                     invocations=[json.loads(line) for line in calls.read_text().splitlines()]
                     self.assertTrue(any('fetch' in row and row[-1]==pin for row in invocations))
+                    self.assertFalse(any('--depth' in row for row in invocations))
                 else:
                     self.assertNotEqual(0,result.returncode);self.assertFalse(stamp.exists());self.assertFalse(envfile.exists())
 
