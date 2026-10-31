@@ -922,7 +922,7 @@ void CPUDetectClass::Init_Memory()
 #endif // defined(_MSC_VER) && _MSC_VER < 1300
 
 #else
-// Non-Windows builds retain zero for these unused legacy diagnostic counters.
+// Non-Windows builds retain the existing zero defaults for these legacy counters.
 #endif // WIN32
 }
 

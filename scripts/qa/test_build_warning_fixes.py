@@ -34,6 +34,18 @@ def workflow_run(name):
 
 
 class BuildWarningFixTests(unittest.TestCase):
+    def test_ini_layout_extension_option_is_accepted_and_preserves_the_actual_offset(self):
+        options=(ROOT/'cmake/compilers.cmake').read_text()
+        flag=re.search(r'COMPILE_LANGUAGE:CXX>:(-Wno-[^>]+)>',options)[1]
+        run_cpp(r'''
+#include <cstddef>
+#include <cassert>
+struct IniRecord {virtual ~IniRecord(){};int value;};
+int main(){IniRecord record;
+ const auto offset=__builtin_offsetof(IniRecord,value);
+ assert(reinterpret_cast<char*>(&record.value)-reinterpret_cast<char*>(&record)==offset);}
+''',extra_flags=('-Werror',flag))
+
     def test_warning_report_counts_diagnostics_and_does_not_claim_incomplete_builds_are_clean(self):
         spec=importlib.util.spec_from_file_location('warning_report',ROOT/'scripts/build/ios/report-build-warnings.py')
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

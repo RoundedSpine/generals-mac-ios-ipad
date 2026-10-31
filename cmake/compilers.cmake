@@ -53,7 +53,7 @@ if (NOT IS_VS6_BUILD)
         add_compile_options(-Wsuggest-override)
         # GeneralsX @build Codex 31/10/2026 INI tables deliberately use the supported ABI offset extension on polymorphic records.
         # Preserve those layouts; this exception does not silence other engine diagnostics.
-        add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wno-invalidoffsetof>")
+        add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>")
         # GeneralsX @build fbraz 03/05/2026 Disable FMA contraction to avoid
         # cross-platform rounding divergence in deterministic math paths.
         # Upstream reference: Okladnoj, PR #2670

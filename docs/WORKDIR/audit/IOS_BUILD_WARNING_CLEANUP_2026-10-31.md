@@ -22,7 +22,7 @@ pathfinding algorithm change or an assertion of cross-platform warning-free buil
   exception specifications in both declarations and definitions. Valid pool
   allocation and constructor-failure cleanup retain their existing behavior.
 - INI layouts: retain the compiler-supported offset extension used by polymorphic
-  record parsing. Scope `-Wno-invalidoffsetof` to modern non-MSVC C++ compilation.
+  record parsing. Scope `-Wno-invalid-offsetof` to modern non-MSVC C++ compilation.
   Do not rewrite the layouts or replace their offsets with guessed values. This
   is the only explicit diagnostic exception added to engine compilation.
 - External SDK boundaries: classify DirectX/native headers as SYSTEM includes in
@@ -129,3 +129,14 @@ regular cases pass (334 preceding plus eleven new checks).
 Native iOS SDK compilation and the final native warning count remain pending.
 Local fixtures cannot establish that every Apple SDK diagnostic has disappeared;
 use the new build's complete warning summary and inspect any remaining groups.
+
+### Compiler-option verification follow-up
+
+Correct the INI diagnostic option spelling to `-Wno-invalid-offsetof`.
+The added compile case fails against the original misspelling and passes with
+the corrected production CMake option; it verifies the actual offset within a
+polymorphic object under `-Werror`. All twelve warning/build cases now pass;
+seven compiled production fragments have no Clang frontend diagnostics.
+The preceding native run passed regular QA and all TSan checks, but is superseded
+before native compilation by the correction. Keep null opaque GUI deletion a
+no-op, including avoiding custom allocator initialization for null payloads.

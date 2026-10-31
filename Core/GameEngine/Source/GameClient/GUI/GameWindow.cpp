@@ -124,8 +124,9 @@ GameWindow::GameWindow()
 GameWindow::~GameWindow()
 {
 
-	// GeneralsX @build Codex 31/10/2026 The opaque gadget payload has no statically known destructor.
-	::operator delete(m_inputData);
+	// GeneralsX @build Codex 31/10/2026 The opaque gadget payload has no statically known destructor; retain null-delete as a no-op.
+	if (m_inputData)
+		::operator delete(m_inputData);
 	m_inputData = nullptr;
 
 	delete m_editData;
