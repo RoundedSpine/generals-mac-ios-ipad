@@ -48,6 +48,7 @@ jobs:
               "test_complete_path_worker.py",
               "test_zone_merges.py", "test_frozen_occupancy_cache.py", "test_reused_path_contexts.py", "test_path_lookahead.py",
               "test_joined_search_pool.py", "test_participant_path_pool.py",
+              "test_four_request_path_pool.py",
           ]
           for test in tests:
               result = subprocess.run([sys.executable, "scripts/qa/" + test], text=True, capture_output=True)
@@ -71,7 +72,7 @@ jobs:
           for test in ["test_occupancy_worker.py", "test_search_context_binding.py",
                        "test_exclusive_search_worker.py", "test_parallel_path_batch.py", "test_complete_path_worker.py",
                        "test_zone_merges.py", "test_frozen_occupancy_cache.py", "test_reused_path_contexts.py", "test_path_lookahead.py",
-                       "test_joined_search_pool.py", "test_participant_path_pool.py"]:
+                       "test_joined_search_pool.py", "test_participant_path_pool.py", "test_four_request_path_pool.py"]:
               result = subprocess.run([sys.executable, "scripts/qa/" + test, "--tsan"], text=True, capture_output=True)
               output = result.stdout + result.stderr
               print(output, flush=True)
@@ -129,8 +130,7 @@ jobs:
           set -euo pipefail
           # GeneralsX @performance Codex 30/10/2026 Trial frozen-request occupancy reuse on the testing branch after the zone-only device baseline.
           # GeneralsX @performance Codex 30/10/2026 Reuse each complete-search participant arena for its sequential fallback.
-          # GeneralsX @performance Codex 30/10/2026 Trial eligible-head lookahead with the existing one-worker, two-result executor.
-          # GeneralsX @feature Codex 31/10/2026 Trial participant-owned arenas and joined dynamic claims at the existing worker count and width.
+          # GeneralsX @feature Codex 31/10/2026 Trial up to four logical requests on two participant arenas, keeping one background worker.
           cmake --preset ios-vulkan \
             -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && 'quad-lists-v1' || '' }} \
             -DGENERALS_SEARCH_CONTEXT=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
@@ -141,6 +141,7 @@ jobs:
             -DGENERALS_COMPLETE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_REUSE_PATH_CONTEXTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_PATH_WORKER_POOL=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_PATH_FOUR_REQUESTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_PATH_LOOKAHEAD=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_FAST_ZONE_MERGES=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
             -DGENERALS_FROZEN_OCCUPANCY_CACHE=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \

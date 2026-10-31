@@ -385,3 +385,27 @@ selects two jobs with one background worker; it does not yet adopt the reference
 wider job window or larger pool. Host tests additionally execute four complete
 searches on three participant arenas. Native/device validation of the new pool
 and performance benefits remain pending; the latest device log predates it.
+
+## Subsequent four-request trial
+
+The e18c0ae device log confirms the dynamic participant pool and normal shutdown:
+1,406 batches, 2,812 primary jobs, 98.33% primary reuse, no logged worker failure
+and correct physical/logical task mapping. This supersedes the pool foundation's
+pending device-execution status; it does not establish a speed improvement.
+
+The [four-request stage](IOS_FOUR_REQUEST_POOL_2026-10-31.md) expands logical
+capacity independently of worker count. Select two to four distinct eligible
+requests within the existing anchored eight-entry bound, retaining one worker
+plus main and two reusable arenas. Unlike the reference's eight-entry group
+budgeting, preserve per-actual-request checks and discard unconsumed speculation.
+Validate complete results at their original queue/API positions. Wider retained
+outputs and profiler slots increase fixed storage; no extra arenas are created.
+The new trial still needs native compilation and device performance validation.
+
+Reimagined can select more requests, skip an unsupported head during collection,
+auto-size a larger worker pool and index dense map-sized node arrays. Our bounded
+lookup/admission, stricter live dependency validation, explicit joined error/FP/
+lifecycle handling and existing scheduling remain intentional adaptations.
+Trial a second worker only after inspecting four-request availability, useful work,
+join duration, stale/unused results, memory and thermals. Neither dispatcher splits
+one expensive search across threads.

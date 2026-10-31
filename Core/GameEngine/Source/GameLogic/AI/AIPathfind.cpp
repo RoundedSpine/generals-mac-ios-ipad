@@ -4576,7 +4576,9 @@ struct PathfindParallelJob {
   context.m_openList.reset();context.m_closedList.reset();context.beginSearch();
   context.m_cumulativeCellsAllocated=0;context.m_isTunneling=false;
 #endif
-  reads.reset();obj=nullptr;captured=ready=used=false;queueIndex=-1;
+  // GeneralsX @bugfix Codex 31/10/2026 Vacant logical slots retain no object, locomotor or cell handles after retirement.
+  reads.reset();obj=nullptr;locomotor=nullptr;id=INVALID_ID;start=goal=nullptr;
+  closestOutcome={nullptr,nullptr,0,false};captured=ready=used=false;queueIndex=-1;
   validatedPermanent=0;
  }
 };
@@ -4590,7 +4592,10 @@ struct PathfindParallelBatch {
  std::array<unsigned long long,participantCount> poolJobs{};
  PathfindParallelBatch(){for(auto&arena:arenas)arena.reset(new PathfindSearchContext);}
 #endif
- PathfindParallelJob jobs[2];
+ // GeneralsX @feature Codex 31/10/2026 Retain bounded logical outputs independently of the two physical arenas.
+ static constexpr unsigned capacity=PathSearchBatchLimits::capacity;
+ PathfindParallelJob jobs[capacity];
+ unsigned count=0;
  PathfindParallelJob* preparing = nullptr;
  unsigned long long batches=0, accepted=0, rejected=0, unused=0, safeSearches=0, safeAccepted=0;
  unsigned long long closestSearches=0, closestAccepted=0;
@@ -4604,8 +4609,8 @@ struct PathfindParallelBatch {
   for(unsigned i=0;i<participantCount;++i)fprintf(stderr," participant%u_jobs=%llu",i,poolJobs[i]);
   fprintf(stderr,"\n");
 #endif
-  fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=2 primary=%llu fallback_only=%llu\n",
-   batches,accepted,rejected,unused,primarySearches,fallbackOnly);
+  fprintf(stderr,"[PATH_PARALLEL_BATCH] stopped batches=%llu accepted=%llu rejected=%llu unused=%llu width=%u primary=%llu fallback_only=%llu\n",
+   batches,accepted,rejected,unused,capacity,primarySearches,fallbackOnly);
   fprintf(stderr,"[PATH_PARALLEL_SAFE] stopped searches=%llu accepted=%llu\n",safeSearches,safeAccepted);
   fprintf(stderr,"[PATH_PARALLEL_CLOSEST] stopped searches=%llu accepted=%llu\n",closestSearches,closestAccepted);
   fprintf(stderr,"[PATH_PARALLEL_FALLBACK] stopped searches=%llu accepted=%llu rejected=%llu unused=%llu early_searches=%llu early_accepted=%llu\n",
@@ -4696,7 +4701,7 @@ void Pathfinder::clearParallelBatch() {
   if(job.fallback && job.fallback->ready && !job.fallback->used) ++m_parallelBatch->fallbackUnused;
   job.reset();
  }
- m_parallelBatch->preparing=nullptr;m_parallelBatch->active=false;
+ m_parallelBatch->preparing=nullptr;m_parallelBatch->active=false;m_parallelBatch->count=0;
 #ifdef GENERALS_ZH_PATH_WORKER_POOL
  // GeneralsX @refactor Codex 31/10/2026 Reset each participant once after join, independently of discarded result records.
  for(auto&arena:m_parallelBatch->arenas)PathfindParallelJob::resetArena(*arena,false);
@@ -7862,7 +7867,7 @@ void Pathfinder::prepareParallelBatch()
   }
   return PathLookaheadEligibility::Eligible;
  };
- Candidate selected[2];
+ Candidate selected[PathfindParallelBatch::capacity];
  const Int begin=m_queuePRHead,tail=m_queuePRTail;
  const auto world=m_parallelWorldEpoch;
  unsigned scanned=0,count=0;
@@ -7870,11 +7875,13 @@ void Pathfinder::prepareParallelBatch()
  unsigned partnerOffset=0;
 #endif
  Int position=begin;
- while(position!=tail && scanned<PathLookaheadWindow<PATHFIND_QUEUE_LEN>::scanLimit && count<2){
+ while(position!=tail && scanned<PathLookaheadWindow<PATHFIND_QUEUE_LEN>::scanLimit && count<PathfindParallelBatch::capacity){
   const auto offset=scanned++;
   const auto id=m_queuedPathfindRequests[position];
   Candidate candidate;
-  const auto status=count&&selected[0].id==id?PathLookaheadEligibility::Duplicate:capture(id,position,candidate);
+  // GeneralsX @bugfix Codex 31/10/2026 Exclude duplicates of every retained request, including later logical slots.
+  bool duplicate=false;for(unsigned i=0;i<count;++i)if(selected[i].id==id)duplicate=true;
+  const auto status=duplicate?PathLookaheadEligibility::Duplicate:capture(id,position,candidate);
   if(status==PathLookaheadEligibility::Eligible){
    selected[count++]=candidate;
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -7891,7 +7898,7 @@ void Pathfinder::prepareParallelBatch()
  }
  m_lookaheadWindow.capture(begin,scanned,world,lifecycle);
 #ifdef GENERALS_ZH_PATH_TIMING
- m_lookaheadProfile.record(scanned,count,count==2?2:0,partnerOffset);
+ m_lookaheadProfile.record(scanned,count,count>=2?count:0,partnerOffset);
 #endif
  if(count<2){
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -7899,10 +7906,13 @@ void Pathfinder::prepareParallelBatch()
 #endif
   return;
  }
- ObjectID ids[2],ignored[2];Object* objects[2];Int positions[2];
- Coord3D from[2],to[2],repulsor2[2];
- Bool safe[2],closest[2],blocked[2];Real repulsorRadius[2],pathCostMultiplier[2];
- for(unsigned i=0;i<2;++i){
+ const unsigned selectedCount=count;
+ ObjectID ids[PathfindParallelBatch::capacity],ignored[PathfindParallelBatch::capacity];
+ Object* objects[PathfindParallelBatch::capacity];Int positions[PathfindParallelBatch::capacity];
+ Coord3D from[PathfindParallelBatch::capacity],to[PathfindParallelBatch::capacity],repulsor2[PathfindParallelBatch::capacity];
+ Bool safe[PathfindParallelBatch::capacity],closest[PathfindParallelBatch::capacity],blocked[PathfindParallelBatch::capacity];
+ Real repulsorRadius[PathfindParallelBatch::capacity],pathCostMultiplier[PathfindParallelBatch::capacity];
+ for(unsigned i=0;i<selectedCount;++i){
   const auto& candidate=selected[i];
   ids[i]=candidate.id;objects[i]=candidate.object;positions[i]=candidate.queueIndex;
   from[i]=candidate.from;to[i]=candidate.to;ignored[i]=candidate.ignored;repulsor2[i]=candidate.repulsor2;
@@ -7921,6 +7931,7 @@ void Pathfinder::prepareParallelBatch()
   }
   clearParallelBatch();
  }
+ const unsigned selectedCount=2;
  const Int next=(m_queuePRHead+1)%PATHFIND_QUEUE_LEN;
  if (next==m_queuePRTail) {
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -8015,8 +8026,8 @@ void Pathfinder::prepareParallelBatch()
    fprintf(stderr,"[PATH_SEARCH_WORKER] enabled mode=parallel scope=ordinary_safe_closest_fallback worker=1 caller=1\n");
   }
 #endif
-  auto& batch=*m_parallelBatch;
-  for (Int i=0;i<2;++i) {
+  auto& batch=*m_parallelBatch;batch.count=selectedCount;
+  for (unsigned i=0;i<selectedCount;++i) {
    auto& job=batch.jobs[i];job.reset();job.obj=objects[i];job.id=ids[i];
    job.locomotor=&objects[i]->getAIUpdateInterface()->getLocomotorSet();
    job.from=from[i];job.to=to[i];job.ignored=ignored[i];
@@ -8070,12 +8081,13 @@ void Pathfinder::prepareParallelBatch()
   }
   batch.active=true;
   Bool canPair=true;
-  for (auto& job:batch.jobs) {
+  for (unsigned i=0;i<selectedCount;++i) {
+   const auto& job=batch.jobs[i];
    if (!job.captured && (job.safe || job.closest || job.locomotor->getValidSurfaces()==0 ||
        job.obj->getAIUpdateInterface()->getPath()!=nullptr)) canPair=false;
   }
   if (canPair) {
-   for (Int i=0;i<2;++i) {
+   for (unsigned i=0;i<selectedCount;++i) {
     auto& job=batch.jobs[i];
     // GeneralsX @feature Codex 27/10/2026 Prepare a read-only fallback on main for ordinary expansion failure or early caller rejection.
     // Reference: dement123, ZeroHourReimagined_1.0.0_source, combined ordinary/closest request execution.
@@ -8118,7 +8130,8 @@ void Pathfinder::prepareParallelBatch()
 #ifdef GENERALS_ZH_PATH_TIMING
   preparationTiming.stop();
 #endif
-  if (hasWork(batch.jobs[0]) && hasWork(batch.jobs[1])) {
+  bool allHaveWork=true;for(unsigned i=0;i<selectedCount;++i)if(!hasWork(batch.jobs[i]))allHaveWork=false;
+  if (allHaveWork) {
 #ifdef GENERALS_ZH_PATH_LOOKAHEAD
    // GeneralsX @bugfix Codex 30/10/2026 A lifecycle transition during main-thread capture retires the window before dispatch.
    if(PathOccupancy::validationPaused().load() || world!=m_parallelWorldEpoch ||
@@ -8191,9 +8204,12 @@ void Pathfinder::prepareParallelBatch()
      fallback.ready=true;
     }
    };
-   // Worker owns job 1; caller participates in job 0. No AI, renderer, cleanup or simulation advances until both complete.
+   // GeneralsX @feature Codex 31/10/2026 Participants claim logical jobs; simulation and AI remain frozen until every callback joins.
 #ifdef GENERALS_ZH_PATH_TIMING
    PathSearchTiming::PairSample pairSample;
+#ifdef GENERALS_ZH_PATH_FOUR_REQUESTS
+   pairSample.count=selectedCount;
+#endif
 #endif
    {
 #ifdef GENERALS_ZH_PATH_TIMING
@@ -8201,12 +8217,12 @@ void Pathfinder::prepareParallelBatch()
 #endif
 #ifdef GENERALS_ZH_PATH_WORKER_POOL
     const auto capturedLifecycle=batch.jobs[0].lifecycle;
-    batch.pool.run(2,[&](unsigned index,unsigned participant){execute(index,participant);},[&]{
+    batch.pool.run(selectedCount,[&](unsigned index,unsigned participant){execute(index,participant);},[&]{
      return !PathOccupancy::validationPaused().load()&&capturedLifecycle==PathOccupancy::validationLifecycleEpoch().load();
     });
     ++batch.poolBatches;
     for(unsigned i=0;i<batch.participantCount;++i)batch.poolJobs[i]+=batch.pool.completedBy(i);
-    for(unsigned i=0;i<2;++i)if(!batch.pool.completed(i))++batch.poolSkipped;
+    for(unsigned i=0;i<selectedCount;++i)if(!batch.pool.completed(i))++batch.poolSkipped;
 #else
     m_exclusiveWorker->worker.runPair([&]{execute(1);},[&]{execute(0);});
 #endif
@@ -8215,7 +8231,7 @@ void Pathfinder::prepareParallelBatch()
 #endif
    }
 #ifdef GENERALS_ZH_PATH_TIMING
-   for(Int i=0;i<2;++i) {
+   for(unsigned i=0;i<selectedCount;++i) {
 #ifdef GENERALS_ZH_PATH_WORKER_POOL
     const bool worker=batch.jobs[i].executionParticipant!=0;
 #else
@@ -8263,7 +8279,7 @@ void Pathfinder::prepareParallelBatch()
     if(task.fallback)copyReads(*job.fallback,task.fallbackReads);
    }
    const auto pairId=m_pathTiming.recordPair(pairSample);
-   for(unsigned i=0;i<2;++i){
+   for(unsigned i=0;i<selectedCount;++i){
     auto&job=batch.jobs[i];
     if(job.kernelTime.calls){job.timingPair=pairId;job.timingRole=i;job.timingResult=PathSearchTiming::Result::Pending;}
     if(job.fallback && job.fallback->kernelTime.calls){
@@ -8272,7 +8288,8 @@ void Pathfinder::prepareParallelBatch()
    }
    admission.reason=PathSearchTiming::Admission::Dispatched;
 #endif
-   for (auto& job:batch.jobs) {
+   for (unsigned i=0;i<selectedCount;++i) {
+    auto& job=batch.jobs[i];
 #ifdef GENERALS_ZH_PATH_WORKER_POOL
     job.ready=job.captured&&job.complete;
 #else
@@ -8291,15 +8308,15 @@ void Pathfinder::prepareParallelBatch()
    ++m_exclusiveWorker->searches;
 #endif
    if (!batch.batches++) {
-    fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=2 worker=1 caller=1 limits=unchanged scheduling=queue_order\n");
+    fprintf(stderr,"[PATH_PARALLEL_BATCH] enabled width=%u worker=1 caller=1 limits=unchanged scheduling=queue_order\n",batch.capacity);
 #ifdef GENERALS_ZH_PATH_LOOKAHEAD
-    fprintf(stderr,"[PATH_LOOKAHEAD] enabled scan=8 selected=2 anchor=head lifetime=inspected_span workers=unchanged\n");
+    fprintf(stderr,"[PATH_LOOKAHEAD] enabled scan=8 selected=%u anchor=head lifetime=inspected_span workers=unchanged\n",batch.capacity);
 #endif
 #ifdef GENERALS_ZH_COMPLETE_PATH_WORKER
     fprintf(stderr,"[PATH_COMPLETE_WORKER] enabled hierarchy=true path_construction=true optimization=true reuse=before_preparation\n");
 #ifdef GENERALS_ZH_REUSE_PATH_CONTEXTS
 #ifdef GENERALS_ZH_PATH_WORKER_POOL
-    fprintf(stderr,"[PATH_WORKER_POOL] enabled workers=1 caller=1 selected=2 assignment=dynamic arenas=participant jobs=logical_slots\n");
+    fprintf(stderr,"[PATH_WORKER_POOL] enabled workers=1 caller=1 selected=%u assignment=dynamic arenas=participant jobs=logical_slots\n",batch.capacity);
 #endif
     fprintf(stderr,"[PATH_CONTEXT_REUSE] enabled arenas=2 results=independent fallback=same_participant job_bytes=%zu context_bytes=%zu\n",
      sizeof(PathfindParallelJob),sizeof(PathfindSearchContext));
@@ -8322,7 +8339,7 @@ void Pathfinder::prepareParallelBatch()
 #ifdef GENERALS_ZH_PATH_TIMING
   else {
    admission.reason=PathSearchTiming::Admission::Capture;
-   for(unsigned i=0;i<2;++i)if(!hasWork(batch.jobs[i])){
+   for(unsigned i=0;i<selectedCount;++i)if(!hasWork(batch.jobs[i])){
     const auto&job=batch.jobs[i];
     m_pathTiming.captureFailure(i,job.safe?PathSearchTiming::Kind::Safe:job.closest?PathSearchTiming::Kind::Closest:PathSearchTiming::Kind::Ordinary,
      job.locomotor->getValidSurfaces()==0,job.obj->getAIUpdateInterface()->getPath()!=nullptr);

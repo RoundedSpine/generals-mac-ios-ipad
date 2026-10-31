@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include "pathsearchprediction.h"
+#include "pathsearchbatchlimits.h"
 
 // GeneralsX @performance Codex 30/10/2026 Retain a bounded inspected queue span independently of speculative result storage.
 template<unsigned QueueLength>
@@ -32,6 +33,8 @@ enum class PathLookaheadEligibility { Eligible,Duplicate,MissingObject,MissingAI
 struct PathLookaheadProfile {
  std::uint64_t windows=0,retained=0,retired=0,inspected=0,eligible=0,selected=0,dispatched=0;
  std::array<std::uint64_t,9> scanCounts{},eligibleCounts{};
+ // GeneralsX @feature Codex 31/10/2026 Distinguish actual selected widths from capped eligible-entry observations.
+ std::array<std::uint64_t,PathSearchBatchLimits::capacity+1> selectedCounts{};
  std::array<std::uint64_t,8> partnerOffsets{};
  std::array<std::uint64_t,static_cast<unsigned>(PathLookaheadEligibility::Count)> skipped{};
  std::array<std::uint64_t,static_cast<unsigned>(PathPredictionReason::Count)> predictions{};
@@ -41,9 +44,9 @@ struct PathLookaheadProfile {
   if(reason==PathLookaheadEligibility::Prediction)++predictions[static_cast<unsigned>(prediction)];
  }
  void record(unsigned scans,unsigned accepted,unsigned chosen,unsigned offset){
-  assert(scans<=8&&accepted<=scans&&chosen<=2&&chosen<=accepted&&offset<8);
+  assert(scans<=8&&accepted<=scans&&chosen<=PathSearchBatchLimits::capacity&&chosen<=accepted&&offset<8);
   ++windows;inspected+=scans;eligible+=accepted;selected+=chosen;
-  ++scanCounts[scans];++eligibleCounts[accepted];if(chosen==2)++partnerOffsets[offset];
+  ++scanCounts[scans];++eligibleCounts[accepted];++selectedCounts[chosen];if(chosen>=2)++partnerOffsets[offset];
  }
  void report(FILE* output)const{
   if(!windows)return;
@@ -57,6 +60,8 @@ struct PathLookaheadProfile {
   for(unsigned i=0;i<scanCounts.size();++i)std::fprintf(output," n%u=%llu",i,u(scanCounts[i]));
   std::fprintf(output,"\n[PATH_LOOKAHEAD_ELIGIBLE]");
   for(unsigned i=0;i<eligibleCounts.size();++i)std::fprintf(output," n%u=%llu",i,u(eligibleCounts[i]));
+  std::fprintf(output,"\n[PATH_LOOKAHEAD_SELECTED]");
+  for(unsigned i=0;i<selectedCounts.size();++i)std::fprintf(output," n%u=%llu",i,u(selectedCounts[i]));
   std::fprintf(output,"\n[PATH_LOOKAHEAD_PARTNER]");
   for(unsigned i=1;i<partnerOffsets.size();++i)std::fprintf(output," offset%u=%llu",i,u(partnerOffsets[i]));
   const char* reasons[]={"accepted","not_waiting","safe","approach","attack","blocked","nonfinal","quick","production_exit","outside_extent"};

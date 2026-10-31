@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cassert>
 #include "pathsearchprediction.h"
+#include "pathsearchbatchlimits.h"
 
 // GeneralsX @feature Codex 28/10/2026 Measure phase boundaries without per-cell clocks, allocation or concurrent shared counters.
 template<class Clock = std::chrono::steady_clock>
@@ -31,6 +32,8 @@ public:
   Duplicate, MissingObject, MissingAI, Dozer, CrusherKey, Prediction, Capture,
   EnvironmentFailure, ThreadFailure, AllocationFailure, Exception, DebugBuild, LookaheadHead, LookaheadSparse, Count
  };
+ // GeneralsX @feature Codex 31/10/2026 Retained timing and capture slots follow logical capacity, not worker count.
+ static constexpr unsigned taskCapacity=PathSearchBatchLimits::capacity;
  static constexpr unsigned retainedSamples=4;
  struct ResultSample {Result result=Result::NotRun;Rejection reason=Rejection::None;};
  // GeneralsX @feature Codex 29/10/2026 Sample wall time at a fixed stride; never time every cell or extrapolate sampled totals.
@@ -94,7 +97,17 @@ public:
  };
  struct PairSample {
   std::uint64_t nanoseconds=0, id=0, queue=0;
-  std::array<TaskSample,2> tasks{};
+  std::array<TaskSample,taskCapacity> tasks{};
+#ifdef GENERALS_ZH_PATH_FOUR_REQUESTS
+  unsigned count=2;
+#endif
+  unsigned taskCount()const{
+#ifdef GENERALS_ZH_PATH_FOUR_REQUESTS
+   return count;
+#else
+   return 2;
+#endif
+  }
  };
  struct QueueSample {
   std::uint64_t nanoseconds=0, id=0;
@@ -176,7 +189,7 @@ public:
   AdmissionScope& operator=(const AdmissionScope&)=delete;
   ~AdmissionScope(){
    ++m_owner.m_admission[static_cast<unsigned>(reason)];
-   if(reason==Admission::Prediction && slot>=0 && slot<2)
+   if(reason==Admission::Prediction && slot>=0 && slot<int(taskCapacity))
     ++m_owner.m_prediction[slot][static_cast<unsigned>(prediction)];
   }
  };
@@ -261,11 +274,13 @@ public:
  const std::array<ClosestSample,retainedSamples>& slowClosest()const{return m_slowClosest;}
  unsigned slowClosestCount()const{return m_slowClosestCount;}
  void captureFailure(unsigned slot,Kind kind,bool immobile,bool oldPath){
+  assert(slot<taskCapacity);
   ++m_capture[slot][static_cast<unsigned>(kind)];
   if(immobile)++m_captureImmobile[slot];
   if(oldPath)++m_captureOldPath[slot];
  }
  std::uint64_t recordPair(PairSample sample){
+  assert(sample.taskCount()<=taskCapacity);
   sample.id=m_metrics[Pair].calls;sample.queue=m_activeQueue?m_activeQueue->id:0;
   for(auto& task:sample.tasks){
    task.primaryOutcome.result=task.primary?Result::Pending:Result::NotRun;
@@ -276,7 +291,7 @@ public:
  }
  // The owning joined job calls once per executed phase, even if this pair was evicted from the top four.
  void resolveResult(std::uint64_t pair,unsigned role,bool fallback,Result result,Rejection reason){
-  assert(role<2 && (result==Result::Reused || result==Result::Rejected || result==Result::Discarded || result==Result::Unfinished));
+  assert(role<taskCapacity && (result==Result::Reused || result==Result::Rejected || result==Result::Discarded || result==Result::Unfinished));
   assert((result==Result::Rejected)==(reason!=Rejection::None));
   ++m_results[unsigned(fallback)][static_cast<unsigned>(result)];
   if(result==Result::Rejected)++m_rejections[unsigned(fallback)][static_cast<unsigned>(reason)];
@@ -369,7 +384,7 @@ public:
   for(unsigned i=0;i<m_admission.size();++i)std::fprintf(output," %s=%llu",admissions[i],u(m_admission[i]));
   std::fprintf(output,"\n");
   const char* predictions[]={"accepted","not_waiting","safe","approach","attack","blocked","nonfinal","quick","production_exit","outside_extent"};
-  for(unsigned slot=0;slot<2;++slot){
+  for(unsigned slot=0;slot<taskCapacity;++slot){
    std::fprintf(output,"[PATH_PAIR_PREDICTION] slot=%u",slot);
    for(unsigned i=0;i<m_prediction[slot].size();++i)std::fprintf(output," %s=%llu",predictions[i],u(m_prediction[slot][i]));
    std::fprintf(output,"\n[PATH_PAIR_CAPTURE] slot=%u ordinary=%llu safe=%llu closest=%llu immobile=%llu old_path=%llu\n",slot,
@@ -429,7 +444,7 @@ public:
   for(unsigned i=0;i<m_slowPairCount;++i){
    const auto&s=m_slowPairs[i];
    std::fprintf(output,"[PATH_PAIR_SLOW] rank=%u pair=%llu queue=%llu ms=%.3f",i+1,u(s.id),u(s.queue),s.nanoseconds/1000000.0);
-   for(unsigned j=0;j<2;++j){const auto&t=s.tasks[j];const char*role=j?"worker":"caller";
+   for(unsigned j=0;j<s.taskCount();++j){const auto&t=s.tasks[j];const char*role=taskRole(j);
     std::fprintf(output," %s_kind=%s %s_primary=%u %s_fallback=%u %s_kernel_ms=%.3f %s_examined=%u %s_fallback_examined=%u %s_records=%u %s_fallback_records=%u",
      role,kindName(t.kind),role,unsigned(t.primary),role,unsigned(t.fallback),role,t.nanoseconds/1000000.0,
      role,t.examined,role,t.fallbackExamined,role,t.records,role,t.fallbackRecords);
@@ -438,7 +453,7 @@ public:
      role,resultName(t.fallbackOutcome.result),role,rejectionName(t.fallbackOutcome.reason));
    }
    std::fprintf(output,"\n");
-   for(unsigned j=0;j<2;++j){const auto&t=s.tasks[j];const char*role=j?"worker":"caller";
+   for(unsigned j=0;j<s.taskCount();++j){const auto&t=s.tasks[j];const char*role=taskRole(j);
 #ifdef GENERALS_ZH_PATH_WORKER_POOL
     if(t.primary||t.fallback)std::fprintf(output,"[PATH_POOL_TASK] pair=%llu slot=%u participant=%u\n",u(s.id),j,t.participant);
 #endif
@@ -461,6 +476,7 @@ private:
     u(pair),role,phase,stages[i],u(p.stageCalls[i]),u(p.stageSamples[i]),p.stageEvaluation[i]/1000000.0,p.stageLogging[i]/1000000.0);
  }
  static unsigned long long u(std::uint64_t value){return static_cast<unsigned long long>(value);}
+ static const char* taskRole(unsigned slot){const char*names[]={"caller","worker","slot2","slot3"};assert(slot<taskCapacity);return names[slot];}
  static const char* kindName(Kind kind){return kind==Kind::Safe?"safe":kind==Kind::Closest?"closest":"ordinary";}
  static const char* resultName(Result result){
   const char* names[]={"not_run","pending","validated","reused","rejected","discarded","validated_unfinished"};
@@ -482,9 +498,9 @@ private:
  }
  std::array<Metric,PhaseCount> m_metrics{};
  std::array<std::uint64_t,static_cast<unsigned>(Admission::Count)> m_admission{};
- std::array<std::array<std::uint64_t,static_cast<unsigned>(PathPredictionReason::Count)>,2> m_prediction{};
- std::array<std::array<std::uint64_t,3>,2> m_capture{};
- std::array<std::uint64_t,2> m_captureImmobile{},m_captureOldPath{};
+ std::array<std::array<std::uint64_t,static_cast<unsigned>(PathPredictionReason::Count)>,taskCapacity> m_prediction{};
+ std::array<std::array<std::uint64_t,3>,taskCapacity> m_capture{};
+ std::array<std::uint64_t,taskCapacity> m_captureImmobile{},m_captureOldPath{};
  std::array<std::uint64_t,3> m_serialKinds{};
  std::array<std::array<std::uint64_t,static_cast<unsigned>(Result::Count)>,2> m_results{};
  std::array<std::array<std::uint64_t,static_cast<unsigned>(Rejection::Count)>,2> m_rejections{};

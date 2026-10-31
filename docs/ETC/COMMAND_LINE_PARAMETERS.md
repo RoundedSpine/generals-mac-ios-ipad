@@ -106,26 +106,36 @@ calls/stages/samples count live evaluations only. Main validation stays live.
 See [zone merging, cache scope and benchmark limits](../WORKDIR/audit/IOS_PATH_ZONE_MERGES_2026-10-30.md).
 `GENERALS_REUSE_PATH_CONTEXTS` defaults OFF, requires complete-worker mode and is
 enabled only on the iOS testing branch. `[PATH_CONTEXT_REUSE]` confirms two
-retained participant arenas, shared only with their sequential fallbacks; result
+retained participant arenas, reused across complete jobs and sequential fallbacks; result
 Paths, validation logs and publication state remain independent. Reported native
 layout sizes are not resident memory. See
 [context reuse, ownership and bounds](../WORKDIR/audit/IOS_PATH_CONTEXT_REUSE_2026-10-30.md).
 `GENERALS_PATH_LOOKAHEAD` defaults OFF, requires complete-worker mode and is enabled
-on the iOS testing branch. It selects two eligible requests from an anchored
+on the iOS testing branch. It selects eligible requests from an anchored
 eight-entry window with one worker, retaining skipped serial callbacks and the
 per-request budget. `[PATH_LOOKAHEAD] enabled` confirms execution; optional timing
 rows summarize inspected/eligible/selected entries, dispatched pairs and partner
-offsets. Scans stop at two eligible entries, so these are not full eight-entry
+offsets. Scans stop at the configured result capacity (two or four), so these are not full eight-entry
 availability counts. See
 [lookahead lifetime, counters and tests](../WORKDIR/audit/IOS_PATH_LOOKAHEAD_IMPLEMENTATION_2026-10-30.md).
 `GENERALS_PATH_WORKER_POOL` defaults OFF and requires complete-worker mode plus
 context-reuse snapshots. The iOS testing branch enables participant-owned arenas
-and joined dynamic claims, retaining one background worker and two selected jobs.
+and joined dynamic claims, retaining one background worker and two participant arenas.
 `[PATH_WORKER_POOL]` confirms enablement and summarizes logical-item execution by
 participant. In pool mode, retained sample `caller`/`worker` prefixes identify
 logical slots; `[PATH_POOL_TASK]` maps each slot to its actual participant. Kernel
 aggregate metrics use the actual executing participant. See
 [pool contracts, cancellation and measurement limits](../WORKDIR/audit/IOS_PARTICIPANT_PATH_POOL_2026-10-31.md).
+`GENERALS_PATH_FOUR_REQUESTS` defaults OFF and requires both the joined pool and
+anchored lookahead. The iOS testing branch enables it to select two to four
+requests within the same eight-entry bound. An unsupported head still runs serially;
+search limits and per-actual-request budgeting remain unchanged. `[PATH_LOOKAHEAD_SELECTED]`
+reports selected-width counts; selection precedes capture/dispatch and is not a
+count of successful batches. Retained `caller`/`worker` prefixes name logical slots
+zero/one; `slot2`/`slot3` name the additional slots, and `[PATH_POOL_TASK]` maps all
+executed slots to physical participants. Wider batches increase retained result
+storage and can increase joined speculative work. See
+[four-request bounds and validation](../WORKDIR/audit/IOS_FOUR_REQUEST_POOL_2026-10-31.md).
 `[PATH_ADMISSION_MISMATCH]` summarizes captured/current permanent-record ranges
 and whether current usage increased, decreased or stayed equal at a rejected
 allocation-decision window check. `[PATH_ADMISSION_REUSE]` counts changed permanent

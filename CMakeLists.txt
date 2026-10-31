@@ -107,7 +107,7 @@ if(GENERALS_COMPLETE_PATH_WORKER)
 endif()
 
 # GeneralsX @performance Codex 30/10/2026 Inspect bounded eligible partners without changing worker count or queue scheduling.
-option(GENERALS_PATH_LOOKAHEAD "Select two eligible complete-search requests from an anchored eight-entry queue window" OFF)
+option(GENERALS_PATH_LOOKAHEAD "Select eligible complete-search requests from an anchored eight-entry queue window" OFF)
 if(GENERALS_PATH_LOOKAHEAD)
     if(NOT GENERALS_COMPLETE_PATH_WORKER)
         message(FATAL_ERROR "GENERALS_PATH_LOOKAHEAD requires GENERALS_COMPLETE_PATH_WORKER")
@@ -131,6 +131,15 @@ if(GENERALS_PATH_WORKER_POOL)
         message(FATAL_ERROR "GENERALS_PATH_WORKER_POOL requires complete-worker mode and context reuse")
     endif()
     add_compile_definitions(GENERALS_PATH_WORKER_POOL=1)
+endif()
+
+# GeneralsX @feature Codex 31/10/2026 Trial four logical requests independently of the existing single background worker.
+option(GENERALS_PATH_FOUR_REQUESTS "Select up to four complete-search requests with the joined pool" OFF)
+if(GENERALS_PATH_FOUR_REQUESTS)
+    if(NOT GENERALS_PATH_WORKER_POOL OR NOT GENERALS_PATH_LOOKAHEAD)
+        message(FATAL_ERROR "GENERALS_PATH_FOUR_REQUESTS requires the joined pool and anchored lookahead")
+    endif()
+    add_compile_definitions(GENERALS_PATH_FOUR_REQUESTS=1)
 endif()
 
 # GeneralsX @performance Codex 30/10/2026 Benchmark request-local occupancy reuse independently from zone merging.

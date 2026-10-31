@@ -109,9 +109,17 @@ joined failures, FP/cancellation and partial thread-construction checks. Run
 `python3 scripts/qa/test_participant_path_pool.py` for production complete APIs
 with participant-owned arenas, independent result publication, physical timing
 and queue/path/budget equivalence. Both accept `--tsan` or `--asan`. The host suite
-also exercises four jobs/three participants; the device trial retains one worker
-and two selected jobs. See
+also exercises four jobs/three participants; the executor foundation retains one worker.
+See
 [pool ownership and execution contracts](../docs/WORKDIR/audit/IOS_PARTICIPANT_PATH_POOL_2026-10-31.md).
+Run `python3 scripts/qa/test_four_request_path_pool.py` (or add `--tsan` / `--asan`)
+for two/three/four-result dispatch on two participant arenas, forty-scenario serial
+queue comparisons in both retail modes, budget-limited multi-call comparisons,
+duplicate exclusions, late-slot rejection/deletion, fallback publication, joined
+error/cancellation cleanup and physical-versus-logical timing. It also exercises
+the actual CMake option dependencies with the system `cmake`. The device trial
+now selects up to four requests with one worker; see
+[four-request scope and memory bounds](../docs/WORKDIR/audit/IOS_FOUR_REQUEST_POOL_2026-10-31.md).
 Run `python3 scripts/qa/test_zone_merges.py` for minimum-label merges, exhaustive
 flattening comparisons and full controlled rebuild-table equivalence. Run
 `python3 scripts/qa/test_frozen_occupancy_cache.py` for optional request-cache

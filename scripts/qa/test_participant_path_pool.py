@@ -80,7 +80,7 @@ int main(){for(bool fallback:{false,true}){World w;Pathfinder p;w.queue(p);
     def test_unstarted_lifecycle_cancelled_jobs_are_not_ready(self):
         source=pool_fixture()
         source='bool cancelBeforeRun=true;\n'+source
-        source=source.replace('batch.pool.run(2,','if(cancelBeforeRun){PathOccupancy::setValidationPaused(true);cancelBeforeRun=false;}batch.pool.run(2,',1)
+        source=source.replace('batch.pool.run(selectedCount,','if(cancelBeforeRun){PathOccupancy::setValidationPaused(true);cancelBeforeRun=false;}batch.pool.run(selectedCount,',1)
         run_cpp(source+r'''
 int main(){World w;Pathfinder p;w.queue(p);p.prepareParallelBatch();auto&batch=*p.m_parallelBatch;
  assert(batch.pool.cancelled()&&batch.poolSkipped==2&&batch.primarySearches==0&&liveEngineObjects==0);

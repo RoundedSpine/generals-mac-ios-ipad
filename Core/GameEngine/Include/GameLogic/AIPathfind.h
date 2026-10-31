@@ -72,7 +72,6 @@ void observeParallelCorridor(std::size_t block, Bool passable);
 // GeneralsX @performance Codex 30/10/2026 Bounded partner lookahead requires completed independently validated results.
 #if defined(GENERALS_PATH_LOOKAHEAD) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
 #define GENERALS_ZH_PATH_LOOKAHEAD 1
-#include "pathlookaheadwindow.h"
 #endif
 // GeneralsX @performance Codex 30/10/2026 Completed results no longer retain their participant's search arena.
 #if defined(GENERALS_REUSE_PATH_CONTEXTS) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
@@ -81,6 +80,16 @@ void observeParallelCorridor(std::size_t block, Bool passable);
 // GeneralsX @feature Codex 31/10/2026 Participant-owned arenas require complete results and the independent publication snapshot.
 #if defined(GENERALS_PATH_WORKER_POOL) && defined(GENERALS_ZH_REUSE_PATH_CONTEXTS)
 #define GENERALS_ZH_PATH_WORKER_POOL 1
+#endif
+// GeneralsX @feature Codex 31/10/2026 Wider result windows require participant arenas and anchored complete-request lookahead.
+#if defined(GENERALS_PATH_FOUR_REQUESTS) && defined(GENERALS_ZH_PATH_WORKER_POOL) && defined(GENERALS_ZH_PATH_LOOKAHEAD)
+#define GENERALS_ZH_PATH_FOUR_REQUESTS 1
+#endif
+#ifdef GENERALS_ZH_PARALLEL_PATH_BATCH
+#include "pathsearchbatchlimits.h"
+#endif
+#ifdef GENERALS_ZH_PATH_LOOKAHEAD
+#include "pathlookaheadwindow.h"
 #endif
 // GeneralsX @performance Codex 30/10/2026 Memoization is restricted to the already joined, frozen complete request lifetime.
 #if defined(GENERALS_FROZEN_OCCUPANCY_CACHE) && defined(GENERALS_ZH_COMPLETE_PATH_WORKER)
