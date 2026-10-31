@@ -72,11 +72,20 @@ The iOS wrapper requests both capabilities from `ios/GeneralsXZH.entitlements`:
 - `com.apple.developer.kernel.increased-memory-limit`
 - `com.apple.developer.kernel.extended-virtual-addressing` (EVA)
 
-The unsigned artifact includes `GeneralsXZH.entitlements` next to the IPA.
-Configure your signing tool to use those entitlements and a compatible
-provisioning profile. The file alone does not activate them: unsigned packages
-have no signed entitlement grant, and some sideloading tools strip unsupported
-keys. Verify the final signed app's entitlements when possible. On a Mac, use
+The externally signed artifact carries these requests in an **ad-hoc signature
+on the Generals executable**. The packager extracts that signature and fails if
+the requests were lost. The artifact also includes `GeneralsXZH.entitlements`
+and `GeneralsXZH-embedded-entitlements.plist` beside the IPA for inspection.
+Here, "unsigned" means no Apple certificate or provisioning profile: the ad-hoc
+signature is a request carrier that your sideloader must replace. It does not
+grant either capability or allow direct installation.
+
+SideStore reads the app's request from the executable signature; the adjacent
+plist alone is insufficient. Older builds removed all executable signatures,
+so even a capable signer could obtain a profile and then omit the memory key
+from the installed executable. A compatible provisioning profile and a retained
+executable request are both required. Verify the final signed app's entitlements.
+On a Mac, use
 `codesign -d --entitlements :- /path/to/GeneralsXZH.app` after extracting the
 signed IPA. Requested keys in an executable signature are not by themselves
 proof that the OS granted the capability on the current device.
@@ -107,14 +116,21 @@ process memory is a changing headroom measurement, not a fixed total RAM limit;
 a `true` signed entitlement alone does not prove the OS granted a particular
 memory allowance. No memory stress allocation is performed.
 
-On SideStore versions with **Customize Entitlements**, enable it under
-**Settings → Advanced Settings → User Customizations**. Import the IPA for
-installation/update, select the main Generals app in the entitlement editor,
-and enable both keys above as **Boolean true**. Keep the existing bundle ID
-when updating an installation. This editor is present in SideStore 0.6.4's
-source; older versions may have different options. Copying the `.entitlements`
-file into Documents does not change the signed app. Check the next startup log
-to verify the running process's values after signing.
+For SideStore, use a signer that enables Increased Memory Limit for your team
+and import the newly packaged **Generals IPA** for a complete signing and
+installation/update operation. Back up game data and keep the same Apple team
+and bundle ID for an update. Refresh All can update provisioning profiles
+without re-signing the executable, so it cannot add a missing executable request.
+Do not assume an entitlement editor or a profile view proves the final signature
+retained the key; inspect the next startup log after restarting the app.
+
+The custom SideStore build applying [SideSign PR #4](https://github.com/SideStore/SideSign/pull/4)
+enables **Increased Memory Limit**, not EVA. It logs capability-request failures
+and may continue installing without the grant. EVA remains a separate provisioning
+requirement even though the game IPA requests it. When Generals is installed
+directly, inspect Generals' profile and signature; LiveContainer's entitlements
+have no effect on that standalone process. Copying an entitlements file into
+Documents does not change a signed app.
 
 For long sessions, `[IOS_MEMORY]` also records `sample=periodic` at the first
 native iteration and every 30 seconds while callbacks run. Rows include SDL

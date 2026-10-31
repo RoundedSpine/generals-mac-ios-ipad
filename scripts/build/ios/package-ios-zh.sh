@@ -14,7 +14,7 @@
 # Usage: ./scripts/build/ios/package-ios-zh.sh [--dev] [--install | --unsigned]
 #   --dev      skip bundling the 2.7 GB of game assets (code-only iteration)
 #   --install  install the packaged app to the first connected device
-#   --unsigned skip provisioning/signing and emit GeneralsXZH-unsigned.ipa for sideloading
+#   --unsigned skip Apple provisioning; embed ad-hoc entitlement requests for external signing
 set -euo pipefail
 
 DEV_MODE=0
@@ -248,11 +248,31 @@ if [[ "${UNSIGNED}" == "1" ]]; then
     done < <(find "${APP}" -type f -print0)
     find "${APP}" -type d -name _CodeSignature -prune -exec rm -rf {} +
     find "${APP}" -name embedded.mobileprovision -type f -delete
+    # GeneralsX @bugfix Codex 01/11/2026 SideStore reads requests from the executable, not the adjacent plist.
+    # This ad-hoc signature carries requests only; the sideloader replaces it with
+    # its certificate/profile. Sign the binary, without provisioning or sealing nested code.
+    codesign --force --sign - --timestamp=none \
+        --entitlements "${OUT_DIR}/${APP_NAME}.entitlements" "${APP}/${APP_NAME}"
+    CARRIED_ENTITLEMENTS="${OUT_DIR}/${APP_NAME}-embedded-entitlements.plist"
+    codesign -d --entitlements - --xml "${APP}/${APP_NAME}" > "${CARRIED_ENTITLEMENTS}"
+    python3 - "${OUT_DIR}/${APP_NAME}.entitlements" "${CARRIED_ENTITLEMENTS}" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], 'rb') as source:
+    requested = plistlib.load(source)
+with open(sys.argv[2], 'rb') as source:
+    carried = plistlib.load(source)
+if carried != requested:
+    raise SystemExit('ERROR: executable signature did not retain the requested iOS entitlements')
+print('[IOS_IPA_ENTITLEMENT_REQUEST] executable signature matches requested entitlements; Apple grant requires external signing')
+PY
     mkdir -p "${OUT_DIR}/Payload"
     mv "${APP}" "${OUT_DIR}/Payload/"
     (cd "${OUT_DIR}" && ditto -c -k --keepParent Payload "${APP_NAME}-unsigned.ipa")
     echo "==> Unsigned IPA ready: ${OUT_DIR}/${APP_NAME}-unsigned.ipa"
     echo "==> Requested signing entitlements: ${OUT_DIR}/${APP_NAME}.entitlements"
+    echo "==> Embedded request verified: ${CARRIED_ENTITLEMENTS} (not an Apple entitlement grant)"
     exit 0
 fi
 

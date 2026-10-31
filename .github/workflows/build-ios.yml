@@ -207,6 +207,7 @@ jobs:
           path: |
             build/ios-package/GeneralsXZH-unsigned.ipa
             build/ios-package/GeneralsXZH.entitlements
+            build/ios-package/GeneralsXZH-embedded-entitlements.plist
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

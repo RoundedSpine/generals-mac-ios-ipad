@@ -49,8 +49,28 @@ elif name == 'file':
     print('Mach-O 64-bit arm64')
 elif name == 'install_name_tool' and '-add_rpath' in args and os.environ.get('FAIL_RPATH'):
     sys.exit(19)
-elif name == 'codesign' and '--entitlements' in args:
-    print('<plist><dict/></plist>')
+elif name == 'codesign':
+    # Explicit model of command flow only; macOS CI verifies real Mach-O signatures.
+    import plistlib
+    state_file = pathlib.Path(os.environ['SIGNATURE_STATE'])
+    state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    binary = str(pathlib.Path(args[-1]).resolve())
+    if '--remove-signature' in args:
+        state.pop(binary, None)
+    elif '--sign' in args:
+        if args[args.index('--sign') + 1] == '-' and os.environ.get('FAIL_ADHOC'):
+            sys.exit(23)
+        request = {}
+        if '--entitlements' in args:
+            with open(args[args.index('--entitlements') + 1], 'rb') as source:
+                request = plistlib.load(source)
+        state[binary] = request
+    elif '--entitlements' in args:
+        request = dict(state.get(binary, {}))
+        if os.environ.get('DROP_MEMORY_REQUEST'):
+            request.pop('com.apple.developer.kernel.increased-memory-limit', None)
+        print(plistlib.dumps(request).decode())
+    state_file.write_text(json.dumps(state))
 elif name == 'ditto':
     source, destination = pathlib.Path(args[-2]), pathlib.Path(args[-1])
     with zipfile.ZipFile(destination, 'w') as archive:
@@ -97,13 +117,14 @@ class PackagingTest(unittest.TestCase):
             path.write_text(MOCK)
             path.chmod(0o755)
         self.env = dict(os.environ, PATH=f'{tools}:{os.environ["PATH"]}',
-                        GX_MOLTENVK=str(framework), TOOL_LOG=str(self.root / 'tools.jsonl'))
+                        GX_MOLTENVK=str(framework), TOOL_LOG=str(self.root / 'tools.jsonl'),
+                        SIGNATURE_STATE=str(self.root / 'signatures.json'))
 
     def run_package(self, *args):
         return subprocess.run(['bash', str(self.script), *args], env=self.env,
                               text=True, capture_output=True)
 
-    def test_unsigned_archive_has_payload_and_no_signatures_or_retail_data(self):
+    def test_unsigned_archive_carries_requests_without_profiles_or_retail_data(self):
         result = self.run_package('--dev', '--unsigned')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         ipa = self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa'
@@ -113,6 +134,8 @@ class PackagingTest(unittest.TestCase):
             'com.apple.developer.kernel.increased-memory-limit': True,
             'com.apple.developer.kernel.extended-virtual-addressing': True,
         })
+        with (ipa.parent / 'GeneralsXZH-embedded-entitlements.plist').open('rb') as file:
+            self.assertEqual(plistlib.load(file), entitlements)
         with zipfile.ZipFile(ipa) as archive:
             names = archive.namelist()
             base = 'Payload/GeneralsXZH.app/'
@@ -126,9 +149,28 @@ class PackagingTest(unittest.TestCase):
         xcode = next(call for call in calls if call[0] == 'xcodebuild')
         self.assertIn('CODE_SIGNING_ALLOWED=NO', xcode)
         self.assertNotIn('-allowProvisioningUpdates', xcode)
-        self.assertFalse(any('--sign' in call for call in calls))
+        signing = [call for call in calls if call[0] == 'codesign' and '--sign' in call]
+        self.assertEqual(len(signing), 1)
+        self.assertEqual(signing[0][signing[0].index('--sign') + 1], '-')
+        self.assertEqual(Path(signing[0][-1]), ipa.parent / 'GeneralsXZH.app/GeneralsXZH')
+        self.assertEqual(Path(signing[0][signing[0].index('--entitlements') + 1]), ipa.parent / 'GeneralsXZH.entitlements')
+        removals = [i for i, call in enumerate(calls) if '--remove-signature' in call]
+        self.assertLess(max(removals), calls.index(signing[0]))
         self.assertTrue(any('--remove-signature' in call for call in calls))
         self.assertTrue(any('@rpath/libSDL3.0.dylib' in call for call in calls))
+
+    def test_missing_embedded_memory_request_stops_packaging(self):
+        self.env['DROP_MEMORY_REQUEST'] = '1'
+        result = self.run_package('--dev', '--unsigned')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('did not retain the requested iOS entitlements', result.stderr)
+        self.assertFalse((self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa').exists())
+
+    def test_failed_adhoc_signature_stops_packaging(self):
+        self.env['FAIL_ADHOC'] = '1'
+        result = self.run_package('--dev', '--unsigned')
+        self.assertEqual(result.returncode, 23)
+        self.assertFalse((self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa').exists())
 
     def test_architecture_check_rejects_filename_after_architecture_list(self):
         binary = self.root / 'build/ios-vulkan/GeneralsMD/GeneralsXZH.app/GeneralsXZH'
