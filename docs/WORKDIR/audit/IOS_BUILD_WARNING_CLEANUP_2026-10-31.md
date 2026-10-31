@@ -83,7 +83,7 @@ have not been published to the upstream repositories.
 - DXVK 46a3bc01: represent the invalid sampler mapping as DWORD/UINT32_MAX, converting
   to the sampler enum only after validation. Retain valid mappings and unmapped
   texture-stage routing. Remove an unused shader counter, mark existing priority
-  overrides, and avoid GNU static-runtime flags on Darwin.
+  overrides on resource interfaces, and avoid GNU static-runtime flags on Darwin.
 
 The shared CMake patch helper accepts pristine or already-patched sources and
 rejects mismatches before mutation. A repository ceiling prevents tarball sources
@@ -173,3 +173,36 @@ Extend its pinned patch to supply this platform define only when absent. The
 real patched header passes a standalone `-D_UNIX=1 -Werror` compile; updated
 patch reverse/application checks pass. This removes the remaining non-DirectX
 macro diagnostic without marking all GameSpy implementation sources SYSTEM.
+
+### Native template failure and correction
+
+Run 41174187262 (a67f255) passed regular QA, TSan, iOS configuration and SDL,
+then failed in DXVK. Unconditional SetPriority/GetPriority overrides in the
+shared D3D8Resource template are invalid for IDirect3DSurface8/IDirect3DVolume8.
+Reproduce that error with the real pinned Direct3D SDK headers. Rename shared
+priority bookkeeping to ordinary helpers; place COM overrides on buffers and
+base textures, whose interfaces actually define them. Mark the buffer's existing
+Lock/Unlock/PreLoad overrides consistently too. Priority fields and managed vs
+unmanaged behavior remain the same; surface/volume wrappers gain no virtual slots.
+
+The same real-header syntax check now passes for all seven concrete buffer,
+surface, volume and texture types. The new regression compiles the full patched
+shared-resource and buffer templates, the actual texture forwarders, checks
+virtual dispatch/managed swaps/unmanaged no-op, and instantiates the interfaces
+without priority methods. All thirteen warning/build cases pass; nine production
+fragments also pass the Clang frontend. Clean application after the existing iOS
+adapter and repeated application are checked against the real pinned checkout.
+
+The previous sanitizer wrapper used partial keyword defaults, which each case's
+warning flags replaced. Earlier --asan runs therefore did not establish sanitizer
+instrumentation for these fragments. Correct the merge and verify every one of
+the nine real compiler invocations contains both ASan/UBSan and strict warning
+flags; all thirteen cases pass with that verified instrumentation.
+
+The native failure annotation had been truncated before the actual compiler
+errors because successful SDL output preceded them in a combined excerpt.
+Capture up to six distinct error contexts and publish each within 1,800 characters;
+use a 2,500-character tail only when no error is recognized. Preserve full raw
+logs and JSON excerpts, and keep failed/incomplete builds explicitly incomplete.
+A regression checks that an error survives even when later success output pushes
+it outside the tail. Final native SDK verification remains pending.

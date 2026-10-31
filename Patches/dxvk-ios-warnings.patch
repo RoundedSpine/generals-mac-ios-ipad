@@ -1,5 +1,3 @@
-# GeneralsX iOS adapter warning fixes for the pinned DXVK revision.
-# Keep SDK sentinels in an integer domain; preserve valid sampler mappings.
 diff --git a/meson.build b/meson.build
 index 26afed45..7c5493dd 100644
 --- a/meson.build
@@ -46,6 +44,77 @@ index 26afed45..7c5493dd 100644
  glsl_compiler = find_program('glslang', 'glslangValidator')
  glsl_args = [
    '--quiet',
+diff --git a/src/d3d8/d3d8_buffer.h b/src/d3d8/d3d8_buffer.h
+index 6ffcdaeb..a8867ab6 100644
+--- a/src/d3d8/d3d8_buffer.h
++++ b/src/d3d8/d3d8_buffer.h
+@@ -9,54 +9,63 @@ namespace dxvk {
+   template <typename D3D9, typename D3D8>
+   class D3D8Buffer : public D3D8Resource<D3D9, D3D8> {
+ 
+   public:
+ 
+     D3D8Buffer(
+             D3D8Device*     pDevice,
+             Com<D3D9>&&     pBuffer,
+             D3DPOOL         Pool,
+             DWORD           Usage)
+       : D3D8Resource<D3D9, D3D8> (pDevice, Pool, std::move(pBuffer))
+       , m_usage                  (Usage) {
+       m_options = this->GetParent()->GetOptions();
+     }
+ 
++    // GeneralsX @build Codex 31/10/2026 Override priority only on interfaces derived from IDirect3DResource8.
++    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) override {
++      return this->SetResourcePriority(PriorityNew);
++    }
++
++    DWORD STDMETHODCALLTYPE GetPriority() override {
++      return this->GetResourcePriority();
++    }
++
+     HRESULT STDMETHODCALLTYPE Lock(
+             UINT   OffsetToLock,
+             UINT   SizeToLock,
+             BYTE** ppbData,
+-            DWORD  Flags) {
++            DWORD  Flags) override {
+ 
+       if (m_options->forceLegacyDiscard &&
+           (Flags & D3DLOCK_DISCARD) &&
+          !((m_usage & D3DUSAGE_DYNAMIC) &&
+            (m_usage & D3DUSAGE_WRITEONLY)))
+           Flags &= ~D3DLOCK_DISCARD;
+ 
+       return this->GetD3D9()->Lock(
+         OffsetToLock,
+         SizeToLock,
+         reinterpret_cast<void**>(ppbData),
+         Flags);
+     }
+ 
+-    HRESULT STDMETHODCALLTYPE Unlock() {
++    HRESULT STDMETHODCALLTYPE Unlock() override {
+       return this->GetD3D9()->Unlock();
+     }
+ 
+-    void STDMETHODCALLTYPE PreLoad() {
++    void STDMETHODCALLTYPE PreLoad() override {
+       this->GetD3D9()->PreLoad();
+     }
+ 
+   protected:
+ 
+     const D3D8Options* m_options;
+     const DWORD        m_usage;
+ 
+   };
+ 
+ 
+   using D3D8VertexBufferBase = D3D8Buffer<d3d9::IDirect3DVertexBuffer9, IDirect3DVertexBuffer8>;
+   class D3D8VertexBuffer : public D3D8VertexBufferBase {
+ 
+   public:
 diff --git a/src/d3d8/d3d8_d3d9_util.h b/src/d3d8/d3d8_d3d9_util.h
 index 8d8677a4..052ed31a 100644
 --- a/src/d3d8/d3d8_d3d9_util.h
@@ -155,55 +224,50 @@ index 8ef95630..f3708895 100644
    }
  
    HRESULT STDMETHODCALLTYPE D3D8Device::GetPaletteEntries(UINT PaletteNumber, PALETTEENTRY* pEntries) {
-diff --git a/src/d3d8/d3d8_resource.h b/src/d3d8/d3d8_resource.h
-index 4966adec..8baefe7f 100644
---- a/src/d3d8/d3d8_resource.h
-+++ b/src/d3d8/d3d8_resource.h
-@@ -67,42 +67,42 @@ namespace dxvk {
-           return D3DERR_INVALIDCALL;
-       }
+diff --git a/src/d3d8/d3d8_texture.h b/src/d3d8/d3d8_texture.h
+index 8d4750e2..135d3d75 100644
+--- a/src/d3d8/d3d8_texture.h
++++ b/src/d3d8/d3d8_texture.h
+@@ -30,30 +30,39 @@ namespace dxvk {
  
-       return D3D_OK;
+     ~D3D8BaseTexture() {
+       for (size_t i = 0; i < m_subresources.size(); i++)
+         m_subresources[i] = nullptr;
      }
  
-     HRESULT STDMETHODCALLTYPE FreePrivateData(REFGUID refguid) final {
-       HRESULT hr = m_privateData.setData(refguid, 0, nullptr);
- 
-       if (unlikely(FAILED(hr)))
-         return D3DERR_INVALIDCALL;
- 
-       return D3D_OK;
-     }
- 
--    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) {
-+    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) override {
-       // Priority can only be set for D3DPOOL_MANAGED resources
-       if (likely(m_pool == D3DPOOL_MANAGED)) {
-         DWORD oldPriority = m_priority;
-         m_priority = PriorityNew;
-         return oldPriority;
-       }
- 
-       return m_priority;
-     }
- 
--    DWORD STDMETHODCALLTYPE GetPriority() {
-+    DWORD STDMETHODCALLTYPE GetPriority() override {
-       return m_priority;
-     }
- 
-     virtual IUnknown* GetInterface(REFIID riid) override try {
-       return D3D8DeviceChild<D3D9, D3D8>::GetInterface(riid);
+     virtual IUnknown* GetInterface(REFIID riid) final override try {
+       return D3D8Resource<D3D9, D3D8>::GetInterface(riid);
      } catch (const DxvkError& e) {
-       if (riid == __uuidof(IDirect3DResource8))
+       if (riid == __uuidof(IDirect3DBaseTexture8))
          return this;
  
        throw e;
      }
  
-   protected:
++    // GeneralsX @build Codex 31/10/2026 Override priority only on interfaces derived from IDirect3DResource8.
++    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) override {
++      return this->SetResourcePriority(PriorityNew);
++    }
++
++    DWORD STDMETHODCALLTYPE GetPriority() override {
++      return this->GetResourcePriority();
++    }
++
+     void STDMETHODCALLTYPE PreLoad() final {
+       this->GetD3D9()->PreLoad();
+     }
  
-     const D3DPOOL        m_pool;
+     DWORD STDMETHODCALLTYPE SetLOD(DWORD LODNew) final {
+       return this->GetD3D9()->SetLOD(LODNew);
+     }
+ 
+     DWORD STDMETHODCALLTYPE GetLOD() final {
+       return this->GetD3D9()->GetLOD();
+     }
+ 
+     DWORD STDMETHODCALLTYPE GetLevelCount() final {
+       return this->GetD3D9()->GetLevelCount();
+     }
 diff --git a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
 index d4df654d..a9b4e35b 100644
 --- a/src/dxso/dxso_compiler.cpp
@@ -244,3 +308,129 @@ index d4df654d..a9b4e35b 100644
          if (elem.semantic.usageIndex < 2)
            m_ps.flatShadingMask |= 1u << slot;
        }
+diff --git a/src/d3d8/d3d8_resource.h b/src/d3d8/d3d8_resource.h
+index 4966adec..2aab91fe 100644
+--- a/src/d3d8/d3d8_resource.h
++++ b/src/d3d8/d3d8_resource.h
+@@ -1,117 +1,118 @@
+ #pragma once
+ 
+ /** Implements IDirect3DResource8
+ *
+ * - SetPrivateData, GetPrivateData, FreePrivateData
+ * - SetPriority, GetPriority
+ *
+ * - Subclasses provide: PreLoad, GetType
+ */
+ 
+ #include "d3d8_device_child.h"
+ #include "../util/com/com_private_data.h"
+ 
+ namespace dxvk {
+ 
+   template <typename D3D9, typename D3D8>
+   class D3D8Resource : public D3D8DeviceChild<D3D9, D3D8> {
+ 
+   public:
+ 
+     D3D8Resource(D3D8Device* pDevice, D3DPOOL Pool, Com<D3D9>&& Object)
+       : D3D8DeviceChild<D3D9, D3D8>(pDevice, std::move(Object))
+       , m_pool                     ( Pool )
+       , m_priority                 ( 0 ) { }
+ 
+     HRESULT STDMETHODCALLTYPE SetPrivateData(
+             REFGUID     refguid,
+       const void*       pData,
+             DWORD       SizeOfData,
+             DWORD       Flags) final {
+       HRESULT hr;
+       if (Flags & D3DSPD_IUNKNOWN) {
+         if(unlikely(SizeOfData != sizeof(IUnknown*)))
+           return D3DERR_INVALIDCALL;
+         IUnknown* unknown =
+           const_cast<IUnknown*>(
+             reinterpret_cast<const IUnknown*>(pData));
+         hr = m_privateData.setInterface(
+           refguid, unknown);
+       }
+       else
+         hr = m_privateData.setData(
+           refguid, SizeOfData, pData);
+ 
+       if (unlikely(FAILED(hr)))
+         return D3DERR_INVALIDCALL;
+ 
+       return D3D_OK;
+     }
+ 
+     HRESULT STDMETHODCALLTYPE GetPrivateData(
+             REFGUID     refguid,
+             void*       pData,
+             DWORD*      pSizeOfData) final {
+       if (unlikely(pData == nullptr && pSizeOfData == nullptr))
+         return D3DERR_NOTFOUND;
+ 
+       HRESULT hr = m_privateData.getData(
+         refguid, reinterpret_cast<UINT*>(pSizeOfData), pData);
+ 
+       if (unlikely(FAILED(hr))) {
+         if(hr == DXGI_ERROR_MORE_DATA)
+           return D3DERR_MOREDATA;
+         else if (hr == DXGI_ERROR_NOT_FOUND)
+           return D3DERR_NOTFOUND;
+         else
+           return D3DERR_INVALIDCALL;
+       }
+ 
+       return D3D_OK;
+     }
+ 
+     HRESULT STDMETHODCALLTYPE FreePrivateData(REFGUID refguid) final {
+       HRESULT hr = m_privateData.setData(refguid, 0, nullptr);
+ 
+       if (unlikely(FAILED(hr)))
+         return D3DERR_INVALIDCALL;
+ 
+       return D3D_OK;
+     }
+ 
+-    DWORD STDMETHODCALLTYPE SetPriority(DWORD PriorityNew) {
++    // GeneralsX @build Codex 31/10/2026 Surface/volume interfaces share storage helpers but have no priority methods.
++    DWORD SetResourcePriority(DWORD PriorityNew) {
+       // Priority can only be set for D3DPOOL_MANAGED resources
+       if (likely(m_pool == D3DPOOL_MANAGED)) {
+         DWORD oldPriority = m_priority;
+         m_priority = PriorityNew;
+         return oldPriority;
+       }
+ 
+       return m_priority;
+     }
+ 
+-    DWORD STDMETHODCALLTYPE GetPriority() {
++    DWORD GetResourcePriority() {
+       return m_priority;
+     }
+ 
+     virtual IUnknown* GetInterface(REFIID riid) override try {
+       return D3D8DeviceChild<D3D9, D3D8>::GetInterface(riid);
+     } catch (const DxvkError& e) {
+       if (riid == __uuidof(IDirect3DResource8))
+         return this;
+ 
+       throw e;
+     }
+ 
+   protected:
+ 
+     const D3DPOOL        m_pool;
+           DWORD          m_priority;
+ 
+   private:
+ 
+     ComPrivateData m_privateData;
+ 
+   };
+ 
+ }
+\ No newline at end of file

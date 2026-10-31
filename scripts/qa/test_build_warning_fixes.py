@@ -10,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from functools import partial
 from compiled_harness import ROOT, run_cpp
 
 
@@ -67,6 +66,17 @@ printf("warning: a source string is not a compiler diagnostic");
             log.write_text('CMake Error: a missing registry tree\n')
             incomplete=module.summarize([log],'skipped')
             self.assertFalse(incomplete['complete']);self.assertIn('missing registry tree',incomplete['incomplete_build_output'])
+            self.assertIn('missing registry tree',incomplete['failure_samples'][0])
+            log.write_text('/tmp/header.h:22:5: error: invalid override\ninstantiation note\n'+'successful command\n'*1500)
+            incomplete=module.summarize([log],'failure')
+            self.assertNotIn('invalid override',incomplete['incomplete_build_output'])
+            self.assertIn('invalid override',incomplete['failure_samples'][0])
+            result=subprocess.run([sys.executable,str(ROOT/'scripts/build/ios/report-build-warnings.py'),'--outcome','failure',
+                '--output',str(Path(directory)/'summary.json'),str(log)],text=True,capture_output=True)
+            self.assertEqual(0,result.returncode,result.stderr)
+            notices=[line for line in result.stdout.splitlines() if line.startswith('::notice')]
+            self.assertTrue(any('iOS build error detail::' in line and 'invalid override' in line for line in notices))
+            self.assertTrue(all(len(line)<4000 for line in notices))
             log.write_text('Build completed\n');clean=module.summarize([log],'success')
             self.assertEqual(0,clean['observed_warnings']);self.assertEqual('',clean['incomplete_build_output'])
 
@@ -158,6 +168,74 @@ int main(){static_assert(std::is_same<decltype(GetSamplerStateType9(D3DTSS_ADDRE
  for(unsigned unknown:{0u,1u,12u,22u,24u,26u,0x7fffffffu})assert(GetSamplerStateType9(static_cast<D3DTEXTURESTAGESTATETYPE>(unknown))==UINT32_MAX);
 }
 ''',extra_flags=('-Werror',))
+
+    def test_dxvk_priority_overrides_preserve_resource_dispatch_without_requiring_surface_or_volume_methods(self):
+        patch='Patches/dxvk-ios-warnings.patch'
+        resource=patch_postimage(patch,'src/d3d8/d3d8_resource.h')
+        resource=resource[resource.index('namespace dxvk {'):]
+        image=patch_postimage(patch,'src/d3d8/d3d8_texture.h')
+        forwarders=function(image,'DWORD STDMETHODCALLTYPE SetPriority(')+'\n'+function(image,'DWORD STDMETHODCALLTYPE GetPriority(')
+        buffer=function(patch_postimage(patch,'src/d3d8/d3d8_buffer.h'),'template <typename D3D9, typename D3D8>')+';'
+        run_cpp(r'''
+#include <cassert>
+#include <utility>
+#include <type_traits>
+using DWORD=unsigned;using UINT=unsigned;using BYTE=unsigned char;using HRESULT=int;using REFGUID=const int&;using REFIID=int;
+#define STDMETHODCALLTYPE
+#define likely(x) (x)
+#define unlikely(x) (x)
+#define FAILED(x) ((x)<0)
+#define __uuidof(x) 0
+constexpr HRESULT D3D_OK=0,D3DERR_INVALIDCALL=-1,D3DERR_NOTFOUND=-2,DXGI_ERROR_MORE_DATA=-3,DXGI_ERROR_NOT_FOUND=-4,D3DERR_MOREDATA=-5;
+constexpr DWORD D3DSPD_IUNKNOWN=1;
+constexpr DWORD D3DLOCK_DISCARD=1,D3DUSAGE_DYNAMIC=2,D3DUSAGE_WRITEONLY=4;
+enum D3DPOOL {D3DPOOL_DEFAULT,D3DPOOL_MANAGED};
+struct IUnknown {virtual ~IUnknown()=default;};
+struct CommonAPI:IUnknown {
+ virtual HRESULT SetPrivateData(REFGUID,const void*,DWORD,DWORD)=0;
+ virtual HRESULT GetPrivateData(REFGUID,void*,DWORD*)=0;
+ virtual HRESULT FreePrivateData(REFGUID)=0;
+};
+struct ResourceAPI:CommonAPI {virtual DWORD SetPriority(DWORD)=0;virtual DWORD GetPriority()=0;};
+struct BufferAPI:ResourceAPI {virtual HRESULT Lock(UINT,UINT,BYTE**,DWORD)=0;virtual HRESULT Unlock()=0;virtual void PreLoad()=0;};
+struct SurfaceAPI:CommonAPI {};struct VolumeAPI:CommonAPI {};
+struct Native{HRESULT Lock(UINT,UINT,void**,DWORD){return 0;}HRESULT Unlock(){return 0;}void PreLoad(){}};
+struct D3D8Options {bool forceLegacyDiscard=false;};
+struct D3D8Device {const D3D8Options*GetOptions(){static D3D8Options o;return &o;}};struct DxvkError{};
+template<class T>struct Com{};
+struct ComPrivateData {
+ HRESULT setInterface(REFGUID,IUnknown*){return D3D_OK;}
+ HRESULT setData(REFGUID,DWORD,const void*){return D3D_OK;}
+ HRESULT getData(REFGUID,UINT*,void*){return D3D_OK;}
+};
+namespace dxvk {
+ template<class NativeT,class Api>struct D3D8DeviceChild:Api {
+  D3D8DeviceChild(D3D8Device*,Com<NativeT>&&){}
+  virtual IUnknown* GetInterface(REFIID){return this;}
+  D3D8Device* GetParent(){static D3D8Device d;return &d;}
+  NativeT* GetD3D9(){static NativeT n;return &n;}
+ };
+}
+RESOURCE
+namespace dxvk {BUFFER_CLASS}
+using Base=dxvk::D3D8Resource<Native,ResourceAPI>;
+using Buffer=dxvk::D3D8Buffer<Native,BufferAPI>;
+struct Texture:Base {using Base::Base;TEXTURE};
+using Surface=dxvk::D3D8Resource<Native,SurfaceAPI>;
+using Volume=dxvk::D3D8Resource<Native,VolumeAPI>;
+int main(){
+ static_assert(!std::is_abstract_v<Surface>&&!std::is_abstract_v<Volume>);
+ Surface surface(nullptr,D3DPOOL_DEFAULT,Com<Native>{});Volume volume(nullptr,D3DPOOL_DEFAULT,Com<Native>{});
+ assert(surface.GetResourcePriority()==0&&volume.GetResourcePriority()==0);
+ Buffer managed(nullptr,Com<Native>{},D3DPOOL_MANAGED,0);ResourceAPI& buffer=managed;
+ assert(buffer.SetPriority(7)==0&&buffer.GetPriority()==7);
+ assert(buffer.SetPriority(0xffffffffu)==7&&buffer.GetPriority()==0xffffffffu);
+ Texture texture(nullptr,D3DPOOL_MANAGED,Com<Native>{});ResourceAPI& api=texture;
+ assert(api.SetPriority(9)==0&&api.GetPriority()==9);
+ Buffer unmanaged(nullptr,Com<Native>{},D3DPOOL_DEFAULT,0);ResourceAPI& fixed=unmanaged;
+ assert(fixed.SetPriority(99)==0&&fixed.GetPriority()==0);
+}
+'''.replace('RESOURCE',resource).replace('BUFFER_CLASS',buffer).replace('TEXTURE',forwarders),extra_flags=('-Werror','-Wsuggest-override'))
 
     def test_compression_none_and_short_headers_keep_their_original_size_contracts(self):
         header=(ROOT/'Core/Libraries/Source/Compression/Compression.h').read_text()
@@ -268,6 +346,10 @@ sys.exit(9)
 
 
 if __name__=='__main__':
-    if '--asan' in sys.argv:run_cpp=partial(run_cpp,extra_flags=('-fsanitize=address,undefined','-fno-omit-frame-pointer','-g','-O1'))
+    if '--asan' in sys.argv:
+        # GeneralsX @test Codex 31/10/2026 Merge sanitizer flags with each case's strict warning options.
+        original_run_cpp=run_cpp
+        def run_cpp(source,extra_flags=(),timeout=10):
+            return original_run_cpp(source,extra_flags=('-fsanitize=address,undefined','-fno-omit-frame-pointer','-g','-O1',*extra_flags),timeout=timeout)
     result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(BuildWarningFixTests))
     sys.exit(not result.wasSuccessful())

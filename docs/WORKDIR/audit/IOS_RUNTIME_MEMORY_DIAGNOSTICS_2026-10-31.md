@@ -51,3 +51,9 @@ Host stand-ins do not establish native API availability or device policy. Native
 iOS SDK compilation and a new sideloaded device log remain the final validation
 boundary. The initial device check should look for both entitlement values equal
 to `true`, query statuses `ok`, and the separate OS memory observations.
+
+The first native attempt (41174187262, a67f255) passed regular/race checks and
+configuration/SDL, but failed in the earlier DXVK warning adapter before the
+engine build completed. That separate template fix is recorded in
+IOS_BUILD_WARNING_CLEANUP_2026-10-31.md. The runtime memory report still requires
+a successful replacement IPA and the user's device log.
