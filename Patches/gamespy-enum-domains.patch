@@ -1,6 +1,22 @@
+diff --git a/include/gamespy/gsplatform.h b/include/gamespy/gsplatform.h
+index 04e76a8..3796e1b 100644
+--- a/include/gamespy/gsplatform.h
++++ b/include/gamespy/gsplatform.h
+@@ -34,7 +34,8 @@
+ #endif
+ #endif
+ 
+-#if defined(__linux__) || (defined(__APPLE__) && defined(__MACH__))
++// GeneralsX @build Codex 31/10/2026 Preserve the engine-supplied platform definition.
++#if (defined(__linux__) || (defined(__APPLE__) && defined(__MACH__))) && !defined(_UNIX)
+ #define _UNIX
+ #endif
+ 
+diff --git a/src/gp/gpiconnect.c b/src/gp/gpiconnect.c
+index 8882c26..6b703f6 100644
 --- a/src/gp/gpiconnect.c
 +++ b/src/gp/gpiconnect.c
-@@ -424,7 +424,7 @@
+@@ -424,7 +424,7 @@ static GPResult gpiSendLogin(GPConnection* connection, GPIConnectData* data)
      gpiAppendIntToBuffer(connection, &iconnection->outputBuffer, iconnection->partnerID);
      gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, "\\response\\");
      gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, response);
@@ -9,9 +25,11 @@
          gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, "\\firewall\\1");
      gpiAppendStringToBuffer(connection, &iconnection->outputBuffer, "\\port\\");
      gpiAppendIntToBuffer(connection, &iconnection->outputBuffer, iconnection->peerPort);
+diff --git a/src/gp/gpisearch.c b/src/gp/gpisearch.c
+index abcf445..87d41d4 100644
 --- a/src/gp/gpisearch.c
 +++ b/src/gp/gpisearch.c
-@@ -460,7 +460,7 @@
+@@ -460,7 +460,7 @@ static GPResult gpiProcessSearch(GPConnection* connection, GPIOperation* operati
      int index;
      int oldIndex;
      GPIBool loop;
@@ -20,7 +38,7 @@
      GPICallback callback;
      GPIConnection* iconnection = (GPIConnection*)*connection;
      int len;
-@@ -828,7 +828,7 @@
+@@ -828,7 +828,7 @@ static GPResult gpiProcessSearch(GPConnection* connection, GPIOperation* operati
  
                      // Save the more state.
                      ///////////////////////
@@ -29,9 +47,11 @@
  
                      // Get the callback.
                      ////////////////////
+diff --git a/src/serverbrowsing/sb_serverbrowsing.c b/src/serverbrowsing/sb_serverbrowsing.c
+index e355ad1..2113a3d 100644
 --- a/src/serverbrowsing/sb_serverbrowsing.c
 +++ b/src/serverbrowsing/sb_serverbrowsing.c
-@@ -299,7 +299,7 @@
+@@ -299,7 +299,7 @@ static SBError WaitForTriggerUpdate(ServerBrowser sb, SBBool viaMaster)
      while (sb->triggerIP != 0 && err == sbe_noerror) {
          msleep(10);
          err = ServerBrowserThink(sb);

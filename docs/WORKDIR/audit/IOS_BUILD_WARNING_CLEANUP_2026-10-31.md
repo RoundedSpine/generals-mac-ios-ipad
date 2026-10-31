@@ -165,3 +165,11 @@ The real pinned vcpkg checkout's complete manifest host dry run exits zero once
 history is restored (after installing the missing local Ninja tool). The registry
 contains both overridden FFmpeg 8.1.1#2 and ffmpeg-bin2c 8.1.1 port trees. This
 verifies dependency resolution, not local iOS compilation.
+
+### Remaining macro baseline cross-check
+
+The GameSpy SDK also redefines the command-line `_UNIX=1` as an empty macro.
+Extend its pinned patch to supply this platform define only when absent. The
+real patched header passes a standalone `-D_UNIX=1 -Werror` compile; updated
+patch reverse/application checks pass. This removes the remaining non-DirectX
+macro diagnostic without marking all GameSpy implementation sources SYSTEM.
