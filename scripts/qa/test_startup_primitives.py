@@ -31,6 +31,86 @@ def compile_and_run(source, flags=()):
 
 
 class StartupTest(unittest.TestCase):
+    # GeneralsX @test Codex 31/10/2026 Exercise the actual native diagnostic body with denied/missing APIs as well as signed values.
+    def test_ios_memory_logging_distinguishes_signed_values_from_unknown_and_releases_queries(self):
+        source = (ROOT / 'Core/GameEngineDevice/Source/SDL3Device/iosmemorydiagnostics.cpp').read_text()
+        body = source[source.index('namespace {'):]
+        compile_and_run(r'''
+#include <cassert>
+#include <cstdio>
+#include <cstdint>
+#include <cstring>
+#include <string>
+using std::size_t;
+struct CFObject {int type;bool value;long long error;};
+using CFTypeRef=const CFObject*;using CFBooleanRef=CFTypeRef;using CFErrorRef=CFTypeRef;
+using CFStringRef=const char*;using CFAllocatorRef=const void*;
+constexpr CFAllocatorRef kCFAllocatorDefault=nullptr;
+#define CFSTR(s) s
+constexpr int RTLD_LAZY=1,RTLD_LOCAL=2;
+int mode=0,owned=0,closed=0,queries=0;
+const CFObject taskObject{2,false,0},enabled{1,true,0},disabled{1,false,0},unexpected{4,false,0},errorObject{3,false,-50};
+void CFRelease(CFTypeRef object){assert(object&&owned>0);--owned;}
+int CFGetTypeID(CFTypeRef object){return object->type;}
+int CFBooleanGetTypeID(){return 1;}
+bool CFBooleanGetValue(CFBooleanRef object){assert(object->type==1);return object->value;}
+long long CFErrorGetCode(CFErrorRef object){return object->error;}
+CFTypeRef fakeCreateTask(CFAllocatorRef){if(mode==7)return nullptr;++owned;return &taskObject;}
+CFTypeRef fakeCopyEntitlement(CFTypeRef task,CFStringRef key,CFErrorRef* error){
+ assert(task==&taskObject);++queries;
+ const bool increased=std::strcmp(key,"com.apple.developer.kernel.increased-memory-limit")==0;
+ assert(increased||std::strcmp(key,"com.apple.developer.kernel.extended-virtual-addressing")==0);
+ if(increased&&mode==2)return nullptr;
+ if(increased&&mode==3){*error=&errorObject;++owned;}
+ ++owned;return increased&&mode==1?&disabled:increased&&mode==4?&unexpected:&enabled;
+}
+void* dlopen(const char*,int){return mode==5?nullptr:reinterpret_cast<void*>(1);}
+void* dlsym(void*,const char* name){
+ if(std::strcmp(name,"SecTaskCreateFromSelf")==0)return reinterpret_cast<void*>(&fakeCreateTask);
+ assert(std::strcmp(name,"SecTaskCopyValueForEntitlement")==0);
+ return mode==6?nullptr:reinterpret_cast<void*>(&fakeCopyEntitlement);
+}
+int dlclose(void*){++closed;return 0;}
+size_t os_proc_available_memory(){return 1024ull*1024*1024;}
+using mach_msg_type_number_t=unsigned;using task_info_t=int*;
+struct task_vm_info_data_t {uint64_t phys_footprint;};
+constexpr unsigned TASK_VM_INFO_COUNT=8,TASK_VM_INFO_REV1_COUNT=2;
+constexpr int TASK_VM_INFO=22,KERN_SUCCESS=0;
+int mach_task_self(){return 3;}
+int task_info(int,int,task_info_t output,mach_msg_type_number_t* count){
+ if(mode==9)return 1;
+ if(mode==10)*count=TASK_VM_INFO_REV1_COUNT-1;
+ reinterpret_cast<task_vm_info_data_t*>(output)->phys_footprint=64ull*1024*1024;return KERN_SUCCESS;
+}
+int sysctlbyname(const char* name,void* output,size_t* length,void*,size_t){
+ assert(std::strcmp(name,"hw.memsize")==0);assert(*length==sizeof(uint64_t));
+ if(mode==8)return -1;
+ *static_cast<uint64_t*>(output)=8ull*1024*1024*1024;return 0;
+}
+namespace gxiosmemory {void logStartupCapabilities(FILE*);}
+BODY
+std::string capture(){FILE* output=std::tmpfile();assert(output);
+ gxiosmemory::logStartupCapabilities(output);std::rewind(output);
+ char text[4096]={};const auto n=std::fread(text,1,sizeof(text),output);std::fclose(output);
+ return std::string(text,n);}
+int main(){
+ for(mode=0;mode<=10;++mode){
+  owned=closed=queries=0;const auto text=capture();
+  auto has=[&](const char* value){return text.find(value)!=std::string::npos;};
+  assert(has("source=running_process"));assert(has("available_process_mib=1024.0"));
+  assert(owned==0);assert(closed==(mode==5?0:1));assert(queries==((mode>=5&&mode<=7)?0:2));
+  if(mode==1)assert(has("increased_memory_limit=false extended_virtual_addressing=true"));
+  else if(mode==2)assert(has("increased_memory_limit=absent extended_virtual_addressing=true"));
+  else if(mode==3){assert(has("increased_memory_limit=unknown extended_virtual_addressing=true"));assert(has("increased_status=query_error increased_error=-50"));}
+  else if(mode==4){assert(has("increased_memory_limit=unknown extended_virtual_addressing=true"));assert(has("increased_status=unexpected_type"));}
+  else if(mode>=5&&mode<=7){assert(has("increased_memory_limit=unknown extended_virtual_addressing=unknown"));assert(has(mode==7?"increased_status=task_unavailable":"increased_status=api_unavailable"));}
+  else assert(has("increased_memory_limit=true extended_virtual_addressing=true"));
+  assert(has(mode==8?"physical_device_mib=unknown":"physical_device_mib=8192.0"));
+  assert(has(mode==9||mode==10?"footprint_mib=unknown":"footprint_mib=64.0"));
+ }
+}
+'''.replace('BODY', body), ['-Werror'])
+
     def test_real_memory_block_offsets_and_recovery(self):
         source = (ROOT / 'Core/GameEngine/Source/Common/System/GameMemory.cpp').read_text()
         wallcount = re.search(r'#define WALLCOUNT[^\n]+', source).group()

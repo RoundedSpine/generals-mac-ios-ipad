@@ -41,6 +41,7 @@
 #include <SDL3/SDL_main.h>
 #include "nativeframecadence.h"
 #include "dxvkcachemaintenance.h"
+#include "SDL3Device/iosmemorydiagnostics.h"
 #include <cerrno>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -387,6 +388,9 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+
+	// GeneralsX @feature Codex 31/10/2026 Write the signed-process capability check after stderr capture is ready.
+	gxiosmemory::logStartupCapabilities(stderr);
 
 	// GeneralsX @build Codex 25/10/2026 Use the standalone app executable for bundle-relative resources.
 	char iosAppDirectory[1024] = {0};

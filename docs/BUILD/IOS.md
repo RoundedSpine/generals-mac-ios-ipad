@@ -88,6 +88,25 @@ missing game assets. Under LiveContainer, the host process's entitlements and
 memory allowance matter; adding keys to the guest does not grant them to the
 host. This does not integrate GetMoreRAM or add a runtime memory-limit bypass.
 
+At startup, `generals-stderr.log` includes a runtime check such as:
+
+```text
+[IOS_MEMORY_ENTITLEMENTS] source=running_process increased_memory_limit=true extended_virtual_addressing=true
+[IOS_MEMORY_ENTITLEMENT_QUERY] increased_status=ok increased_error=0 eva_status=ok eva_error=0
+[IOS_MEMORY] available_process_mib=... footprint_mib=... physical_device_mib=... sample=startup
+```
+
+These entitlement values come from the executing process, after sideload signing,
+rather than the build plist or profile permissions. `false` and `absent` report
+their respective query results. `unknown` means the optional native query was
+unavailable, failed, or returned an unexpected type; the query row explains why.
+The self-query uses dynamically resolved Security framework symbols because the
+public iOS SDK does not declare SecTask. Failure to resolve/query them is harmless
+and does not prevent startup. Memory observations use public OS APIs. Available
+process memory is a changing headroom measurement, not a fixed total RAM limit;
+a `true` signed entitlement alone does not prove the OS granted a particular
+memory allowance. No memory stress allocation is performed.
+
 Some Zero Hour editions rely on shared base-Generals archives. If your
 installation does not already include `ZH_Generals`, place the base game's
 `.big` archives in a `ZH_Generals` subfolder alongside the Zero Hour archives

@@ -78,6 +78,14 @@ target_sources(z_generals PRIVATE
     $<$<NOT:$<BOOL:${WIN32}>>:LinuxStubs.cpp>
 )
 
+# GeneralsX @build Codex 31/10/2026 Keep optional native memory inspection in the iOS device layer.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_sources(z_generals PRIVATE
+        "${CMAKE_SOURCE_DIR}/Core/GameEngineDevice/Source/SDL3Device/iosmemorydiagnostics.cpp"
+    )
+    target_link_libraries(z_generals PRIVATE "-framework CoreFoundation")
+endif()
+
 # RC files optional for MinGW builds
 # Icon: LoadIcon() handles missing resource gracefully (uses default system icon)
 # Manifest: DPI awareness metadata (nice to have but not essential)

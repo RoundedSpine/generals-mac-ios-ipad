@@ -69,6 +69,12 @@ Test in windowed mode at 1440p resolution.
 
 ## Logging Diagnostics Recipe
 
+iOS startup writes `[IOS_MEMORY_ENTITLEMENTS]`, `[IOS_MEMORY_ENTITLEMENT_QUERY]`
+and `[IOS_MEMORY]` to `generals-stderr.log` after capture is ready. No launch flag
+is needed. These report the running process's signed capability values and OS
+memory observations; `unknown` is not an enabled capability, and headroom is not
+a fixed memory limit. See [iOS memory diagnostics](../BUILD/IOS.md#memory-entitlements).
+
 The experimental iOS workflow enables the compile-time `GENERALS_PATH_TIMING`
 option (default OFF elsewhere; requires `GENERALS_PARALLEL_PATH_BATCH`). This is
 not a command-line flag. On normal game exit it writes `[PATH_TIMING]` session

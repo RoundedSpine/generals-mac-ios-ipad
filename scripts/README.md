@@ -42,7 +42,9 @@ See [unsigned IPA builds](../docs/BUILD/IOS.md) for the manual GitHub Actions wo
 Validate packaging control flow with `python3 scripts/qa/test_ios_packaging.py`
 (Apple tools are simulated; a real device build still requires macOS/Xcode).
 Run `python3 scripts/qa/test_startup_primitives.py` for compiled allocator/path
-contract tests; these exercise real function bodies without the full engine.
+contracts and iOS runtime memory-report handling; these exercise real function
+bodies without the full engine. Native entitlement APIs are simulated for the
+host tests; device logs are needed to confirm the actual installed signature.
 Run `python3 scripts/qa/test_unix_worker.py` for compiled worker-lifecycle,
 concurrent texture-queue and shutdown-lock tests.
 Run `python3 scripts/qa/test_ios_native_callbacks.py` for compiled callback,
