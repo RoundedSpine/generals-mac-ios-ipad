@@ -41,6 +41,8 @@ class StartupTest(unittest.TestCase):
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <atomic>
+#include <thread>
 using std::size_t;
 struct CFObject {int type;bool value;long long error;};
 using CFTypeRef=const CFObject*;using CFBooleanRef=CFTypeRef;using CFErrorRef=CFTypeRef;
@@ -48,7 +50,7 @@ using CFStringRef=const char*;using CFAllocatorRef=const void*;
 constexpr CFAllocatorRef kCFAllocatorDefault=nullptr;
 #define CFSTR(s) s
 constexpr int RTLD_LAZY=1,RTLD_LOCAL=2;
-int mode=0,owned=0,closed=0,queries=0;
+int mode=0,owned=0,closed=0,queries=0,memoryQueries=0;
 const CFObject taskObject{2,false,0},enabled{1,true,0},disabled{1,false,0},unexpected{4,false,0},errorObject{3,false,-50};
 void CFRelease(CFTypeRef object){assert(object&&owned>0);--owned;}
 int CFGetTypeID(CFTypeRef object){return object->type;}
@@ -71,7 +73,7 @@ void* dlsym(void*,const char* name){
  return mode==6?nullptr:reinterpret_cast<void*>(&fakeCopyEntitlement);
 }
 int dlclose(void*){++closed;return 0;}
-size_t os_proc_available_memory(){return 1024ull*1024*1024;}
+size_t os_proc_available_memory(){++memoryQueries;return 1024ull*1024*1024;}
 using mach_msg_type_number_t=unsigned;using task_info_t=int*;
 struct task_vm_info_data_t {uint64_t phys_footprint;};
 constexpr unsigned TASK_VM_INFO_COUNT=8,TASK_VM_INFO_REV1_COUNT=2;
@@ -87,10 +89,11 @@ int sysctlbyname(const char* name,void* output,size_t* length,void*,size_t){
  if(mode==8)return -1;
  *static_cast<uint64_t*>(output)=8ull*1024*1024*1024;return 0;
 }
-namespace gxiosmemory {void logStartupCapabilities(FILE*);}
+namespace gxiosmemory {void logStartupCapabilities(FILE*);void noteLowMemoryWarning();void logRuntimeIfDue(FILE*,uint64_t);}
 BODY
-std::string capture(){FILE* output=std::tmpfile();assert(output);
- gxiosmemory::logStartupCapabilities(output);std::rewind(output);
+std::string capture(bool startup=true,uint64_t now=0){FILE* output=std::tmpfile();assert(output);
+ if(startup)gxiosmemory::logStartupCapabilities(output);else gxiosmemory::logRuntimeIfDue(output,now);
+ std::rewind(output);
  char text[4096]={};const auto n=std::fread(text,1,sizeof(text),output);std::fclose(output);
  return std::string(text,n);}
 int main(){
@@ -108,8 +111,26 @@ int main(){
   assert(has(mode==8?"physical_device_mib=unknown":"physical_device_mib=8192.0"));
   assert(has(mode==9||mode==10?"footprint_mib=unknown":"footprint_mib=64.0"));
  }
+ // GeneralsX @test Codex 31/10/2026 No OS queries between samples, no catchup after suspension, and warning counts survive throttling.
+ mode=0;closed=queries=memoryQueries=0;
+ assert(capture(false,0).find("sample=periodic uptime_s=0.000")!=std::string::npos);
+ assert(memoryQueries==1&&capture(false,0).empty()&&capture(false,29999999999ull).empty()&&memoryQueries==1);
+ assert(capture(false,30000000000ull).find("sample=periodic")!=std::string::npos&&memoryQueries==2);
+ assert(capture(false,600000000000ull).find("sample=periodic")!=std::string::npos&&memoryQueries==3);
+ std::thread warning([]{for(int i=0;i<3;++i)gxiosmemory::noteLowMemoryWarning();});warning.join();
+ assert(memoryQueries==3);
+ auto text=capture(false,600000000001ull);
+ assert(text.find("sample=low_memory")!=std::string::npos&&text.find("low_memory_warnings=3")!=std::string::npos);
+ gxiosmemory::noteLowMemoryWarning();gxiosmemory::noteLowMemoryWarning();
+ assert(capture(false,600000000002ull).empty()&&memoryQueries==4);
+ text=capture(false,601000000001ull);
+ assert(text.find("sample=low_memory")!=std::string::npos&&text.find("low_memory_warnings=5")!=std::string::npos);
+ assert(capture(false,631000000000ull).empty());
+ assert(capture(false,631000000001ull).find("sample=periodic")!=std::string::npos);
+ assert(capture(false,1).find("sample=periodic")!=std::string::npos);
+ assert(queries==0&&closed==0); // Entitlement framework inspection remains startup-only.
 }
-'''.replace('BODY', body), ['-Werror'])
+'''.replace('BODY', body), ['-Werror','-pthread'])
 
     def test_real_memory_block_offsets_and_recovery(self):
         source = (ROOT / 'Core/GameEngine/Source/Common/System/GameMemory.cpp').read_text()

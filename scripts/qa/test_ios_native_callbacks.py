@@ -56,11 +56,16 @@ int main() {
 #define SDLCALL
 using Real=float;
 enum SDL_AppResult { SDL_APP_CONTINUE,SDL_APP_SUCCESS,SDL_APP_FAILURE };
-enum { SDL_EVENT_TERMINATING=1 };
+enum { SDL_EVENT_TERMINATING=1,SDL_EVENT_LOW_MEMORY=2 };
 struct SDL_Event { unsigned type; };
 bool onMain=true;uint64_t ticks=1000000000;int initResult=0,shuts=0,launcherExit=-1;
 bool SDL_IsMainThread() { return onMain; }
 uint64_t SDL_GetTicksNS() { return ticks; }
+namespace gxiosmemory {
+ int warnings=0,polls=0;
+ void noteLowMemoryWarning(){++warnings;}
+ void logRuntimeIfDue(FILE*,uint64_t){assert(onMain);++polls;}
+}
 struct Pacer { int fps=60;float delta=0;int getActualFramesPerSecondLimit() { return fps; } void updateExternal(float value) { delta=value; } } pacer;
 Pacer* TheFramePacer=&pacer;
 struct SDL3GameEngine {
@@ -92,6 +97,12 @@ int main() {
  ticks+=1000000;assert(SDL_AppIterate(state)==SDL_APP_CONTINUE && engine.frames==1);
  engine.ready=false;ticks+=10000000000ull;assert(SDL_AppIterate(state)==SDL_APP_CONTINUE && engine.frames==1);
  engine.ready=true;assert(SDL_AppIterate(state)==SDL_APP_CONTINUE && engine.frames==2 && pacer.delta<.02f);
+ const int beforePolls=gxiosmemory::polls;
+ event.type=SDL_EVENT_LOW_MEMORY;onMain=false;
+ assert(SDL_AppEvent(state,&event)==SDL_APP_CONTINUE&&gxiosmemory::warnings==1&&gxiosmemory::polls==beforePolls);
+ onMain=true;assert(SDL_AppIterate(state)==SDL_APP_CONTINUE&&gxiosmemory::polls==beforePolls+1&&gxiosmemory::warnings==1);
+ assert(SDL_AppEvent(state,&event)==SDL_APP_CONTINUE&&gxiosmemory::warnings==2&&gxiosmemory::polls==beforePolls+2);
+ event.type=99;
  engine.throwFrame=true;ticks+=20000000;assert(SDL_AppIterate(state)==SDL_APP_FAILURE);engine.throwFrame=false;
  engine.throwEvent=true;assert(SDL_AppEvent(state,&event)==SDL_APP_FAILURE);engine.throwEvent=false;
  engine.quitting=true;assert(SDL_AppIterate(state)==SDL_APP_SUCCESS);

@@ -365,12 +365,14 @@ int main(int argc, char* argv[])
 							static bool s_capMarked = false;
 							if (!s_capMarked) {
 								s_capMarked = true;
-								const char *mark = "[log capped: non-error lines dropped from here]\n";
+								const char *mark = "[log capped: retaining errors and low-rate memory samples]\n";
 								write(s_logFd, mark, strlen(mark));
 							}
-							if (len > 4 && (memcmp(buf, "err:", 4) == 0 ||
+							// GeneralsX @feature Codex 31/10/2026 Retain low-rate memory evidence after general debug spam reaches the cap.
+							if ((len >= 12 && memcmp(buf, "[IOS_MEMORY]", 12) == 0) ||
+							    (len > 4 && (memcmp(buf, "err:", 4) == 0 ||
 							                memcmp(buf, "ERROR", 5) == 0 ||
-							                memcmp(buf, "FATAL", 5) == 0)) {
+							                memcmp(buf, "FATAL", 5) == 0))) {
 								write(s_logFd, buf, (size_t)len);
 							}
 							return len;
@@ -704,6 +706,11 @@ SDL_AppResult SDLCALL SDL_AppInit(void** appstate, int argc, char* argv[])
 
 SDL_AppResult SDLCALL SDL_AppEvent(void* appstate, SDL_Event* event)
 {
+	// GeneralsX @feature Codex 31/10/2026 Capture warnings on any delivery thread; sample only on the main thread.
+	if (event->type == SDL_EVENT_LOW_MEMORY) {
+		gxiosmemory::noteLowMemoryWarning();
+		if (SDL_IsMainThread()) gxiosmemory::logRuntimeIfDue(stderr, SDL_GetTicksNS());
+	}
 	if (event->type == SDL_EVENT_TERMINATING) return SDL_APP_SUCCESS;
 	if (!appstate) return SDL_APP_CONTINUE;
 	try {
@@ -727,6 +734,7 @@ SDL_AppResult SDLCALL SDL_AppIterate(void* appstate)
 	try {
 		auto* engine = static_cast<SDL3GameEngine*>(appstate);
 		if (!engine) return SDL_APP_SUCCESS;
+		gxiosmemory::logRuntimeIfDue(stderr, SDL_GetTicksNS());
 		engine->drainNativeEvents();
 		if (engine->getQuitting()) return SDL_APP_SUCCESS;
 		const bool ready = engine->nativeFrameReady();

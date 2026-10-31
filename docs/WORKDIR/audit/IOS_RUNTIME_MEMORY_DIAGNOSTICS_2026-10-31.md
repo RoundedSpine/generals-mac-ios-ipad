@@ -57,3 +57,40 @@ configuration/SDL, but failed in the earlier DXVK warning adapter before the
 engine build completed. That separate template fix is recorded in
 IOS_BUILD_WARNING_CLEANUP_2026-10-31.md. The runtime memory report still requires
 a successful replacement IPA and the user's device log.
+
+## Long-session device evidence and sampling follow-up
+
+The uploaded log for ~44666f8 reports increased_memory_limit=absent and
+extended_virtual_addressing=absent, both with query status ok/error 0. Startup
+headroom is 3304.0 MiB, footprint 72.0 MiB, and hardware RAM 7622.1 MiB. The user
+reports a crash after nearly an hour and no matching IPS/Jetsam report. The game
+log has no fatal stack or normal shutdown summary, and its final display-busy
+messages do not establish the failing operation. There is no late-session memory
+measurement. Memory pressure is a hypothesis, not a confirmed termination cause.
+The preceding native build 41189741446 succeeded; the separate warning report
+shows three remaining diagnostics (two template-name-table and one duplicate
+archive warning), rather than a warning-free claim.
+
+Add a snapshot on the first native iteration and then every 30 seconds, using
+SDL uptime. Off-main SDL_EVENT_LOW_MEMORY delivery increments an atomic count;
+main-thread event delivery samples immediately for the first warning, and main
+iteration consumes pending warnings. Further warnings coalesce to at most one
+sample per second while preserving the count. Periodic sampling does not catch
+up in bursts after suspension. Clock rewind rebases the sampling deadline.
+
+All snapshot OS reads and stream writes occur on the main thread. Skipped polls
+perform no OS queries, and runtime snapshots never resolve Security symbols or
+re-query entitlements. Capture low-rate memory rows after the general 8 MiB
+spam cap as well, to retain evidence from late in long sessions. There is no
+allocation probe, sampling thread, cache purge or gameplay/search adjustment.
+An abrupt memory kill may still provide no warning or final snapshot.
+
+Five startup, six callback and ten packaging cases pass. The production memory
+body also passes Clang frontend and ASan/UBSan checks. Extended cases verify
+cross-thread warning increments, immediate first warning, count-preserving
+throttling, 30-second boundaries, no catchup/rewind underflow, and absence of
+OS/private-entitlement queries between snapshots. Callback tests verify that
+off-main warnings defer sampling and main-thread warnings request it without
+duplicating event delivery. Native SDK and long-session device validation remain
+pending. Manual SideStore entitlement editing is documented separately; the
+attached two-key plist is valid but is not applied by copying it to Documents.

@@ -107,6 +107,27 @@ process memory is a changing headroom measurement, not a fixed total RAM limit;
 a `true` signed entitlement alone does not prove the OS granted a particular
 memory allowance. No memory stress allocation is performed.
 
+On SideStore versions with **Customize Entitlements**, enable it under
+**Settings → Advanced Settings → User Customizations**. Import the IPA for
+installation/update, select the main Generals app in the entitlement editor,
+and enable both keys above as **Boolean true**. Keep the existing bundle ID
+when updating an installation. This editor is present in SideStore 0.6.4's
+source; older versions may have different options. Copying the `.entitlements`
+file into Documents does not change the signed app. Check the next startup log
+to verify the running process's values after signing.
+
+For long sessions, `[IOS_MEMORY]` also records `sample=periodic` at the first
+native iteration and every 30 seconds while callbacks run. Rows include SDL
+`uptime_s` and a cumulative `low_memory_warnings` count. iOS low-memory events
+request an additional `sample=low_memory`; repeated warnings coalesce at up to
+one sample per second, retaining the event count. Off-main event delivery only
+updates an atomic counter; the main thread performs the OS queries and logging.
+There is no sampling thread or catchup burst after suspension. Entitlements are
+still queried only at startup. These low-rate memory rows remain eligible for
+capture after the general 8 MiB debug-log cap, alongside existing fatal/error
+lines. A memory kill may happen without a warning or final sample, so missing
+warnings do not rule it out.
+
 Some Zero Hour editions rely on shared base-Generals archives. If your
 installation does not already include `ZH_Generals`, place the base game's
 `.big` archives in a `ZH_Generals` subfolder alongside the Zero Hour archives

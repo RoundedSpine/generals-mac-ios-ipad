@@ -74,6 +74,10 @@ and `[IOS_MEMORY]` to `generals-stderr.log` after capture is ready. No launch fl
 is needed. These report the running process's signed capability values and OS
 memory observations; `unknown` is not an enabled capability, and headroom is not
 a fixed memory limit. See [iOS memory diagnostics](../BUILD/IOS.md#memory-entitlements).
+The same memory row repeats every 30 seconds during callbacks and on rate-limited
+low-memory notifications, with SDL uptime and a cumulative warning count. These
+rows remain captured after the general debug-spam cap. Entitlement queries
+remain startup-only; no launch option or memory allocation probe is involved.
 
 The experimental iOS workflow enables the compile-time `GENERALS_PATH_TIMING`
 option (default OFF elsewhere; requires `GENERALS_PARALLEL_PATH_BATCH`). This is
