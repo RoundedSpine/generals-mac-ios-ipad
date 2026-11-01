@@ -1,5 +1,7 @@
 # Command & Conquer Generals: Zero Hour — macOS, iOS & iPadOS
 
+EA has not endorsed and does not support this product.
+
 <img width="500" height="281" alt="IMG_3457_500" src="https://github.com/user-attachments/assets/aeaf6692-36e6-40c8-b9f8-8066d014ec4b" />
 
 **Zero Hour running natively on Apple Silicon Macs, iPhone, and iPad** — campaign,
@@ -8,6 +10,11 @@ drag-box, long-press deselect, two-finger scroll, pinch zoom). No emulation: thi
 is the real 2003 engine compiled for ARM64, rendering DirectX 8 →
 [DXVK](https://github.com/doitsujin/dxvk) → Vulkan →
 [MoltenVK](https://github.com/KhronosGroup/MoltenVK) → Metal.
+
+This `experiment/ios-community-patch` branch adds an opt-in
+[Full English Community Patch data overlay](docs/BUILD/IOS_COMMUNITY_PATCH.md)
+on the current mod-testing engine. Real asset conversion and device validation
+remain pending; no automatic push build is enabled for this branch.
 
 Built on EA's GPL v3 source release, standing on a chain of community work —
 [TheSuperHackers](https://github.com/TheSuperHackers/GeneralsGameCode),

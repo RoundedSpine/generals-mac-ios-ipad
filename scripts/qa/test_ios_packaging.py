@@ -2,6 +2,8 @@
 """Exercise iOS packaging control flow without Xcode; real Mach-O/device checks need macOS."""
 # GeneralsX @build Codex 24/10/2026 Verify unsigned IPA contents and signing isolation.
 import json
+import hashlib
+import importlib.util
 import os
 import plistlib
 from pathlib import Path
@@ -123,6 +125,74 @@ class PackagingTest(unittest.TestCase):
     def run_package(self, *args):
         return subprocess.run(['bash', str(self.script), *args], env=self.env,
                               text=True, capture_output=True)
+
+    # GeneralsX @test Codex 02/11/2026 Patch resources must match both the configured engine and staged source hash.
+    def patch_resources(self, enabled=True):
+        helper = SCRIPT.with_name('stage-community-patch.py')
+        shutil.copy2(helper, self.script.with_name(helper.name))
+        spec = importlib.util.spec_from_file_location('packaging_patch_stage', helper)
+        stage = importlib.util.module_from_spec(spec); spec.loader.exec_module(stage)
+        build = self.root / 'build/ios-vulkan'
+        (build / 'CMakeCache.txt').write_text('GENERALS_COMMUNITY_PATCH:BOOL=' + ('ON' if enabled else 'OFF') + '\n')
+        config = json.loads((SCRIPT.parents[3] / 'ios/community-patch/source.json').read_text())
+        (build / 'community-patch-source.json').write_text(json.dumps(config))
+        patch = self.root / 'patch'; patch.mkdir()
+        payload = self.root / 'payload'; payload.write_bytes(b'compiled-data-fixture')
+        entries = [('data/ini/gamedata.ini', payload, 0, payload.stat().st_size),
+                   ('data/english/generals.csf', payload, 0, payload.stat().st_size)]
+        stage.write_big(entries, patch / 'CommunityPatch.big')
+        (patch / 'manifest.json').write_text(json.dumps(dict(config, entries=len(entries),
+            archive_sha256=hashlib.sha256((patch / 'CommunityPatch.big').read_bytes()).hexdigest())))
+        (patch / 'Notices').mkdir()
+        for name in ['Notices/LICENSE.txt', 'TERMS.txt', 'UPSTREAM-README.md']:
+            (patch / name).write_text('fixture notice')
+        self.env['GX_COMMUNITY_PATCH_DIR'] = str(patch)
+        return patch
+
+    def test_patch_resources_are_bundled_with_existing_memory_requests(self):
+        patch = self.patch_resources()
+        result = self.run_package('--dev', '--unsigned')
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        ipa = self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa'
+        with zipfile.ZipFile(ipa) as archive:
+            bundled = archive.read('Payload/GeneralsXZH.app/CommunityPatch/CommunityPatch.big')
+            self.assertEqual((patch / 'CommunityPatch.big').read_bytes(), bundled)
+            self.assertIn('Payload/GeneralsXZH.app/CommunityPatch/Notices/LICENSE.txt', archive.namelist())
+        carried = ipa.parent / 'GeneralsXZH-embedded-entitlements.plist'
+        with carried.open('rb') as source:
+            self.assertEqual(plistlib.load(source), {
+                'com.apple.developer.kernel.increased-memory-limit': True,
+                'com.apple.developer.kernel.extended-virtual-addressing': True,
+            })
+
+    def test_patch_enabled_engine_requires_resources(self):
+        self.patch_resources()
+        del self.env['GX_COMMUNITY_PATCH_DIR']
+        result = self.run_package('--dev', '--unsigned')
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('requires GX_COMMUNITY_PATCH_DIR', result.stderr)
+
+    def test_patch_payload_cannot_be_bundled_into_vanilla_engine(self):
+        self.patch_resources(enabled=False)
+        result = self.run_package('--dev', '--unsigned')
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('require a GENERALS_COMMUNITY_PATCH=ON engine', result.stderr)
+
+    def test_corrupted_or_mismatched_patch_stops_packaging(self):
+        patch = self.patch_resources()
+        with (patch / 'CommunityPatch.big').open('ab') as file:
+            file.write(b'corrupt')
+        result = self.run_package('--dev', '--unsigned')
+        self.assertNotEqual(0, result.returncode)
+        self.assertFalse((self.root / 'build/ios-package/GeneralsXZH-unsigned.ipa').exists())
+
+    def test_patch_profile_matches_configured_engine_not_changed_source(self):
+        patch = self.patch_resources()
+        manifest = json.loads((patch / 'manifest.json').read_text()); manifest['commit'] = 'f' * 40
+        (patch / 'manifest.json').write_text(json.dumps(manifest))
+        result = self.run_package('--dev', '--unsigned')
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('manifest does not match', result.stderr)
 
     def test_unsigned_archive_carries_requests_without_profiles_or_retail_data(self):
         result = self.run_package('--dev', '--unsigned')

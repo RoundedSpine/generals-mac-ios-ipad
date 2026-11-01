@@ -42,6 +42,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <stdexcept>
 
 #if defined(_UNIX)
 #include <strings.h>
@@ -509,6 +511,42 @@ void StdBIGFileSystem::init() {
 
 #if RTS_ZEROHOUR
 	loadBaseGeneralsAssetsForZH(this, primaryAssetsDirectory);
+#if defined(GENERALS_COMMUNITY_PATCH)
+	// GeneralsX @feature Codex 02/11/2026 Mount the converted patch only after both retail archive sets are present.
+	auto hasRetailArchive = [this](const char* filename) {
+		for (const auto& entry : m_archiveFileMap) {
+			const char* basename = entry.first.str();
+			for (const char* cursor = basename; *cursor; ++cursor)
+				if (*cursor == '/' || *cursor == '\\') basename = cursor + 1;
+			if (AsciiString(basename).compareNoCase(filename) == 0) return true;
+		}
+		return false;
+	};
+	if (!loadedPrimaryAssets || !hasRetailArchive("INI.big") || !hasRetailArchive("Textures.big") ||
+		!hasRetailArchive("W3D.big") || !hasRetailArchive("INIZH.big") ||
+		!hasRetailArchive("TexturesZH.big") || !hasRetailArchive("W3DZH.big"))
+		throw std::runtime_error("Community Patch requires base Generals and Zero Hour INI, Textures and W3D archives");
+
+	AsciiString patchPath;
+	if (!getExecutableDirectory(patchPath))
+		throw std::runtime_error("Cannot locate Community Patch app bundle");
+	patchPath.concat("/CommunityPatch/CommunityPatch.big");
+	if (!TheLocalFileSystem->doesFileExist(patchPath.str()))
+		throw std::runtime_error("Missing bundled Community Patch overlay");
+	std::unique_ptr<ArchiveFile> patch(openArchiveFile(patchPath.str()));
+	if (!patch) throw std::runtime_error("Cannot open bundled Community Patch overlay");
+	auto mounted = m_archiveFileMap.emplace(patchPath, patch.get());
+	if (!mounted.second) throw std::runtime_error("Community Patch overlay is already mounted");
+	ArchiveFile* archive = patch.release(); // The archive map now owns cleanup, including failed directory setup.
+	loadIntoDirectoryTree(archive, TRUE);
+	fprintf(stderr, "[COMMUNITY_PATCH] mounted profile=%s commit=%s after_retail=1 path=%s\n",
+		GENERALS_COMMUNITY_PATCH_PROFILE, GENERALS_COMMUNITY_PATCH_COMMIT, patchPath.str());
+	// Existing local-file precedence remains intentional; report common overrides that can mask this profile.
+	for (const char* loose : {"Data/INI/GameData.ini", "Data/INI/CommandSet.ini", "Data/English/generals.csf"})
+		if (TheLocalFileSystem->doesFileExist(loose))
+			fprintf(stderr, "[COMMUNITY_PATCH] local_override=%s precedence=loose_file\n", loose);
+#endif
+
 #endif
 }
 
@@ -658,6 +696,13 @@ Bool StdBIGFileSystem::loadBigFilesFromDirectory(AsciiString dir, AsciiString fi
 	Bool actuallyAdded = FALSE;
 	FilenameListIter it = filenameList.begin();
 	while (it != filenameList.end()) {
+#if RTS_ZEROHOUR && defined(GENERALS_COMMUNITY_PATCH)
+		// GeneralsX @bugfix Codex 02/11/2026 A recursively discovered overlay is not a retail data root.
+		if (it->endsWithNoCase("CommunityPatch/CommunityPatch.big") || it->endsWithNoCase("CommunityPatch\\CommunityPatch.big")) {
+			++it;
+			continue;
+		}
+#endif
 #if RTS_ZEROHOUR
 		// TheSuperHackers @bugfix bobtista 18/11/2025 Skip duplicate INIZH.big in Data\INI to prevent CRC mismatches.
 		// English, Chinese, and Korean SKUs shipped with two INIZH.big files (one in Run directory, one in Run\Data\INI).

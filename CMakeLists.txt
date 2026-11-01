@@ -50,6 +50,24 @@ if(NOT GENERALS_DXVK_CACHE_TAG STREQUAL "")
     add_compile_definitions(GENERALS_DXVK_CACHE_TAG="${GENERALS_DXVK_CACHE_TAG}")
 endif()
 
+# GeneralsX @feature Codex 02/11/2026 Keep the pinned Community Patch overlay opt-in and identify it in device logs.
+option(GENERALS_COMMUNITY_PATCH "Mount the bundled Full English Community Patch after retail data" OFF)
+if(GENERALS_COMMUNITY_PATCH)
+    file(READ "${CMAKE_SOURCE_DIR}/ios/community-patch/source.json" _community_patch_source)
+    string(JSON _community_patch_commit GET "${_community_patch_source}" commit)
+    string(JSON _community_patch_pack GET "${_community_patch_source}" pack)
+    string(LENGTH "${_community_patch_commit}" _community_patch_commit_length)
+    if(NOT _community_patch_pack STREQUAL "FullEnglish" OR NOT _community_patch_commit_length EQUAL 40 OR
+       NOT _community_patch_commit MATCHES "^[0-9a-f]+$")
+        message(FATAL_ERROR "Invalid pinned Community Patch source/profile")
+    endif()
+    configure_file("${CMAKE_SOURCE_DIR}/ios/community-patch/source.json"
+        "${CMAKE_BINARY_DIR}/community-patch-source.json" COPYONLY)
+    add_compile_definitions(GENERALS_COMMUNITY_PATCH=1
+        GENERALS_COMMUNITY_PATCH_COMMIT="${_community_patch_commit}"
+        GENERALS_COMMUNITY_PATCH_PROFILE="${_community_patch_pack}")
+endif()
+
 # GeneralsX @build Codex 26/10/2026 Keep the bounded serial search-context experiment opt-in.
 option(GENERALS_SEARCH_CONTEXT "Use generation-stamped single-threaded Zero Hour search state" OFF)
 if(GENERALS_SEARCH_CONTEXT)

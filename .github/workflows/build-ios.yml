@@ -16,7 +16,62 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  community-patch:
+    if: github.ref_name == 'experiment/ios-community-patch'
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read pinned Community Patch source
+        id: patch
+        shell: pwsh
+        run: |
+          $config = Get-Content ios/community-patch/source.json -Raw | ConvertFrom-Json
+          if ($config.repository -notmatch '^https://github.com/([^/]+/[^/]+)\.git$') { throw 'Invalid patch repository URL' }
+          "repository=$($Matches[1])" >> $env:GITHUB_OUTPUT
+          "commit=$($config.commit)" >> $env:GITHUB_OUTPUT
+          "pack=$($config.pack)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.patch.outputs.repository }}
+          ref: ${{ steps.patch.outputs.commit }}
+          submodules: recursive
+          path: community-patch-source
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.9.5'
+      - name: Build pinned Full English data without installing the PC game
+        shell: pwsh
+        run: |
+          $source = Resolve-Path community-patch-source
+          $config = Get-Content ios/community-patch/source.json -Raw | ConvertFrom-Json
+          $builder = git -C "$source/Tools/GeneralsModBuilder" rev-parse HEAD
+          if ($builder -ne $config.builder_commit) { throw 'Unexpected Mod Builder commit' }
+          uv run --locked --project "$source/Tools/GeneralsModBuilder" python scripts/build/ios/build-community-patch.py --source "$source"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/build/ios/stage-community-patch.py --source "$source" --pack-dir "$source/Patch104pZH/.Build/RawBundlePacks/$($config.pack)" --output build/community-patch
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CommunityPatch-FullEnglish
+          path: build/community-patch/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload patch build logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CommunityPatch-build-debug
+          path: community-patch-source/Patch104pZH/.Build/**/*.log
+          if-no-files-found: ignore
+
   build-ipa:
+    needs: community-patch
+    # GeneralsX @build Codex 02/11/2026 Patch runs require successful conversion; other branches keep the existing IPA path.
+    if: always() && !cancelled() && (needs.community-patch.result == 'success' || (github.ref_name != 'experiment/ios-community-patch' && needs.community-patch.result == 'skipped'))
     # GeneralsX @build Codex 28/10/2026 Restore the macOS 15 ARM64 host pool at the user's request.
     runs-on: macos-15
     timeout-minutes: 180
@@ -27,9 +82,21 @@ jobs:
       VCPKG_MAX_CONCURRENCY: '3'
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
       GX_BUNDLE_ID: org.generalsx.generalszh
+      GX_MOD_TESTING_PROFILE: ${{ contains(fromJSON('["experiment/ios-mod-testing","experiment/ios-community-patch"]'), github.ref_name) && 'ON' || 'OFF' }}
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Download pinned Community Patch data
+        if: github.ref_name == 'experiment/ios-community-patch'
+        uses: actions/download-artifact@v6
+        with:
+          name: CommunityPatch-FullEnglish
+          path: build/community-patch
+
+      - name: Verify compiled Community Patch artifact
+        if: github.ref_name == 'experiment/ios-community-patch'
+        run: python3 scripts/build/ios/stage-community-patch.py --verify build/community-patch
 
       - name: Check packaging behavior
         run: |
@@ -38,7 +105,7 @@ jobs:
           import sys
           tests = [
               "test_ios_packaging.py", "test_startup_primitives.py", "test_csf_reserved_header.py", "test_openal_stream.py",
-              "test_wwlib_pool.py", "test_audio_cache.py", "test_ffmpeg_ownership.py", "test_memory_counters.py",
+              "test_wwlib_pool.py", "test_audio_cache.py", "test_ffmpeg_ownership.py", "test_community_patch.py", "test_memory_counters.py",
               "test_paused_messages.py",
               "test_raw_memory.py",
               "test_unix_worker.py", "test_ios_native_callbacks.py",
@@ -157,22 +224,23 @@ jobs:
           # GeneralsX @performance Codex 30/10/2026 Reuse each complete-search participant arena for its sequential fallback.
           # GeneralsX @feature Codex 31/10/2026 Trial up to four logical requests on two participant arenas, keeping one background worker.
           cmake --preset ios-vulkan \
-            -DGENERALS_DXVK_CACHE_TAG=${{ github.ref_name == 'experiment/ios-mod-testing' && 'quad-lists-v1' || '' }} \
-            -DGENERALS_SEARCH_CONTEXT=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_COMMUNITY_PATCH=${{ github.ref_name == 'experiment/ios-community-patch' && 'ON' || 'OFF' }} \
+            -DGENERALS_DXVK_CACHE_TAG=${{ env.GX_MOD_TESTING_PROFILE == 'ON' && 'quad-lists-v1' || '' }} \
+            -DGENERALS_SEARCH_CONTEXT=${{ env.GX_MOD_TESTING_PROFILE }} \
             -DGENERALS_OCCUPANCY_SHADOW_VALIDATION=OFF \
             -DGENERALS_OWNED_PATH_ROUTE=OFF \
-            -DGENERALS_OCCUPANCY_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_PARALLEL_PATH_BATCH=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_COMPLETE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_REUSE_PATH_CONTEXTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_PATH_WORKER_POOL=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_PATH_FOUR_REQUESTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_PATH_LOOKAHEAD=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_FAST_ZONE_MERGES=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_FROZEN_OCCUPANCY_CACHE=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_PATH_TIMING=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_EXCLUSIVE_PATH_WORKER=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
-            -DGENERALS_QUAD_LISTS=${{ github.ref_name == 'experiment/ios-mod-testing' && 'ON' || 'OFF' }} \
+            -DGENERALS_OCCUPANCY_WORKER=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_PARALLEL_PATH_BATCH=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_COMPLETE_PATH_WORKER=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_REUSE_PATH_CONTEXTS=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_PATH_WORKER_POOL=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_PATH_FOUR_REQUESTS=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_PATH_LOOKAHEAD=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_FAST_ZONE_MERGES=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_FROZEN_OCCUPANCY_CACHE=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_PATH_TIMING=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_EXCLUSIVE_PATH_WORKER=${{ env.GX_MOD_TESTING_PROFILE }} \
+            -DGENERALS_QUAD_LISTS=${{ env.GX_MOD_TESTING_PROFILE }} \
             -DGENERALS_STRIP_DIAGNOSTICS=OFF \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
@@ -196,6 +264,8 @@ jobs:
           cmake --build build/ios-vulkan --target z_generals --parallel 3 2>&1 | tee logs/build_ios.log
 
       - name: Package unsigned IPA without retail game assets
+        env:
+          GX_COMMUNITY_PATCH_DIR: ${{ github.ref_name == 'experiment/ios-community-patch' && format('{0}/build/community-patch', github.workspace) || '' }}
         run: |
           set -euo pipefail
           bash scripts/build/ios/package-ios-zh.sh --dev --unsigned 2>&1 | tee logs/package_ios.log

@@ -170,6 +170,18 @@ for mixed host results and memory savings.
 #### `build/windows/` - Windows Build (Pending)
 Reserved for modern Windows toolchain (VS2022 + SDL3 + DXVK + OpenAL)
 
+#### Community Patch data tools
+
+- `build/ios/build-community-patch.py` - Build only pinned Full English data with
+  the upstream Windows builder, without installing or running the PC game.
+- `build/ios/stage-community-patch.py` - Merge converted BIG/loose runtime data in
+  upstream priority order, materialize allowed build links, preserve notices and
+  verify source/profile/hash provenance. Packaging uses `--source-config` with
+  the copy saved when its engine was configured.
+- `qa/test_community_patch.py` - Verify builder metadata, archive paths/priority,
+  both retail datasets, failed mounts, text presence, loose-file precedence,
+  configured profile and preservation of the current worker build options.
+
 ### `env/` - Environment Setup
 
 #### `env/docker/` - Docker Configuration
@@ -487,3 +499,8 @@ ref-owner semantics and pinned patch/build setup/report contracts. CMake must be
 on PATH. The iOS workflow preserves its raw logs and publishes a warning-count
 report with a completion flag; see
 [the warning cleanup audit](../docs/WORKDIR/audit/IOS_BUILD_WARNING_CLEANUP_2026-10-31.md).
+
+The build-warning regression suite also checks the model-condition name-table
+specialization across translation units and the nested game's linker policies.
+The shared FFmpeg header check uses the real video base declarations with missing
+`override` warnings treated as errors.

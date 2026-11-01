@@ -177,6 +177,25 @@ if [[ "${DEV_MODE}" != "1" ]]; then
     echo "    bundled $(du -sh "${APP}/GameData" | cut -f1) of game data"
 fi
 
+# GeneralsX @feature Codex 02/11/2026 Verify converted patch provenance before bundling, retaining current entitlement/signature handling.
+PATCH_ENABLED=0
+if [[ -f "${BUILD_DIR}/CMakeCache.txt" ]] && grep -Eiq '^GENERALS_COMMUNITY_PATCH:BOOL=(ON|YES|TRUE|1|Y)$' "${BUILD_DIR}/CMakeCache.txt"; then
+    PATCH_ENABLED=1
+fi
+if [[ "${PATCH_ENABLED}" == "1" && -z "${GX_COMMUNITY_PATCH_DIR:-}" ]]; then
+    echo "ERROR: patch-enabled engine requires GX_COMMUNITY_PATCH_DIR" >&2
+    exit 1
+fi
+if [[ -n "${GX_COMMUNITY_PATCH_DIR:-}" ]]; then
+    if [[ "${PATCH_ENABLED}" != "1" ]]; then
+        echo "ERROR: patch resources require a GENERALS_COMMUNITY_PATCH=ON engine" >&2
+        exit 1
+    fi
+    python3 "${PROJECT_ROOT}/scripts/build/ios/stage-community-patch.py" --verify "${GX_COMMUNITY_PATCH_DIR}" \
+        --source-config "${BUILD_DIR}/community-patch-source.json"
+    cp -R "${GX_COMMUNITY_PATCH_DIR}/." "${APP}/CommunityPatch"
+fi
+
 # Loose icon PNGs alongside the compiled asset catalog: SpringBoard on some
 # iOS versions won't read Assets.car icons from developer-signed sideloads
 # until a reboot, but it always honors CFBundleIconFiles PNGs in the bundle root.

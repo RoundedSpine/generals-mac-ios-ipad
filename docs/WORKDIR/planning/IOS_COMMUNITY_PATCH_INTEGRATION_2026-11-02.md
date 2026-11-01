@@ -1,6 +1,8 @@
 # Community Patch investigation on the current iOS mod-testing base
 
-Reviewed 2 November 2026. Investigation only: no patch has been enabled or bundled.
+Reviewed 2 November 2026; local integration completed after this investigation.
+Implementation and build instructions: [Community Patch iOS guide](../../BUILD/IOS_COMMUNITY_PATCH.md).
+The feature is opt-in; real converted assets and native/device validation remain pending.
 
 ## Branch and scope
 
@@ -9,8 +11,8 @@ Reviewed 2 November 2026. Investigation only: no patch has been enabled or bundl
   `7341715fdbdf5c0f300cfa22df2c6af45f95fd11`.
 - Separate checkout: `/workspace/generals-community-patch-ios`.
 - The original checkout remains on `experiment/ios-mod-testing`, including its
-  uncommitted warning fixes. Those changes were not moved, discarded or committed
-  as part of this investigation; bring them forward separately before a later build.
+  uncommitted warning fixes. They remain untouched there. Their reviewed code/test
+  changes were separately carried into this branch in local commit `8066a7d0e`.
 - Continue the user's previously selected **Full English** profile.
 - No push, workflow dispatch, patch-data build or IPA build was performed.
 
@@ -91,9 +93,11 @@ retain the existing checks on broken links and links outside the pinned project.
 | Text | Current CSF parsing already has the reserved-word correction and stronger bounds/short-read handling than the old Community Patch branch. Keep the current implementation; do not overwrite it with the older parser. |
 | Saves/replays | Gameplay definitions change. Use fresh patched games for acceptance; do not assume vanilla, Reimagined-data or other mod saves/replays are interchangeable. |
 
-The new branch currently has **no runtime patch mount, package resources or CI
-enablement**. Merely having a branch and the integration plan does not activate
-Community Patch content.
+The new branch now implements the opt-in mount, compiled-data builder/stager,
+manual workflow configuration and package verification. No converted game-data
+payload is checked into the repository. Patch resources must be built and validated
+before an enabled engine can be packaged; merely switching branches does not alter
+the currently installed app.
 
 ## iOS validation and memory considerations
 
@@ -137,15 +141,22 @@ All 13 existing checks pass. The staging tests use small generated archives; the
 are not a real Full English asset build. No retail game was installed, no conversion
 tools were launched, and no iOS gameplay compatibility claim follows from them.
 
-## Recommended implementation sequence
+## Implementation status
 
-1. Bring forward the separately preserved warning fixes when preparing the build.
-   Keep the current engine and validated experiment profile as the baseline.
-2. Add the pinned official-source Full English builder/stager and notices. Adapt
-   current CI profile selection and packaging without starting a workflow.
-3. Add the explicit retail-then-overlay mount and tests for priority, required
-   resources, missing retail data, loose-file masking and current CSF compatibility.
-4. Validate actual converted output and archive provenance. Only then build an
-   IPA when the user lifts the current no-new-build constraint.
-5. Run the device checks above with fresh patched content before considering the
-   integration validated or comparing memory/performance.
+- [x] Carry the reviewed warning fixes separately while preserving their original checkout.
+- [x] Add the official-source pinned Full English builder/stager and attribution.
+- [x] Preserve the current worker/renderer profile on both testing branches.
+- [x] Add source/profile/hash-checked packaging while retaining memory requests.
+- [x] Mount after six core retail archives; reject missing/failed/duplicate mounts,
+  exclude recursive discovery and report common loose-file overrides.
+- [x] Preserve current CSF handling and validate loose-file/archive precedence.
+- [x] Validate all 36 local workflow test modules, including 11 patch integration
+  and 17 packaging cases; the C++ patch fixtures also pass with ASan/UBSan.
+- [ ] Build actual Full English conversion outputs on Windows and inspect the result.
+- [ ] Build the native IPA only when the user lifts the no-new-build constraint.
+- [ ] Test fresh campaign/skirmish games, menus/touch, audio, worker behavior and
+  matched sustained memory/performance on device.
+
+No remote push, workflow dispatch or native IPA build was performed. Existing
+helper tests use small generated payloads and stand-in packaging tools; they do
+not establish compatibility of the real converted assets.
