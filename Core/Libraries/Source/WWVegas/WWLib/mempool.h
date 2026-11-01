@@ -84,8 +84,10 @@ public:
 
 protected:
 
+	// GeneralsX @bugfix Codex 01/11/2026 Keep the chunk link separate from pointer-aligned object storage on 64-bit hosts.
+	struct BlockHeader { BlockHeader* Next; };
 	T	*		FreeListHead;
-	uint32 *	BlockListHead;
+	BlockHeader * BlockListHead;
 	int		FreeObjectCount;
 	int		TotalObjectCount;
 	FastCriticalSectionClass ObjectPoolCS;
@@ -205,7 +207,7 @@ ObjectPoolClass<T,BLOCK_SIZE>::~ObjectPoolClass()
 	// delete all of the blocks we allocated
 	int block_count = 0;
 	while (BlockListHead != nullptr) {
-		uint32 * next_block = *(uint32 **)BlockListHead;
+		BlockHeader * next_block = BlockListHead->Next;
 		::operator delete(BlockListHead);
 		BlockListHead = next_block;
 		block_count++;
@@ -280,18 +282,29 @@ T * ObjectPoolClass<T,BLOCK_SIZE>::Allocate_Object_Memory()
 
 	if ( FreeListHead == nullptr ) {
 
-		// No free objects, allocate another block
-		uint32 * tmp_block_head = BlockListHead;
-		BlockListHead = (uint32*)::operator new( sizeof(T) * BLOCK_SIZE + sizeof(uint32 *));
-		// Link this block into the block list
-		*(void **)BlockListHead = tmp_block_head;
-
-		// Link the objects in the block into the free object list
-		FreeListHead = (T*)(BlockListHead + 1);
-		for ( int i = 0; i < BLOCK_SIZE; i++ ) {
-			*(T**)(&(FreeListHead[i])) = &(FreeListHead[i+1]);	// link up the elements
+		// GeneralsX @bugfix Codex 01/11/2026 Overallocate for T's alignment, preserving the original pointer for matching delete.
+#if defined(_MSC_VER) && _MSC_VER < 1900
+		const size_t object_alignment = sizeof(void*); // Legacy compiler has no alignof.
+		WWASSERT(sizeof(T) >= sizeof(T*) && BLOCK_SIZE > 0);
+#else
+		static_assert(sizeof(T) >= sizeof(T*), "Object pool slots must hold a free-list pointer");
+		static_assert(BLOCK_SIZE > 0, "Object pool block size must be positive");
+		const size_t object_alignment = alignof(T);
+#endif
+		const size_t alignment = object_alignment < sizeof(void*) ? sizeof(void*) : object_alignment;
+		const size_t stride = (sizeof(T) + alignment - 1) / alignment * alignment;
+		void* allocation = ::operator new(stride * BLOCK_SIZE + sizeof(BlockHeader) + alignment - 1);
+		BlockHeader* block = new (allocation) BlockHeader;
+		block->Next = BlockListHead;
+		BlockListHead = block;
+		unsigned char* objects = reinterpret_cast<unsigned char*>(block + 1);
+		const size_t remainder = reinterpret_cast<size_t>(objects) % alignment;
+		if (remainder) objects += alignment - remainder;
+		FreeListHead = reinterpret_cast<T*>(objects);
+		for ( int i = 0; i < BLOCK_SIZE - 1; i++ ) {
+			*reinterpret_cast<T**>(objects + i * stride) = reinterpret_cast<T*>(objects + (i + 1) * stride);
 		}
-		*(T**)(&(FreeListHead[BLOCK_SIZE-1])) = nullptr;				// Mark the end
+		*reinterpret_cast<T**>(objects + (BLOCK_SIZE - 1) * stride) = nullptr;
 
 		FreeObjectCount += BLOCK_SIZE;
 		TotalObjectCount += BLOCK_SIZE;
