@@ -51,6 +51,19 @@ constexpr CFAllocatorRef kCFAllocatorDefault=nullptr;
 #define CFSTR(s) s
 constexpr int RTLD_LAZY=1,RTLD_LOCAL=2;
 int mode=0,owned=0,closed=0,queries=0,memoryQueries=0;
+int metalMode=0,metalOwned=0,heapQueries=0,resourceSamples=0;
+using id=void*;using Class=void*;using SEL=const char*;using IMP=void(*)();
+id fakeCreateDevice(){if(metalMode==3)return nullptr;++metalOwned;return reinterpret_cast<id>(2);}
+Class object_getClass(id device){assert(device==reinterpret_cast<id>(2));return device;}
+SEL sel_registerName(const char*name){return name;}
+bool class_respondsToSelector(Class,SEL selector){assert(std::strcmp(selector,"currentAllocatedSize")==0);return metalMode!=4;}
+unsigned long fakeAllocated(id,SEL){return 128ull*1024*1024;}
+void fakeRelease(id,SEL){assert(metalOwned>0);--metalOwned;}
+IMP class_getMethodImplementation(Class,SEL selector){
+ return std::strcmp(selector,"release")==0?reinterpret_cast<IMP>(&fakeRelease):reinterpret_cast<IMP>(&fakeAllocated);}
+struct malloc_statistics_t {size_t size_in_use=0,size_allocated=0;};
+void malloc_zone_statistics(void*zone,malloc_statistics_t*stats){assert(!zone);++heapQueries;stats->size_in_use=16*1024*1024;stats->size_allocated=32*1024*1024;}
+void fakeResourceSampler(FILE*output){++resourceSamples;std::fprintf(output,"[TEST_RESOURCE] sample=%d\n",resourceSamples);}
 const CFObject taskObject{2,false,0},enabled{1,true,0},disabled{1,false,0},unexpected{4,false,0},errorObject{3,false,-50};
 void CFRelease(CFTypeRef object){assert(object&&owned>0);--owned;}
 int CFGetTypeID(CFTypeRef object){return object->type;}
@@ -66,8 +79,10 @@ CFTypeRef fakeCopyEntitlement(CFTypeRef task,CFStringRef key,CFErrorRef* error){
  if(increased&&mode==3){*error=&errorObject;++owned;}
  ++owned;return increased&&mode==1?&disabled:increased&&mode==4?&unexpected:&enabled;
 }
-void* dlopen(const char*,int){return mode==5?nullptr:reinterpret_cast<void*>(1);}
-void* dlsym(void*,const char* name){
+void* dlopen(const char*path,int){if(std::strstr(path,"Metal.framework"))return metalMode==1?nullptr:reinterpret_cast<void*>(2);
+ return mode==5?nullptr:reinterpret_cast<void*>(1);}
+void* dlsym(void*handle,const char* name){
+ if(handle==reinterpret_cast<void*>(2)){assert(std::strcmp(name,"MTLCreateSystemDefaultDevice")==0);return metalMode==2?nullptr:reinterpret_cast<void*>(&fakeCreateDevice);}
  if(std::strcmp(name,"SecTaskCreateFromSelf")==0)return reinterpret_cast<void*>(&fakeCreateTask);
  assert(std::strcmp(name,"SecTaskCopyValueForEntitlement")==0);
  return mode==6?nullptr:reinterpret_cast<void*>(&fakeCopyEntitlement);
@@ -89,7 +104,7 @@ int sysctlbyname(const char* name,void* output,size_t* length,void*,size_t){
  if(mode==8)return -1;
  *static_cast<uint64_t*>(output)=8ull*1024*1024*1024;return 0;
 }
-namespace gxiosmemory {void logStartupCapabilities(FILE*);void noteLowMemoryWarning();void logRuntimeIfDue(FILE*,uint64_t);}
+namespace gxiosmemory {using ResourceSampler=void(*)(FILE*);void setResourceSampler(ResourceSampler);void logStartupCapabilities(FILE*);void noteLowMemoryWarning();void logRuntimeIfDue(FILE*,uint64_t);}
 BODY
 std::string capture(bool startup=true,uint64_t now=0){FILE* output=std::tmpfile();assert(output);
  if(startup)gxiosmemory::logStartupCapabilities(output);else gxiosmemory::logRuntimeIfDue(output,now);
@@ -101,7 +116,7 @@ int main(){
   owned=closed=queries=0;const auto text=capture();
   auto has=[&](const char* value){return text.find(value)!=std::string::npos;};
   assert(has("source=running_process"));assert(has("available_process_mib=1024.0"));
-  assert(owned==0);assert(closed==(mode==5?0:1));assert(queries==((mode>=5&&mode<=7)?0:2));
+  assert(owned==0&&metalOwned==0);assert(closed==(mode==5?1:2));assert(queries==((mode>=5&&mode<=7)?0:2));
   if(mode==1)assert(has("increased_memory_limit=false extended_virtual_addressing=true"));
   else if(mode==2)assert(has("increased_memory_limit=absent extended_virtual_addressing=true"));
   else if(mode==3){assert(has("increased_memory_limit=unknown extended_virtual_addressing=true"));assert(has("increased_status=query_error increased_error=-50"));}
@@ -111,8 +126,19 @@ int main(){
   assert(has(mode==8?"physical_device_mib=unknown":"physical_device_mib=8192.0"));
   assert(has(mode==9||mode==10?"footprint_mib=unknown":"footprint_mib=64.0"));
  }
+ // GeneralsX @test Codex 01/11/2026 Public Metal query failures preserve unknowns and release every owned device/framework.
+ mode=0;
+ for(metalMode=0;metalMode<=4;++metalMode){
+  closed=0;const auto text=capture();assert(metalOwned==0&&closed==(metalMode==1?1:2));
+  assert(text.find("malloc_in_use_mib=16.0 malloc_reserved_mib=32.0")!=std::string::npos);
+  assert(text.find(metalMode==0?"metal_allocated_mib=128.0 metal_status=ok":metalMode<=2?
+   "metal_allocated_mib=unknown metal_status=api_unavailable":metalMode==3?
+   "metal_allocated_mib=unknown metal_status=device_unavailable":"metal_allocated_mib=unknown metal_status=counter_unavailable")!=std::string::npos);
+ }
+ metalMode=0;
  // GeneralsX @test Codex 31/10/2026 No OS queries between samples, no catchup after suspension, and warning counts survive throttling.
- mode=0;closed=queries=memoryQueries=0;
+ mode=0;closed=queries=memoryQueries=heapQueries=0;
+ gxiosmemory::setResourceSampler(fakeResourceSampler);
  assert(capture(false,0).find("sample=periodic uptime_s=0.000")!=std::string::npos);
  assert(memoryQueries==1&&capture(false,0).empty()&&capture(false,29999999999ull).empty()&&memoryQueries==1);
  assert(capture(false,30000000000ull).find("sample=periodic")!=std::string::npos&&memoryQueries==2);
@@ -128,7 +154,9 @@ int main(){
  assert(capture(false,631000000000ull).empty());
  assert(capture(false,631000000001ull).find("sample=periodic")!=std::string::npos);
  assert(capture(false,1).find("sample=periodic")!=std::string::npos);
- assert(queries==0&&closed==0); // Entitlement framework inspection remains startup-only.
+ assert(queries==0&&closed==memoryQueries&&heapQueries==memoryQueries&&resourceSamples==memoryQueries&&metalOwned==0);
+ gxiosmemory::setResourceSampler(nullptr);const auto before=resourceSamples;
+ capture(false,40000000000ull);assert(resourceSamples==before&&heapQueries==memoryQueries);
 }
 '''.replace('BODY', body), ['-Werror','-pthread'])
 

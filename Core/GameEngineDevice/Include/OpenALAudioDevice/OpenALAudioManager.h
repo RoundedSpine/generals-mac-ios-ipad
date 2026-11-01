@@ -81,6 +81,8 @@ public:
 
 	OpenALAudioManager();
 	virtual ~OpenALAudioManager();
+	// GeneralsX @feature Codex 01/11/2026 Main-thread cache/source counts, without keeping diagnostic history.
+	void logMemoryUsage(FILE* output) const;
 
 	virtual AsciiString nextMusicTrack(void) override;
 	virtual AsciiString prevMusicTrack(void) override;

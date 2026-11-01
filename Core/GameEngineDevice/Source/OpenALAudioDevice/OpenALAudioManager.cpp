@@ -106,6 +106,18 @@ static inline bool sourceIsStopped(ALuint source)
 }
 
 //-------------------------------------------------------------------------------------------------
+// GeneralsX @feature Codex 01/11/2026 Sample existing residency and playback lists on the engine thread only.
+void OpenALAudioManager::logMemoryUsage(FILE* output) const
+{
+	if (!m_audioCache) return;
+	const double mib = 1024.0 * 1024.0;
+	fprintf(output, "[IOS_AUDIO_MEMORY] decoded_pcm_mib=%.3f cache_limit_mib=%.1f cached_buffers=%zu unmatched_closes=%u playing_2d=%zu playing_3d=%zu streams=%zu fading=%zu stopped=%zu\n",
+		m_audioCache->getCurrentlyUsedSize() / mib, m_audioCache->getMaxSize() / mib,
+		m_audioCache->getCachedBufferCount(), m_audioCache->getUnmatchedCloseCount(),
+		m_playingSounds.size(), m_playing3DSounds.size(), m_playingStreams.size(),
+		m_fadingAudio.size(), m_stoppedAudio.size());
+}
+
 OpenALAudioManager::OpenALAudioManager() :
 	m_providerCount(1),
 	m_selectedProvider(PROVIDER_ERROR),

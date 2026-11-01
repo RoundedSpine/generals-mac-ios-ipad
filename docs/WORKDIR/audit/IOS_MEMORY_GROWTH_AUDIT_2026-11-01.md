@@ -2,7 +2,8 @@
 
 Baseline: `experiment/ios-mod-testing`, `1cf4ae575`. This is a source audit and
 compiled-fragment investigation, not an on-device heap or Metal allocation trace.
-No production fix or renderer configuration change is included in this audit.
+The findings below describe that baseline. Follow-up implementation status is
+recorded at the end; on-device impact remains unmeasured.
 
 ## Observed session
 
@@ -233,3 +234,27 @@ path as its optional argument. It asserts the observed **baseline defects** and
 expects the pool UBSan failure; it is not a passing regression test for repaired
 code. No Apple signing credentials, retail assets or real GPU/audio device are
 used by the harness.
+
+## Follow-up implementation — 1 November 2026
+
+- Repair the WWLib chunk header/payload overlap and align every free-list slot,
+  including over-aligned and odd-sized types. Keep locking, reuse and retention.
+- Repair OpenAL first-borrow accounting and unmatched-close underflow. Charge
+  actual decoded PCM to the existing 14 MiB budget, bound a single decoded clip,
+  and roll back file/decoder/buffer/budget ownership on admission failures.
+  Retire the decoder after upload; streaming policy remains unchanged.
+- Extend the existing sample with aggregate malloc in-use/reserved bytes,
+  optional public Metal device accounting, engine pool payload used/reserved,
+  asset-hash textures, vertex/index buffers, live objects/particles and audio
+  cache/playback counts. Keep main-thread throttling and coalesced warnings.
+  Queries do not wait for the GPU or change cache retention. No history is kept.
+- Add `test_wwlib_pool.py`, `test_audio_cache.py` and `test_memory_counters.py` to
+  CI; extend the native diagnostic fixture with Metal failure/ownership and
+  category-sampling cadence checks. Local pool/audio/counter fixtures and the
+  native diagnostic fixture pass with AddressSanitizer/UndefinedBehaviorSanitizer.
+
+The latent depth-texture reference, FFmpeg failure-path gaps and renderer/cache
+retention policies remain separate findings. Do not infer that these repairs
+explain or eliminate the 58.49 MiB/minute device slope. The next long-session log
+must identify which categories continue to rise. Heap, Metal, pool and footprint
+measurements overlap; texture/audio rows intentionally describe narrower coverage.

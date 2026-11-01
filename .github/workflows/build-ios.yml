@@ -38,6 +38,7 @@ jobs:
           import sys
           tests = [
               "test_ios_packaging.py", "test_startup_primitives.py", "test_csf_reserved_header.py", "test_openal_stream.py",
+              "test_wwlib_pool.py", "test_audio_cache.py", "test_memory_counters.py",
               "test_unix_worker.py", "test_ios_native_callbacks.py",
               "test_pathfind_heap.py", "test_hierarchical_edges.py",
               "test_strip_diagnostics.py", "test_quad_lists.py",

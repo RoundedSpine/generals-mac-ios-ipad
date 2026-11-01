@@ -152,6 +152,7 @@ if(APPLE AND SAGE_USE_MOLTENVK)
             "-framework QuartzCore"
             "-framework Foundation"
             "-framework UIKit"
+            objc # GeneralsX @build Codex 01/11/2026 Public Metal accounting from the C++ device layer.
         )
     endif()
     message(STATUS "MoltenVK (Vulkan on macOS) detected and enabled")

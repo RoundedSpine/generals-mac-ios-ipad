@@ -4,6 +4,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <mach/mach.h>
+#include <malloc/malloc.h>
+#include <objc/runtime.h>
 #include <os/proc.h>
 #include <sys/sysctl.h>
 #include <cstdint>
@@ -20,6 +22,43 @@ bool s_warningSampled = false;
 uint64_t s_lastSampleNS = 0;
 uint64_t s_lastWarningNS = 0;
 uint64_t s_warningCount = 0;
+gxiosmemory::ResourceSampler s_resourceSampler = nullptr;
+
+// GeneralsX @feature Codex 01/11/2026 Query public Metal device accounting without a GPU wait, resource purge or retained device.
+void logAllocationBreakdown(FILE* output)
+{
+    malloc_statistics_t heap = {};
+    malloc_zone_statistics(nullptr, &heap); // nullptr aggregates every registered malloc zone.
+    char metalMiB[32] = "unknown";
+    const char* metalStatus = "api_unavailable";
+    void* metal = dlopen("/System/Library/Frameworks/Metal.framework/Metal", RTLD_LAZY | RTLD_LOCAL);
+    if (metal != nullptr) {
+        using CreateDevice = id (*)();
+        auto create = reinterpret_cast<CreateDevice>(dlsym(metal, "MTLCreateSystemDefaultDevice"));
+        if (create != nullptr) {
+            id device = create(); // Create returns an owned reference, even without ARC.
+            metalStatus = "device_unavailable";
+            if (device != nullptr) {
+                Class cls = object_getClass(device);
+                SEL sizeSelector = sel_registerName("currentAllocatedSize");
+                metalStatus = "counter_unavailable";
+                if (class_respondsToSelector(cls, sizeSelector)) {
+                    using ReadSize = unsigned long (*)(id, SEL);
+                    auto readSize = reinterpret_cast<ReadSize>(class_getMethodImplementation(cls, sizeSelector));
+                    snprintf(metalMiB, sizeof(metalMiB), "%.1f", static_cast<double>(readSize(device, sizeSelector)) / kMiB);
+                    metalStatus = "ok";
+                }
+                SEL releaseSelector = sel_registerName("release");
+                using Release = void (*)(id, SEL);
+                reinterpret_cast<Release>(class_getMethodImplementation(cls, releaseSelector))(device, releaseSelector);
+            }
+        }
+        dlclose(metal);
+    }
+    // Malloc, Metal, engine payload and footprint categories overlap: never add them together.
+    fprintf(output, "[IOS_MEMORY_BREAKDOWN] malloc_in_use_mib=%.1f malloc_reserved_mib=%.1f metal_allocated_mib=%s metal_status=%s categories=overlap\n",
+        static_cast<double>(heap.size_in_use) / kMiB, static_cast<double>(heap.size_allocated) / kMiB, metalMiB, metalStatus);
+}
 
 // SecTask's self-query is not declared in the public iOS SDK. Resolve it optionally
 // so an unavailable/restricted query cannot stop the game from launching.
@@ -75,7 +114,14 @@ void logSnapshot(FILE* output, const char* sample, uint64_t uptimeNS)
     fprintf(output, "[IOS_MEMORY] available_process_mib=%.1f footprint_mib=%s physical_device_mib=%s sample=%s uptime_s=%.3f low_memory_warnings=%llu\n",
         static_cast<double>(available) / kMiB, footprintMiB, physicalMiB, sample,
         static_cast<double>(uptimeNS) / 1000000000.0, static_cast<unsigned long long>(s_warningCount));
+    logAllocationBreakdown(output);
+    if (s_resourceSampler != nullptr) s_resourceSampler(output);
 }
+}
+
+void gxiosmemory::setResourceSampler(ResourceSampler sampler)
+{
+    s_resourceSampler = sampler;
 }
 
 void gxiosmemory::logStartupCapabilities(FILE* output)

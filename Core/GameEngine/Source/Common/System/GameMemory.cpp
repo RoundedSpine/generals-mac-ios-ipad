@@ -2981,6 +2981,17 @@ void MemoryPoolFactory::debugResetCheckpoints()
 #endif
 
 //-----------------------------------------------------------------------------
+// GeneralsX @feature Codex 01/11/2026 Read existing pool counters without allocating or changing retention policy.
+void MemoryPoolFactory::getPoolMemoryUsage(size_t& used, size_t& reserved)
+{
+	ScopedCriticalSection scopedCriticalSection(TheMemoryPoolCriticalSection);
+	used = reserved = 0;
+	for (MemoryPool* pool = m_firstPoolInFactory; pool; pool = pool->getNextPoolInList()) {
+		used += static_cast<size_t>(pool->getUsedBlockCount()) * pool->getAllocationSize();
+		reserved += static_cast<size_t>(pool->getTotalBlockCount()) * pool->getAllocationSize();
+	}
+}
+
 void MemoryPoolFactory::memoryPoolUsageReport( const char* filename, FILE *appendToFileInstead )
 {
 #ifdef MEMORYPOOL_DEBUG

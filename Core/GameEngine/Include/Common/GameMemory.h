@@ -554,6 +554,8 @@ public:
 	void reset();
 
 	void memoryPoolUsageReport( const char* filename, FILE *appendToFileInstead = nullptr );
+	// GeneralsX @feature Codex 01/11/2026 Payload-only pool accounting; excludes headers and raw DMA allocations.
+	void getPoolMemoryUsage(size_t& used, size_t& reserved);
 
 	#ifdef MEMORYPOOL_DEBUG
 

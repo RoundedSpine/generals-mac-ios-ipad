@@ -368,8 +368,11 @@ int main(int argc, char* argv[])
 								const char *mark = "[log capped: retaining errors and low-rate memory samples]\n";
 								write(s_logFd, mark, strlen(mark));
 							}
-							// GeneralsX @feature Codex 31/10/2026 Retain low-rate memory evidence after general debug spam reaches the cap.
-							if ((len >= 12 && memcmp(buf, "[IOS_MEMORY]", 12) == 0) ||
+							// GeneralsX @feature Codex 01/11/2026 Retain every category in each low-rate memory sample after the debug cap.
+							if ((len >= 11 && memcmp(buf, "[IOS_MEMORY", 11) == 0) ||
+							    (len >= 18 && memcmp(buf, "[IOS_AUDIO_MEMORY]", 18) == 0) ||
+							    (len >= 19 && memcmp(buf, "[IOS_ENGINE_MEMORY]", 19) == 0) ||
+							    (len >= 21 && memcmp(buf, "[IOS_RESOURCE_MEMORY]", 21) == 0) ||
 							    (len > 4 && (memcmp(buf, "err:", 4) == 0 ||
 							                memcmp(buf, "ERROR", 5) == 0 ||
 							                memcmp(buf, "FATAL", 5) == 0))) {

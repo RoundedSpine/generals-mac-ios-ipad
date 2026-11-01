@@ -144,6 +144,25 @@ capture after the general 8 MiB debug-log cap, alongside existing fatal/error
 lines. A memory kill may happen without a warning or final sample, so missing
 warnings do not rule it out.
 
+Each sample now includes these diagnostic rows:
+
+| Row | Coverage |
+| --- | --- |
+| `[IOS_MEMORY_BREAKDOWN]` | All malloc zones' in-use/reserved bytes and the default Metal device's `currentAllocatedSize`; unavailable Metal queries say `unknown`. |
+| `[IOS_ENGINE_MEMORY]` | Engine memory-pool payload used/reserved bytes; excludes block headers and raw DMA allocations. Disabled pools are identified. |
+| `[IOS_RESOURCE_MEMORY]` | Named texture count/estimated bytes from the asset hash, vertex/index buffer count/bytes, live objects and particles. Texture coverage excludes some procedural, font and render-target resources. |
+| `[IOS_AUDIO_MEMORY]` | Retained decoded PCM cache bytes, buffer count, unmatched closes and playback-list sizes; excludes streamed decoder/OpenAL internal allocations. |
+
+The categories overlap and must not be added to produce a total. Compare their
+trends against footprint. Sampling does not wait for GPU completion, flush caches,
+or retain past snapshots. Engine counters become available after initialization;
+all sample categories survive the general debug-log cap.
+
+For a useful comparison, record the times when you pause a stationary match,
+resume normal play, and return to the menu. A 20–30 minute session helps reproduce
+the previous growth. Returning to the menu need not release reserved allocator
+storage; rising in-use allocations and rising reserved space mean different things.
+
 Some Zero Hour editions rely on shared base-Generals archives. If your
 installation does not already include `ZH_Generals`, place the base game's
 `.big` archives in a `ZH_Generals` subfolder alongside the Zero Hour archives
