@@ -424,6 +424,8 @@ public:
 	// 'public' funcs that are really only for use by MemoryPoolFactory
 
 	DynamicMemoryAllocator *getNextDmaInList();						///< return next dma in linked list
+	// GeneralsX @feature Codex 01/11/2026 Snapshot-only access; caller must hold TheDmaCriticalSection.
+	MemoryPoolSingleBlock *getFirstRawBlock() const { return m_rawBlocks; }
 	void addToList(DynamicMemoryAllocator **pHead);				///< add this dma to the list
 	void removeFromList(DynamicMemoryAllocator **pHead);	///< remove this dma from the list
 	#ifdef MEMORYPOOL_DEBUG
@@ -557,6 +559,8 @@ public:
 	void memoryPoolUsageReport( const char* filename, FILE *appendToFileInstead = nullptr );
 	// GeneralsX @feature Codex 01/11/2026 Payload-only accounting with optional bounded named snapshots; returns total pool count even if capacity is exceeded.
 	size_t getPoolMemoryUsage(size_t& used, size_t& reserved, MemoryPoolUsage* pools = nullptr, size_t capacity = 0);
+	// GeneralsX @feature Codex 01/11/2026 Main-thread snapshot of raw DMA blocks. Size provider must not allocate, log or reenter the engine while locked.
+	void getRawMemoryUsage(RawMemoryUsage& usage, MemoryAllocationSizeQuery allocationSize = nullptr);
 
 	#ifdef MEMORYPOOL_DEBUG
 

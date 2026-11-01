@@ -124,6 +124,12 @@ void gxiosmemory::setResourceSampler(ResourceSampler sampler)
     s_resourceSampler = sampler;
 }
 
+// GeneralsX @feature Codex 01/11/2026 Engine raw blocks are the original malloc pointers from the GlobalAlloc compatibility layer.
+size_t gxiosmemory::allocationSize(const void* allocation)
+{
+    return allocation != nullptr ? malloc_size(allocation) : 0;
+}
+
 void gxiosmemory::logStartupCapabilities(FILE* output)
 {
     EntitlementValue increased;

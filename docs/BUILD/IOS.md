@@ -150,6 +150,7 @@ Each sample now includes these diagnostic rows:
 | --- | --- |
 | `[IOS_MEMORY_BREAKDOWN]` | All malloc zones' in-use/reserved bytes and the default Metal device's `currentAllocatedSize`; unavailable Metal queries say `unknown`. |
 | `[IOS_ENGINE_MEMORY]` | Engine memory-pool payload used/reserved bytes; excludes block headers and raw DMA allocations. Disabled pools are identified. |
+| `[IOS_MEMORY_RAW]` | Live large allocations routed through engine DMA allocators: block count, native usable bytes, largest block, size ranges and measurement coverage. Includes engine block headers and native rounding. |
 | `[IOS_MEMORY_POOLS]` / `[IOS_MEMORY_POOL]` | Named pool coverage, selected pools' live/reserved allocation counts and bytes, and changes since the preceding sample. See the limits below. |
 | `[IOS_RESOURCE_MEMORY]` | Named texture count/estimated bytes from the asset hash, vertex/index buffer count/bytes, live objects and particles, pause/menu state and logic frame. Texture coverage excludes some procedural, font and render-target resources. |
 | `[IOS_AUDIO_MEMORY]` | Retained decoded PCM cache bytes, buffer count, unmatched closes and playback-list sizes; excludes streamed decoder/OpenAL internal allocations. |
@@ -171,6 +172,23 @@ the first sample; a newly observed pool is not automatically a leak. Names are
 copied while locked, sanitized for one-line logging and flagged if truncated.
 The sampler prints after releasing the pool lock and does not allocate tracking
 storage, release empty blobs or change the game's allocation/scheduling policy.
+
+Raw allocation sampling walks the existing live lists under the DMA lock, using
+the iOS device layer's `malloc_size` query on each original allocation base.
+`usable_mib` includes engine block headers and native size-class rounding; it is
+neither requested payload nor process footprint. The six size-range fields are
+disjoint: for example `le_16k` counts blocks larger than 4 KiB and at most 16 KiB.
+`status=partial` and `unmeasured_blocks` identify blocks whose size is unknown;
+known bytes then form a partial total. Disabled/unavailable allocators are marked.
+`scan_ms` records query time including lock wait, before formatting the row.
+No allocation headers, allocation/free paths or retention rules are changed.
+The walk uses fixed stack storage, and its work scales with current raw-block count.
+
+These counters identify an allocation route, not the calling subsystem: linked
+libraries may use the engine's global `new`, and engine code may allocate directly
+outside it. Compare raw-allocation trends with pool and malloc trends before
+assigning the remaining growth to a library. Do not add overlapping categories
+or assume their difference gives an exact library-only total.
 
 For the next focused test, pause a loaded mission for 15–20 minutes, resume and
 issue a move command, then return to the main menu for a few minutes. Exit through

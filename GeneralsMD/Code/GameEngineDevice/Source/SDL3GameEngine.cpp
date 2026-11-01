@@ -92,8 +92,18 @@ static void logIOSResourceMemory(FILE* output)
 		TheMemoryPoolFactory ? "ok" : "unavailable", poolUsed / mib, poolReserved / mib);
 	if (TheMemoryPoolFactory) s_poolMemoryTracker.log(output, poolCount);
 	else s_poolMemoryTracker.reset();
+	// GeneralsX @feature Codex 01/11/2026 Split large engine system allocations from pooled payload; query after releasing the pool lock.
+	RawMemoryUsage raw = {};
+	const Uint64 rawStartNS = SDL_GetTicksNS();
+	if (TheMemoryPoolFactory) TheMemoryPoolFactory->getRawMemoryUsage(raw, gxiosmemory::allocationSize);
+	const double rawScanMS = static_cast<double>(SDL_GetTicksNS() - rawStartNS) / 1000000.0;
+	fprintf(output, "[IOS_MEMORY_RAW] status=%s allocators=%zu live_blocks=%zu usable_mib=%.3f largest_kib=%.1f unmeasured_blocks=%zu le_4k=%zu le_16k=%zu le_64k=%zu le_256k=%zu le_1m=%zu gt_1m=%zu scan_ms=%.3f coverage=engine_raw_dma_including_headers\n",
+		!TheMemoryPoolFactory ? "unavailable" : raw.unmeasuredBlocks ? "partial" : "complete",
+		raw.allocators, raw.liveBlocks, raw.allocatedBytes / mib, raw.largestBlock / 1024.0, raw.unmeasuredBlocks,
+		raw.sizeBuckets[0], raw.sizeBuckets[1], raw.sizeBuckets[2], raw.sizeBuckets[3], raw.sizeBuckets[4], raw.sizeBuckets[5], rawScanMS);
 #else
 	fprintf(output, "[IOS_ENGINE_MEMORY] pool_status=disabled\n");
+	fprintf(output, "[IOS_MEMORY_RAW] status=disabled\n");
 #endif
 	fprintf(output, "[IOS_RESOURCE_MEMORY] texture_coverage=asset_hash named_textures=%d named_texture_mib=%.1f vertex_buffers=%u vertex_buffer_mib=%.1f index_buffers=%u index_buffer_mib=%.1f objects=%u particles=%u game_paused=%d shell_game=%d logic_frame=%u\n",
 		TextureBaseClass::_Get_Total_Texture_Count(), TextureBaseClass::_Get_Total_Texture_Size() / mib,

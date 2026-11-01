@@ -3011,6 +3011,30 @@ size_t MemoryPoolFactory::getPoolMemoryUsage(size_t& used, size_t& reserved, Mem
 	return count;
 }
 
+// GeneralsX @feature Codex 01/11/2026 Measure existing live raw-block lists without modifying allocator layout, hot paths or retention.
+void MemoryPoolFactory::getRawMemoryUsage(RawMemoryUsage& usage, MemoryAllocationSizeQuery allocationSize)
+{
+	ScopedCriticalSection scopedCriticalSection(TheDmaCriticalSection);
+	memset(&usage, 0, sizeof(usage));
+	const size_t limits[] = {4u * 1024u, 16u * 1024u, 64u * 1024u, 256u * 1024u, 1024u * 1024u};
+	for (DynamicMemoryAllocator* dma = m_firstDmaInFactory; dma; dma = dma->getNextDmaInList()) {
+		++usage.allocators;
+		for (MemoryPoolSingleBlock* block = dma->getFirstRawBlock(); block; block = block->getNextRawBlock()) {
+			++usage.liveBlocks;
+			const size_t bytes = allocationSize ? allocationSize(block) : 0;
+			if (!bytes) {
+				++usage.unmeasuredBlocks;
+				continue;
+			}
+			usage.allocatedBytes += bytes;
+			if (bytes > usage.largestBlock) usage.largestBlock = bytes;
+			size_t bucket = 0;
+			while (bucket < sizeof(limits) / sizeof(limits[0]) && bytes > limits[bucket]) ++bucket;
+			++usage.sizeBuckets[bucket];
+		}
+	}
+}
+
 void MemoryPoolFactory::memoryPoolUsageReport( const char* filename, FILE *appendToFileInstead )
 {
 #ifdef MEMORYPOOL_DEBUG

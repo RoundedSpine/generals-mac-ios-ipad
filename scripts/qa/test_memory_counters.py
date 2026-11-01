@@ -50,7 +50,7 @@ class MemoryCounterTests(unittest.TestCase):
 #include <cstring>
 bool retain(const char*buf,int len){return CONDITION;}
 int main(){
- for(const char*line:{"[IOS_MEMORY] x", "[IOS_MEMORY_POOL] name=\"AudioEventRTS\"", "[IOS_MEMORY_POOLS] total=500", "[IOS_ENGINE_MEMORY] x", "ERROR test"})
+ for(const char*line:{"[IOS_MEMORY] x", "[IOS_MEMORY_POOL] name=\"AudioEventRTS\"", "[IOS_MEMORY_POOLS] total=500", "[IOS_MEMORY_RAW] status=complete", "[IOS_ENGINE_MEMORY] x", "ERROR test"})
   assert(retain(line,std::strlen(line)));
  for(const char*line:{"", "[IOS", "debug noise", "[PATH_TIMING] x"})assert(!retain(line,std::strlen(line)));
  assert(!retain(nullptr,0));
@@ -180,8 +180,13 @@ int main(){FILE*output=std::tmpfile();assert(output);OpenALAudioManager manager;
 #ifndef DISABLE_GAMEMEMORY
 static gxpoolmemory::Tracker s_poolMemoryTracker;
 #endif
-struct Factory{size_t getPoolMemoryUsage(size_t&used,size_t&reserved,MemoryPoolUsage*pools,size_t){
- used=1048576;reserved=4194304;pools[0]={this,"test",64,16384,65536,false};return 1;}};
+using Uint64=unsigned long long;
+Uint64 SDL_GetTicksNS(){static Uint64 time=0;return time+=100000;}
+namespace gxiosmemory{size_t allocationSize(const void*){return 8192;}}
+struct Factory{bool unmeasured=false;size_t getPoolMemoryUsage(size_t&used,size_t&reserved,MemoryPoolUsage*pools,size_t){
+ used=1048576;reserved=4194304;pools[0]={this,"test",64,16384,65536,false};return 1;}
+ void getRawMemoryUsage(RawMemoryUsage&usage,MemoryAllocationSizeQuery query){
+  usage=unmeasured?RawMemoryUsage{1,1,0,0,1,{}}:RawMemoryUsage{1,1,query(this),query(this),0,{0,1,0,0,0,0}};}};
 struct Logic{unsigned getObjectCount(){return 25;}bool isGamePaused(){return true;}bool isInShellGame(){return false;}unsigned getFrame(){return 10;}};
 struct Particles{unsigned getParticleCount(){return 100;}};
 struct OpenALAudioManager{unsigned calls=0;void logMemoryUsage(FILE*){++calls;}};
@@ -194,6 +199,7 @@ std::string capture(){FILE*out=std::tmpfile();assert(out);logIOSResourceMemory(o
 int main(){auto text=capture();assert(text.find("objects=0 particles=0")!=std::string::npos);
 #ifndef DISABLE_GAMEMEMORY
  assert(text.find("pool_status=unavailable")!=std::string::npos);
+ assert(text.find("[IOS_MEMORY_RAW] status=unavailable")!=std::string::npos);
 #endif
  Factory factory;Logic logic;Particles particles;OpenALAudioManager audio;
  TheMemoryPoolFactory=&factory;TheGameLogic=&logic;TheParticleSystemManager=&particles;TheAudio=&audio;
@@ -204,8 +210,13 @@ int main(){auto text=capture();assert(text.find("objects=0 particles=0")!=std::s
  assert(text.find("pool_status=ok pool_payload_used_mib=1.0 pool_payload_reserved_mib=4.0")!=std::string::npos);
  assert(text.find("[IOS_MEMORY_POOLS] total=1 captured=1 omitted=0")!=std::string::npos);
  assert(text.find("name=\"test\"")!=std::string::npos);
+ assert(text.find("[IOS_MEMORY_RAW] status=complete allocators=1 live_blocks=1 usable_mib=0.008 largest_kib=8.0 unmeasured_blocks=0")!=std::string::npos);
+ assert(text.find("le_4k=0 le_16k=1 le_64k=0 le_256k=0 le_1m=0 gt_1m=0 scan_ms=0.100")!=std::string::npos);
+ factory.unmeasured=true;text=capture();
+ assert(text.find("[IOS_MEMORY_RAW] status=partial allocators=1 live_blocks=1 usable_mib=0.000 largest_kib=0.0 unmeasured_blocks=1")!=std::string::npos);
 #else
  assert(text.find("pool_status=disabled")!=std::string::npos);
+ assert(text.find("[IOS_MEMORY_RAW] status=disabled")!=std::string::npos);
 #endif
 }
 '''.replace('BODY', body)

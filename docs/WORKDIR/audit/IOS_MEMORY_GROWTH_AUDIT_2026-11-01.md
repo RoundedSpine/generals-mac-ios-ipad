@@ -301,3 +301,40 @@ typed camera payload, player barriers, translator delivery, active/network and
 playback exclusions, bulk transfer, resume/reset and tick-only streams. All pass
 normally and with ASan/UBSan. Actual replay-file playback and device memory impact
 remain unverified until the next native build is tested.
+
+## Device verification and raw-allocation accounting — 1 November 2026
+
+Revision `c9e9b71` completes the paused test with normal exit. From 121.431 to
+661.481 seconds, pause remains true, frame stays 1,375, and all 397 pools are
+captured. Pool live/reserved payload remains 89.9/118.4 MiB at logged precision,
+and the prior steady `GameMessage`/argument growth is absent from the selected
+growth rows. Metal stays 655.1 MiB and decoded PCM stays below 14 MiB. The targeted
+message repair is supported by device evidence; exact absolute message counts
+are not present in the ranked output.
+
+Malloc in-use still rises from 353.2 to 386.1 MiB over those nine minutes, and
+footprint from 1,119.0 to 1,153.6 MiB. The default DMA routes requests larger than
+its largest subpool directly to system allocation; those blocks are on separate
+raw lists and were excluded from the previous pool totals. Direct library and
+engine C allocations are excluded as well. The remaining caller is unidentified.
+
+Extend diagnostics with a read-only, locked traversal of factory DMA raw lists.
+A size provider in the iOS device layer queries `malloc_size` on original base
+pointers from the malloc-backed GlobalAlloc compatibility layer. Log live block
+count, measured usable bytes including engine header/native rounding, largest
+block, six disjoint size ranges, unknown-size count and elapsed scan time. Print
+after unlocking; retain the existing normal/warning sample cadence and log-cap
+exception. Preserve allocation layout, allocation/free behavior and retention;
+use only fixed-size sampling storage. Traversal work scales with live raw blocks.
+
+The snapshot distinguishes allocator routes, not source call sites. Linked
+libraries may route C++ `new` through engine DMA, and engine code may use malloc
+directly. A zero or unavailable size is partial coverage, not a zero-byte live
+allocation. Even with complete raw coverage, subtracting pool payload from heap
+does not yield exact library memory because coverage and overhead differ.
+
+`test_raw_memory.py` covers multiple/empty DMA lists, allocation base pointers,
+wide totals, all size boundaries, partial coverage, unlink/free/teardown and
+concurrent mutation under the same lock. Extend native/provider and resource-log
+fixtures with unavailable/disabled/partial states and log-cap retention. Local
+normal and ASan/UBSan cases pass; native iOS measurements remain pending.

@@ -52,6 +52,8 @@ constexpr CFAllocatorRef kCFAllocatorDefault=nullptr;
 constexpr int RTLD_LAZY=1,RTLD_LOCAL=2;
 int mode=0,owned=0,closed=0,queries=0,memoryQueries=0;
 int metalMode=0,metalOwned=0,heapQueries=0,resourceSamples=0;
+int allocationQueries=0;
+size_t malloc_size(const void*allocation){assert(allocation==&allocationQueries);++allocationQueries;return 8192;}
 using id=void*;using Class=void*;using SEL=const char*;using IMP=void(*)();
 id fakeCreateDevice(){if(metalMode==3)return nullptr;++metalOwned;return reinterpret_cast<id>(2);}
 Class object_getClass(id device){assert(device==reinterpret_cast<id>(2));return device;}
@@ -104,7 +106,7 @@ int sysctlbyname(const char* name,void* output,size_t* length,void*,size_t){
  if(mode==8)return -1;
  *static_cast<uint64_t*>(output)=8ull*1024*1024*1024;return 0;
 }
-namespace gxiosmemory {using ResourceSampler=void(*)(FILE*);void setResourceSampler(ResourceSampler);void logStartupCapabilities(FILE*);void noteLowMemoryWarning();void logRuntimeIfDue(FILE*,uint64_t);}
+namespace gxiosmemory {using ResourceSampler=void(*)(FILE*);void setResourceSampler(ResourceSampler);size_t allocationSize(const void*);void logStartupCapabilities(FILE*);void noteLowMemoryWarning();void logRuntimeIfDue(FILE*,uint64_t);}
 BODY
 std::string capture(bool startup=true,uint64_t now=0){FILE* output=std::tmpfile();assert(output);
  if(startup)gxiosmemory::logStartupCapabilities(output);else gxiosmemory::logRuntimeIfDue(output,now);
@@ -112,6 +114,8 @@ std::string capture(bool startup=true,uint64_t now=0){FILE* output=std::tmpfile(
  char text[4096]={};const auto n=std::fread(text,1,sizeof(text),output);std::fclose(output);
  return std::string(text,n);}
 int main(){
+ assert(gxiosmemory::allocationSize(nullptr)==0&&allocationQueries==0);
+ assert(gxiosmemory::allocationSize(&allocationQueries)==8192&&allocationQueries==1);
  for(mode=0;mode<=10;++mode){
   owned=closed=queries=0;const auto text=capture();
   auto has=[&](const char* value){return text.find(value)!=std::string::npos;};
