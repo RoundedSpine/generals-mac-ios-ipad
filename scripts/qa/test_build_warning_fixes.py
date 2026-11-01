@@ -33,6 +33,72 @@ def workflow_run(name):
 
 
 class BuildWarningFixTests(unittest.TestCase):
+    # GeneralsX @test Codex 01/11/2026 Exercise policies after nested minimum-version resets, not just at the root.
+    def test_game_subprojects_preserve_capability_based_archive_deduplication(self):
+        version=subprocess.run(['cmake','--version'],text=True,capture_output=True,check=True).stdout
+        if tuple(map(int,re.search(r'version (\d+)\.(\d+)',version).groups())) < (3,31):
+            self.skipTest('Both linker-policy checks require CMake 3.31 or newer')
+        for game in ['GeneralsMD', 'Generals']:
+            prefix=(ROOT/game/'CMakeLists.txt').read_text().split('project(',1)[0]
+            for capable in [True,False]:
+                with self.subTest(game=game,capable=capable), tempfile.TemporaryDirectory() as directory:
+                    root=Path(directory);child=root/'game';child.mkdir()
+                    processing=('set(CMAKE_CXX_LINK_LIBRARIES_PROCESSING ORDER=REVERSE DEDUPLICATION=ALL)\n' if capable else
+                                'set(CMAKE_CXX_LINK_LIBRARIES_PROCESSING ORDER=FORWARD DEDUPLICATION=NONE)\n')
+                    (root/'CMakeLists.txt').write_text('cmake_minimum_required(VERSION 3.25)\nproject(check CXX)\n'
+                        'cmake_policy(SET CMP0156 NEW)\ncmake_policy(SET CMP0179 NEW)\n'+processing+'add_subdirectory(game)\n')
+                    (child/'main.cpp').write_text('int main(){}\n')
+                    (child/'library.cpp').write_text('void fixture(){}\n')
+                    (child/'CMakeLists.txt').write_text(prefix+'project(game CXX)\n'
+                        'cmake_policy(GET CMP0156 dedup)\ncmake_policy(GET CMP0179 order)\n'
+                        'if(NOT dedup STREQUAL "NEW" OR NOT order STREQUAL "NEW")\n'
+                        'message(FATAL_ERROR "Nested minimum reset linker policies")\nendif()\n'
+                        'foreach(name bz2 png16 z)\nadd_library(${name} STATIC library.cpp)\nendforeach()\n'
+                        'add_executable(app main.cpp)\ntarget_link_libraries(app PRIVATE bz2 png16 z bz2 png16 z)\n')
+                    result=subprocess.run(['cmake','-G','Unix Makefiles','-S',str(root),'-B',str(root/'build')],text=True,capture_output=True)
+                    self.assertEqual(0,result.returncode,result.stdout+result.stderr)
+                    link=(root/'build/game/CMakeFiles/app.dir/link.txt').read_text()
+                    for name in ['bz2','png16','z']:
+                        self.assertEqual(1 if capable else 2,link.count('lib'+name+'.a'),link)
+
+    # GeneralsX @test Codex 01/11/2026 Link the actual model-condition name table from another translation unit.
+    def test_model_condition_specialization_is_visible_and_links_existing_table(self):
+        header=(ROOT/'GeneralsMD/Code/GameEngine/Include/Common/BitFlags.h').read_text()
+        header=re.sub(r'^#(?:include|pragma once)[^\n]*','',header,flags=re.M)
+        model=(ROOT/'GeneralsMD/Code/GameEngine/Include/Common/ModelState.h').read_text()
+        model=model[model.index('enum ModelConditionFlagType'):model.index('#define MAKE_MODELCONDITION_MASK')]
+        definition=(ROOT/'GeneralsMD/Code/GameEngine/Source/Common/BitFlags.cpp').read_text()
+        definition=definition[definition.index('template<>'):definition.index('\ntemplate<>',definition.index('template<>')+1)]
+        support=r'''
+#pragma once
+#include <algorithm>
+#include <bitset>
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <strings.h>
+using Int=int;using Bool=bool;using UnsignedInt=unsigned;using std::min;
+#define CPP_11(...) __VA_ARGS__
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
+#define stricmp strcasecmp
+class AsciiString{public:void concat(const char*){};AsciiString&operator=(const char*){return *this;}};
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'model.h').write_text(support+header+model)
+            (root/'table.cpp').write_text('#include "model.h"\n'+definition)
+            (root/'reader.cpp').write_text('#include "model.h"\n'
+                'int main(){auto names=ModelConditionFlags::getBitNames();'
+                'assert(!strcmp(names[0],"TOPPLED"));assert(names[MODELCONDITION_COUNT]==nullptr);'
+                'ModelConditionFlags flags;assert(flags.setBitByName("DAMAGED"));'
+                'assert(flags.test(MODELCONDITION_DAMAGED));}\n')
+            compiler=os.environ.get('CXX','c++')
+            version=subprocess.run([compiler,'--version'],text=True,capture_output=True,check=True).stdout
+            strict=['-Werror=undefined-var-template'] if 'clang' in version.lower() else []
+            result=subprocess.run([compiler,'-std=c++17','-Werror',*strict,str(root/'table.cpp'),str(root/'reader.cpp'),
+                '-o',str(root/'check')],text=True,capture_output=True)
+            self.assertEqual(0,result.returncode,result.stderr)
+            subprocess.run([str(root/'check')],check=True)
+
     def test_ini_layout_extension_option_is_accepted_and_preserves_the_actual_offset(self):
         options=(ROOT/'cmake/compilers.cmake').read_text()
         flag=re.search(r'COMPILE_LANGUAGE:CXX>:(-Wno-[^>]+)>',options)[1]

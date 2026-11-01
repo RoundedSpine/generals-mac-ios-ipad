@@ -233,9 +233,21 @@ class OwnershipTests(unittest.TestCase):
             (include / 'GameClient').mkdir()
             (include / 'Lib/BaseType.h').write_text('#pragma once\nusing Bool=bool;using Int=int;using UnsignedInt=unsigned;'
                 'using Char=char;using UnsignedByte=unsigned char;using UnsignedInt64=unsigned long long;\n')
-            (include / 'GameClient/VideoPlayer.h').write_text('#pragma once\n#include <Lib/BaseType.h>\n'
-                'struct File;class AsciiString;class VideoBuffer;class VideoStreamInterface{};'
-                'class VideoStream:public VideoStreamInterface{};class VideoPlayer{};\n')
+            # Compile the real base interface too, so override checking cannot be
+            # satisfied by an unrelated stand-in with matching method names.
+            (include / 'Common').mkdir()
+            (include / 'WWMath').mkdir()
+            with (include / 'Lib/BaseType.h').open('a') as output:
+                output.write('using Real=float;\n')
+            (include / 'WWMath/rect.h').write_text('class RectClass {};\n')
+            (include / 'Common/SubsystemInterface.h').write_text(
+                'class SubsystemInterface {public: virtual ~SubsystemInterface()=default;'
+                'virtual void init()=0;virtual void reset()=0;virtual void update()=0;};\n')
+            (include / 'Common/AsciiString.h').write_text('class AsciiString {};\n')
+            (include / 'Common/INI.h').write_text('struct FieldParse {};\n')
+            (include / 'Common/STLTypedefs.h').write_text('#include <vector>\n')
+            (include / 'GameClient/VideoPlayer.h').write_text(
+                (ROOT / 'Core/GameEngine/Include/GameClient/VideoPlayer.h').read_text())
             headers = ROOT / 'GeneralsMD/Code/GameEngineDevice/Include/VideoDevice/FFmpeg'
             run_cpp(f'#include "{headers / "FFmpegFile.h"}"\n'
                 f'#include "{headers / "FFmpegVideoPlayer.h"}"\n' + r'''
@@ -243,7 +255,7 @@ class OwnershipTests(unittest.TestCase):
 static_assert(!std::is_copy_constructible<FFmpegFile>::value);
 static_assert(sizeof(FFmpegVideoStream)>sizeof(void*));
 int main(){}
-''', extra_flags=['-I', str(include)])
+''', extra_flags=['-I', str(include), '-Werror', '-Wsuggest-override'])
 
     def test_video_factory_partial_constructor_and_realloc(self):
         run_cpp(video_fixture() + r'''

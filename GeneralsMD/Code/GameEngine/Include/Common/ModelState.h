@@ -244,6 +244,8 @@ enum ModelConditionFlagType CPP_11(: Int)
 //-------------------------------------------------------------------------------------------------
 
 typedef BitFlags<MODELCONDITION_COUNT> ModelConditionFlags;
+// GeneralsX @build Codex 01/11/2026 Declare the existing name-table specialization before callers instantiate it.
+template<> const char* const ModelConditionFlags::s_bitNameList[];
 
 #define MAKE_MODELCONDITION_MASK(k) ModelConditionFlags(ModelConditionFlags::kInit, (k))
 #define MAKE_MODELCONDITION_MASK2(k,a) ModelConditionFlags(ModelConditionFlags::kInit, (k), (a))

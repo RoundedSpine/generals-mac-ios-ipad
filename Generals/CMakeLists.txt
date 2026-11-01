@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.25)
 
+# GeneralsX @build Codex 01/11/2026 The nested minimum resets parent policies; restore capability-based archive deduplication.
+if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+endif()
+if(POLICY CMP0179)
+    cmake_policy(SET CMP0179 NEW)
+endif()
+
 project(g_generals LANGUAGES C CXX)
 
 if (RTS_BUILD_GENERALS_DOCS)
