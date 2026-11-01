@@ -14,7 +14,8 @@ is the real 2003 engine compiled for ARM64, rendering DirectX 8 →
 This `experiment/ios-community-patch` branch adds an opt-in
 [Full English Community Patch data overlay](docs/BUILD/IOS_COMMUNITY_PATCH.md)
 on the current mod-testing engine. Real asset conversion and device validation
-remain pending; no automatic push build is enabled for this branch.
+remain pending. Builds on this branch require manual dispatch or an explicit
+`[build community patch]` commit-message marker; ordinary pushes skip IPA jobs.
 
 Built on EA's GPL v3 source release, standing on a chain of community work —
 [TheSuperHackers](https://github.com/TheSuperHackers/GeneralsGameCode),

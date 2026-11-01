@@ -165,7 +165,7 @@ class CommunityPatchTest(unittest.TestCase):
                 stage.pack_input(link, project)
 
 
-    def test_current_worker_profile_and_manual_only_patch_build(self):
+    def test_current_worker_profile_and_explicit_patch_build(self):
         workflow = (ROOT / '.github/workflows/build-ios.yml').read_text()
         profiles = json.loads(re.search(r"GX_MOD_TESTING_PROFILE:.*fromJSON\('([^']+)'\)", workflow)[1])
         for branch, expected in [('experiment/ios-mod-testing', 'ON'), ('experiment/ios-community-patch', 'ON'), ('main', 'OFF')]:
@@ -175,7 +175,8 @@ class CommunityPatchTest(unittest.TestCase):
                      'REUSE_PATH_CONTEXTS', 'PATH_WORKER_POOL', 'PATH_FOUR_REQUESTS', 'PATH_LOOKAHEAD',
                      'FAST_ZONE_MERGES', 'FROZEN_OCCUPANCY_CACHE', 'PATH_TIMING', 'EXCLUSIVE_PATH_WORKER', 'QUAD_LISTS']:
             self.assertIn('GENERALS_' + flag, flags)
-        self.assertNotIn('experiment/ios-community-patch', workflow.split('workflow_dispatch:', 1)[0])
+        self.assertIn('experiment/ios-community-patch', workflow.split('workflow_dispatch:', 1)[0])
+        self.assertIn("github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build community patch]')", workflow)
         self.assertIn('needs: community-patch', workflow)
         self.assertIn("needs.community-patch.result == 'success'", workflow)
         self.assertIn('stage-community-patch.py --verify build/community-patch', workflow)

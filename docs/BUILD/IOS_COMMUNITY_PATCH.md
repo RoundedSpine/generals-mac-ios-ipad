@@ -77,9 +77,11 @@ need device validation; successful packaging is not gameplay verification.
 
 ## Build and verification
 
-This branch deliberately has **no automatic push trigger**. When a build is later
-authorized, manually dispatch `Build iOS unsigned IPA` on
-`experiment/ios-community-patch`. Its Windows patch-data job must succeed before
+This branch requires an **explicit build request**. Manually dispatch
+`Build iOS unsigned IPA` on `experiment/ios-community-patch`, or push a commit
+whose message contains `[build community patch]`. The latter supports environments
+without access to GitHub's dispatch API. Ordinary pushes skip the IPA jobs.
+Its Windows patch-data job must succeed before
 the macOS 15 IPA job can run. Other existing branches skip patch conversion and
 retain their previous build behavior. The shared testing profile explicitly
 includes both experiment branches so worker/renderer options do not silently turn

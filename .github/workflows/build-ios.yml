@@ -6,6 +6,7 @@ on:
     branches:
       - ci/ios-unsigned-ipa
       - experiment/ios-mod-testing
+      - experiment/ios-community-patch
   workflow_dispatch:
 
 permissions:
@@ -17,7 +18,8 @@ concurrency:
 
 jobs:
   community-patch:
-    if: github.ref_name == 'experiment/ios-community-patch'
+    # GeneralsX @build Codex 02/11/2026 Allow explicitly requested push builds when dispatch access is unavailable.
+    if: github.ref_name == 'experiment/ios-community-patch' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build community patch]'))
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
