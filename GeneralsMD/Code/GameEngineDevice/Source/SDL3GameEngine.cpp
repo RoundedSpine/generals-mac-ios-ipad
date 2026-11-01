@@ -69,10 +69,15 @@ extern GameWindowManager *TheWindowManager;
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #include <atomic>
 #include "SDL3Device/iosmemorydiagnostics.h"
+#include "SDL3Device/poolmemorydiagnostics.h"
 #include "Common/GameMemory.h"
 #include "texture.h"
 #include "dx8vertexbuffer.h"
 #include "dx8indexbuffer.h"
+
+#ifndef DISABLE_GAMEMEMORY
+static gxpoolmemory::Tracker s_poolMemoryTracker;
+#endif
 
 // GeneralsX @feature Codex 01/11/2026 Counters describe engine payload, not all Metal or process allocations.
 static void logIOSResourceMemory(FILE* output)
@@ -80,18 +85,25 @@ static void logIOSResourceMemory(FILE* output)
 	const double mib = 1024.0 * 1024.0;
 #ifndef DISABLE_GAMEMEMORY
 	size_t poolUsed = 0, poolReserved = 0;
-	if (TheMemoryPoolFactory) TheMemoryPoolFactory->getPoolMemoryUsage(poolUsed, poolReserved);
+	size_t poolCount = 0;
+	if (TheMemoryPoolFactory)
+		poolCount = TheMemoryPoolFactory->getPoolMemoryUsage(poolUsed, poolReserved, s_poolMemoryTracker.entries(), gxpoolmemory::Tracker::Capacity);
 	fprintf(output, "[IOS_ENGINE_MEMORY] pool_status=%s pool_payload_used_mib=%.1f pool_payload_reserved_mib=%.1f\n",
 		TheMemoryPoolFactory ? "ok" : "unavailable", poolUsed / mib, poolReserved / mib);
+	if (TheMemoryPoolFactory) s_poolMemoryTracker.log(output, poolCount);
+	else s_poolMemoryTracker.reset();
 #else
 	fprintf(output, "[IOS_ENGINE_MEMORY] pool_status=disabled\n");
 #endif
-	fprintf(output, "[IOS_RESOURCE_MEMORY] texture_coverage=asset_hash named_textures=%d named_texture_mib=%.1f vertex_buffers=%u vertex_buffer_mib=%.1f index_buffers=%u index_buffer_mib=%.1f objects=%u particles=%u\n",
+	fprintf(output, "[IOS_RESOURCE_MEMORY] texture_coverage=asset_hash named_textures=%d named_texture_mib=%.1f vertex_buffers=%u vertex_buffer_mib=%.1f index_buffers=%u index_buffer_mib=%.1f objects=%u particles=%u game_paused=%d shell_game=%d logic_frame=%u\n",
 		TextureBaseClass::_Get_Total_Texture_Count(), TextureBaseClass::_Get_Total_Texture_Size() / mib,
 		VertexBufferClass::Get_Total_Buffer_Count(), VertexBufferClass::Get_Total_Allocated_Memory() / mib,
 		IndexBufferClass::Get_Total_Buffer_Count(), IndexBufferClass::Get_Total_Allocated_Memory() / mib,
 		TheGameLogic ? TheGameLogic->getObjectCount() : 0,
-		TheParticleSystemManager ? TheParticleSystemManager->getParticleCount() : 0);
+		TheParticleSystemManager ? TheParticleSystemManager->getParticleCount() : 0,
+		TheGameLogic ? static_cast<int>(TheGameLogic->isGamePaused()) : -1,
+		TheGameLogic ? static_cast<int>(TheGameLogic->isInShellGame()) : -1,
+		TheGameLogic ? TheGameLogic->getFrame() : 0);
 	if (TheAudio) static_cast<OpenALAudioManager*>(TheAudio)->logMemoryUsage(output);
 }
 
@@ -494,6 +506,9 @@ SDL3GameEngine::~SDL3GameEngine()
 {
 #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 	gxiosmemory::setResourceSampler(nullptr);
+#ifndef DISABLE_GAMEMEMORY
+	s_poolMemoryTracker.reset();
+#endif
 	if (m_IsInitialized) SDL_RemoveEventWatch(iosLifecycleWatcher, nullptr);
 #endif
 	if (m_SDLWindow && m_IsTextInputActive) {

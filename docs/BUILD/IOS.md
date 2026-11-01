@@ -150,13 +150,33 @@ Each sample now includes these diagnostic rows:
 | --- | --- |
 | `[IOS_MEMORY_BREAKDOWN]` | All malloc zones' in-use/reserved bytes and the default Metal device's `currentAllocatedSize`; unavailable Metal queries say `unknown`. |
 | `[IOS_ENGINE_MEMORY]` | Engine memory-pool payload used/reserved bytes; excludes block headers and raw DMA allocations. Disabled pools are identified. |
-| `[IOS_RESOURCE_MEMORY]` | Named texture count/estimated bytes from the asset hash, vertex/index buffer count/bytes, live objects and particles. Texture coverage excludes some procedural, font and render-target resources. |
+| `[IOS_MEMORY_POOLS]` / `[IOS_MEMORY_POOL]` | Named pool coverage, selected pools' live/reserved allocation counts and bytes, and changes since the preceding sample. See the limits below. |
+| `[IOS_RESOURCE_MEMORY]` | Named texture count/estimated bytes from the asset hash, vertex/index buffer count/bytes, live objects and particles, pause/menu state and logic frame. Texture coverage excludes some procedural, font and render-target resources. |
 | `[IOS_AUDIO_MEMORY]` | Retained decoded PCM cache bytes, buffer count, unmatched closes and playback-list sizes; excludes streamed decoder/OpenAL internal allocations. |
 
 The categories overlap and must not be added to produce a total. Compare their
-trends against footprint. Sampling does not wait for GPU completion, flush caches,
-or retain past snapshots. Engine counters become available after initialization;
+trends against footprint. Sampling does not wait for GPU completion or flush caches.
+Named pool tracking retains only the preceding snapshot in fixed storage;
+there is no growing history. Engine counters become available after initialization;
 all sample categories survive the general debug-log cap.
+
+Named pool snapshots cover up to 1,024 pools using about 272 KiB of fixed storage
+on ARM64. Each sample logs at most 16 distinct pools: the eight largest positive
+increases in live bytes, four largest live payloads and four largest reserved
+payloads, with duplicates combined. Summary `total`, `captured` and `omitted`
+fields make partial coverage explicit; aggregate pool totals still cover all pools.
+Rows include signed byte/block changes and `baseline=first_sample`,
+`previous_sample` or `not_in_previous`. An unseen pool starts from zero only after
+the first sample; a newly observed pool is not automatically a leak. Names are
+copied while locked, sanitized for one-line logging and flagged if truncated.
+The sampler prints after releasing the pool lock and does not allocate tracking
+storage, release empty blobs or change the game's allocation/scheduling policy.
+
+For the next focused test, pause a loaded mission for 15–20 minutes, return to the
+main menu for a few minutes, then exit through the menu and collect the log.
+`game_paused`, `shell_game` and `logic_frame` help distinguish these phases.
+These rows report net live allocations, not allocation call stacks; allocations
+outside engine pools still require separate investigation if CPU heap keeps rising.
 
 For a useful comparison, record the times when you pause a stationary match,
 resume normal play, and return to the menu. A 20–30 minute session helps reproduce

@@ -2982,14 +2982,33 @@ void MemoryPoolFactory::debugResetCheckpoints()
 
 //-----------------------------------------------------------------------------
 // GeneralsX @feature Codex 01/11/2026 Read existing pool counters without allocating or changing retention policy.
-void MemoryPoolFactory::getPoolMemoryUsage(size_t& used, size_t& reserved)
+size_t MemoryPoolFactory::getPoolMemoryUsage(size_t& used, size_t& reserved, MemoryPoolUsage* pools, size_t capacity)
 {
 	ScopedCriticalSection scopedCriticalSection(TheMemoryPoolCriticalSection);
 	used = reserved = 0;
+	size_t count = 0;
 	for (MemoryPool* pool = m_firstPoolInFactory; pool; pool = pool->getNextPoolInList()) {
 		used += static_cast<size_t>(pool->getUsedBlockCount()) * pool->getAllocationSize();
 		reserved += static_cast<size_t>(pool->getTotalBlockCount()) * pool->getAllocationSize();
+		if (pools && count < capacity) {
+			MemoryPoolUsage& entry = pools[count];
+			entry.identity = pool;
+			entry.allocationSize = pool->getAllocationSize();
+			entry.usedBlocks = pool->getUsedBlockCount();
+			entry.totalBlocks = pool->getTotalBlockCount();
+			const char* name = pool->getPoolName();
+			if (!name) name = "";
+			size_t n = 0;
+			while (n + 1 < sizeof(entry.name) && name[n]) {
+				entry.name[n] = name[n];
+				++n;
+			}
+			entry.name[n] = '\0';
+			entry.nameTruncated = name[n] != '\0';
+		}
+		++count;
 	}
+	return count;
 }
 
 void MemoryPoolFactory::memoryPoolUsageReport( const char* filename, FILE *appendToFileInstead )

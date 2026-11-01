@@ -190,6 +190,7 @@
 #ifdef DISABLE_GAMEMEMORY
 #include "GameMemoryNull.h"
 #else
+#include "MemoryPoolUsage.h"
 
 #ifdef MEMORYPOOL_DEBUG
 
@@ -554,8 +555,8 @@ public:
 	void reset();
 
 	void memoryPoolUsageReport( const char* filename, FILE *appendToFileInstead = nullptr );
-	// GeneralsX @feature Codex 01/11/2026 Payload-only pool accounting; excludes headers and raw DMA allocations.
-	void getPoolMemoryUsage(size_t& used, size_t& reserved);
+	// GeneralsX @feature Codex 01/11/2026 Payload-only accounting with optional bounded named snapshots; returns total pool count even if capacity is exceeded.
+	size_t getPoolMemoryUsage(size_t& used, size_t& reserved, MemoryPoolUsage* pools = nullptr, size_t capacity = 0);
 
 	#ifdef MEMORYPOOL_DEBUG
 
