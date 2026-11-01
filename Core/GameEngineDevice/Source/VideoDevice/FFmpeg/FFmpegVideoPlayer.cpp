@@ -52,6 +52,7 @@ extern "C" {
 #endif
 
 #include <chrono>
+#include <memory>
 
 //----------------------------------------------------------------------------
 //         Externals
@@ -192,14 +193,15 @@ VideoStreamInterface* FFmpegVideoPlayer::createStream( File* file )
 		return nullptr;
 	}
 
-	FFmpegFile* ffmpegHandle = NEW FFmpegFile();
-	if(!ffmpegHandle->open(file))
-	{
-		delete ffmpegHandle;
+	// GeneralsX @bugfix Codex 01/11/2026 Keep input and decoder owned until video construction succeeds.
+	auto closeInput = [](File* input) { input->close(); };
+	std::unique_ptr<File, decltype(closeInput)> input(file, closeInput);
+	std::unique_ptr<FFmpegFile> ffmpegHandle(NEW FFmpegFile());
+	if (!ffmpegHandle->open(input.release()))
 		return nullptr;
-	}
 
-	FFmpegVideoStream *stream = NEW FFmpegVideoStream(ffmpegHandle);
+	FFmpegVideoStream *stream = NEW FFmpegVideoStream(ffmpegHandle.get());
+	ffmpegHandle.release(); // A fully constructed video stream now owns the decoder.
 
 	if ( stream )
 	{
@@ -308,28 +310,36 @@ void FFmpegVideoPlayer::initializeBinkWithMiles()
 FFmpegVideoStream::FFmpegVideoStream(FFmpegFile* file)
 : m_ffmpegFile(file)
 {
-	m_ffmpegFile->setFrameCallback(onFrame);
-	m_ffmpegFile->setUserData(this);
+	// GeneralsX @bugfix Codex 01/11/2026 A throwing constructor must release its partial frame storage.
+	try {
+		m_ffmpegFile->setFrameCallback(onFrame);
+		m_ffmpegFile->setUserData(this);
 
 #ifdef SAGE_USE_OPENAL
-	// Release the audio handle if it's already in use
-	OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
-	audioStream->reset();
+		// Release the audio handle if it's already in use
+		OpenALAudioStream* audioStream = (OpenALAudioStream*)TheAudio->getHandleForBink();
+		audioStream->reset();
 #endif
 
-	// Decode until we have our first video frame
-	while (m_good && m_gotFrame == false)
-		m_good = m_ffmpegFile->decodePacket();
+		// Decode until we have our first video frame
+		while (m_good && m_gotFrame == false)
+			m_good = m_ffmpegFile->decodePacket();
 
 #ifdef SAGE_USE_OPENAL
-	// Start audio playback
-	// GeneralsX @bugfix fbraz3 23/04/2026 Ensure video stream starts with audible gain even after prior source reuse.
-	// Issue: https://github.com/fbraz3/GeneralsX/issues/38
-	audioStream->setVolume(1.0f);
-	audioStream->play();
+		// Start audio playback
+		// GeneralsX @bugfix fbraz3 23/04/2026 Ensure video stream starts with audible gain even after prior source reuse.
+		// Issue: https://github.com/fbraz3/GeneralsX/issues/38
+		audioStream->setVolume(1.0f);
+		audioStream->play();
 #endif
 
-	m_startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+		m_startTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	} catch (...) {
+		av_freep(&m_audioBuffer);
+		av_frame_free(&m_frame);
+		sws_freeContext(m_swsContext);
+		throw;
+	}
 }
 
 //============================================================================
@@ -382,12 +392,14 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 		{
 			outputBitsPerSample = 16;
 			outputFrameSize = frame->nb_samples * frame->ch_layout.nb_channels * (int)sizeof(int16_t);
-			videoStream->m_audioBuffer = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, outputFrameSize));
-			if (videoStream->m_audioBuffer == nullptr)
+			// GeneralsX @bugfix Codex 01/11/2026 Failed realloc retains the original owned buffer.
+			uint8_t* resized = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, outputFrameSize));
+			if (resized == nullptr)
 			{
 				DEBUG_LOG(("Failed to allocate converted audio buffer"));
 				return;
 			}
+			videoStream->m_audioBuffer = resized;
 			int16_t *dst = reinterpret_cast<int16_t *>(videoStream->m_audioBuffer);
 			if (sampleFmt == AV_SAMPLE_FMT_FLTP)
 			{
@@ -416,12 +428,14 @@ void FFmpegVideoStream::onFrame(AVFrame *frame, int stream_idx, int stream_type,
 		// The format is planar - convert it to interleaved
 		else if (av_sample_fmt_is_planar(sampleFmt))
 		{
-			videoStream->m_audioBuffer = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, outputFrameSize));
-			if (videoStream->m_audioBuffer == nullptr)
+			// GeneralsX @bugfix Codex 01/11/2026 Failed realloc retains the original owned buffer.
+			uint8_t* resized = static_cast<uint8_t*>(av_realloc(videoStream->m_audioBuffer, outputFrameSize));
+			if (resized == nullptr)
 			{
 				DEBUG_LOG(("Failed to allocate audio buffer"));
 				return;
 			}
+			videoStream->m_audioBuffer = resized;
 			// Write the samples into our audio buffer
 			for (int sample_idx = 0; sample_idx < frame->nb_samples; sample_idx++)
 			{

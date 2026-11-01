@@ -47,9 +47,12 @@ class FFmpegFile
 {
 public:
 	FFmpegFile();
-	// The constructur takes ownership of the file
+	// Both this constructor and open() take ownership of the file, including on failure.
 	explicit FFmpegFile(File *file);
 	~FFmpegFile();
+	// GeneralsX @bugfix Codex 01/11/2026 A decoder's native handles and input file have one owner.
+	FFmpegFile(const FFmpegFile&) = delete;
+	FFmpegFile& operator=(const FFmpegFile&) = delete;
 
 	Bool open(File *file);
 	void close();

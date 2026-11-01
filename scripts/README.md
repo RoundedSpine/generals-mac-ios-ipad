@@ -473,6 +473,10 @@ debug/exception exclusions and the original budget cutoff with diagnostics enabl
 
 Run `python3 scripts/qa/test_openal_stream.py` for production streaming regressions
 covering persistent no-context errors, pause/resume, failed queries, EOF and refill.
+Run `python3 scripts/qa/test_ffmpeg_ownership.py` for production decoder/stream
+failure cleanup, throwing callbacks/constructors, same-packet backpressure retry,
+video resize failures and the single shared FFmpeg CMake source graph. CMake and
+a C++17 compiler must be on PATH; FFmpeg/OpenAL development libraries are not needed.
 Run `python3 scripts/qa/test_csf_reserved_header.py` for reserved CSF words, allocation
 count bounds, malformed lengths, truncation and table bounds. Packaging tests also
 reject arm64 host/Simulator inputs and propagate real framework-rpath failures.

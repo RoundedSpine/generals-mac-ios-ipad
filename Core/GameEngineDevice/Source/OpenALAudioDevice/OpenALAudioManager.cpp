@@ -67,6 +67,7 @@
 #include "Common/file.h"
 
 #include <AL/alext.h>
+#include <memory>
 
 // GeneralsX @bugfix 14/06/2026 Self-heal for stuck "disallow speech" flag.
 // Uninterruptible streamed speech (e.g. Generals Challenge enemy taunts) sets
@@ -739,6 +740,8 @@ void OpenALAudioManager::pauseAmbient(Bool shouldPause)
 //-------------------------------------------------------------------------------------------------
 void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 {
+	// GeneralsX @bugfix Codex 01/11/2026 Retain the incoming event until a playing owner exists.
+	std::unique_ptr<AudioEventRTS> pendingEvent(event);
 #ifdef INTENSIVE_AUDIO_DEBUG
 	DEBUG_LOG(("OPENAL (%d) - Processing play request: %d (%s)", TheGameLogic->getFrame(), event->getPlayingHandle(), event->getEventName().str()));
 #endif
@@ -754,11 +757,17 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 
 	AsciiString fileToPlay = event->getFilename();
 	PlayingAudio* audio = allocatePlayingAudio();
+	audio->m_audioEventRTS = pendingEvent.release();
 	switch (info->m_soundType)
 	{
 	case AT_Music:
 	case AT_Streaming:
 	{
+		// GeneralsX @bugfix Codex 01/11/2026 Own partial streaming setup before any allocation or callback can fail.
+		auto releasePending = [this](PlayingAudio* value) { releasePlayingAudio(value); };
+		std::unique_ptr<PlayingAudio, decltype(releasePending)> pending(audio, releasePending);
+		audio = NULL; // The scoped streaming owner now handles every early exit.
+		pending->m_type = PAT_Stream;
 #ifdef INTENSIVE_AUDIO_DEBUG
 		DEBUG_LOG(("- Stream\n"));
 #endif
@@ -795,24 +804,25 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 			}
 		}
 
-		File* file = TheFileSystem->openFile(fileToPlay.str());
+		auto closeInput = [](File* input) { input->close(); };
+		std::unique_ptr<File, decltype(closeInput)> file(TheFileSystem->openFile(fileToPlay.str()), closeInput);
 		if (!file) {
 			DEBUG_LOG(("Failed to open file: %s\n", fileToPlay.str()));
-			releasePlayingAudio(audio);
 			return;
 		}
 
-		FFmpegFile* ffmpegFile = NEW FFmpegFile();
-		if (!ffmpegFile->open(file))
+		pending->m_ffmpegFile = NEW FFmpegFile();
+		FFmpegFile* ffmpegFile = pending->m_ffmpegFile;
+		if (!ffmpegFile->open(file.release()))
 		{
 			DEBUG_LOG(("Failed to open FFmpeg file: %s\n", fileToPlay.str()));
-			releasePlayingAudio(audio);
 			return;
 		}
 
 		OpenALAudioStream* stream;
 		if (!handleToKill || foundSoundToReplace) {
 			stream = new OpenALAudioStream;
+			pending->m_stream = stream;
 			// When we need more data ask FFmpeg for more data.
 			stream->setRequireDataCallback([ffmpegFile, stream]() -> bool {
 				ffmpegFile->decodePacket();
@@ -836,11 +846,17 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 				ALenum format = OpenALAudioManager::getALFormat(frame->ch_layout.nb_channels, bytesPerSample * 8);
 				const int frameSize =
 					av_samples_get_buffer_size(NULL, frame->ch_layout.nb_channels, frame->nb_samples, sampleFmt, 1);
+				// GeneralsX @bugfix Codex 01/11/2026 Reject invalid conversion sizes before allocation.
+				if (frameSize <= 0 || bytesPerSample <= 0 || frame->ch_layout.nb_channels <= 0 || frame->nb_samples <= 0)
+					return;
 				uint8_t* frameData = frame->data[0];
 
 				// We need to interleave the samples if the format is planar
 				if (av_sample_fmt_is_planar(static_cast<AVSampleFormat>(frame->format))) {
-					uint8_t* audioBuffer = static_cast<uint8_t*>(av_malloc(frameSize));
+					// Scoped PCM scratch also survives a throwing OpenAL queue admission.
+					std::unique_ptr<uint8_t, decltype(&av_free)> audioBuffer(static_cast<uint8_t*>(av_malloc(frameSize)), av_free);
+					if (!audioBuffer)
+						return;
 
 					// Write the samples into our audio buffer
 					for (int sample_idx = 0; sample_idx < frame->nb_samples; sample_idx++)
@@ -848,13 +864,12 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 						int byte_offset = sample_idx * bytesPerSample;
 						for (int channel_idx = 0; channel_idx < frame->ch_layout.nb_channels; channel_idx++)
 						{
-							uint8_t* dst = &audioBuffer[byte_offset * frame->ch_layout.nb_channels + channel_idx * bytesPerSample];
+							uint8_t* dst = &audioBuffer.get()[byte_offset * frame->ch_layout.nb_channels + channel_idx * bytesPerSample];
 							uint8_t* src = &frame->data[channel_idx][byte_offset];
 							memcpy(dst, src, bytesPerSample);
 						}
 					}
-					stream->bufferData(audioBuffer, frameSize, format, frame->sample_rate);
-					av_freep(&audioBuffer);
+					stream->bufferData(audioBuffer.get(), frameSize, format, frame->sample_rate);
 				}
 				else
 					stream->bufferData(frameData, frameSize, format, frame->sample_rate);
@@ -864,12 +879,6 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 			stream = NULL;
 		}
 
-		// Put this on here, so that the audio event RTS will be cleaned up regardless.
-		audio->m_audioEventRTS = event;
-		audio->m_stream = stream;
-		audio->m_ffmpegFile = ffmpegFile;
-		audio->m_type = PAT_Stream;
-
 		if (stream) {
 			if ((info->m_soundType == AT_Streaming) && event->getUninterruptible()) {
 				setDisallowSpeech(TRUE);
@@ -877,8 +886,8 @@ void OpenALAudioManager::playAudioEvent(AudioEventRTS* event)
 			}
 			// AIL_set_stream_volume_pan(stream, curVolume, 0.5f);
 			playStream(event, stream);
-			m_playingStreams.push_back(audio);
-			audio = NULL;
+			m_playingStreams.push_back(pending.get());
+			pending.release();
 		}
 		break;
 	}

@@ -28,6 +28,7 @@
 
 #include "VideoDevice/FFmpeg/FFmpegFile.h"
 #include "Common/file.h"
+#include <memory>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -47,7 +48,8 @@ FFmpegFile::~FFmpegFile()
 	close();
 }
 
-Bool FFmpegFile::open(File *file)
+// GeneralsX @bugfix Codex 01/11/2026 Roll back partially opened handles even when stream storage throws.
+Bool FFmpegFile::open(File *file) try
 {
 	DEBUG_ASSERTCRASH(m_file == nullptr, ("already open"));
 	DEBUG_ASSERTCRASH(file != nullptr, ("null file pointer"));
@@ -82,6 +84,7 @@ Bool FFmpegFile::open(File *file)
 	m_avioCtx = avio_alloc_context(buffer, avio_ctx_buffer_size, 0, file, &readPacket, nullptr, nullptr);
 	if (m_avioCtx == nullptr) {
 		DEBUG_LOG(("Failed to alloc AVIOContext"));
+		av_free(buffer); // avio_alloc_context does not consume the buffer on failure.
 		close();
 		return false;
 	}
@@ -123,6 +126,9 @@ Bool FFmpegFile::open(File *file)
 			close();
 			return false;
 		}
+		// Publish ownership before either codec setup call can fail.
+		FFmpegStream &output_stream = m_streams[stream_idx];
+		output_stream.codec_ctx = codec_ctx;
 
 		result = avcodec_parameters_to_context(codec_ctx, av_stream->codecpar);
 		if (result < 0) {
@@ -141,18 +147,29 @@ Bool FFmpegFile::open(File *file)
 			close();
 			return false;
 		}
-
-		FFmpegStream &output_stream = m_streams[stream_idx];
-		output_stream.codec_ctx = codec_ctx;
 		output_stream.codec = input_codec;
 		output_stream.stream_type = input_codec->type;
 		output_stream.stream_idx = stream_idx;
 		output_stream.frame = av_frame_alloc();
+		if (output_stream.frame == nullptr) {
+			DEBUG_LOG(("Failed to alloc AVFrame"));
+			close();
+			return false;
+		}
 	}
 
 	m_packet = av_packet_alloc();
+	if (m_packet == nullptr) {
+		DEBUG_LOG(("Failed to alloc AVPacket"));
+		close();
+		return false;
+	}
 
 	return true;
+}
+catch (...) {
+	close();
+	throw;
 }
 
 /**
@@ -182,8 +199,8 @@ void FFmpegFile::close()
 	for (auto &stream : m_streams) {
 		if (stream.codec_ctx != nullptr) {
 			avcodec_free_context(&stream.codec_ctx);
-			av_frame_free(&stream.frame);
 		}
+		av_frame_free(&stream.frame);
 	}
 	m_streams.clear();
 
@@ -202,61 +219,55 @@ void FFmpegFile::close()
 	}
 }
 
+// GeneralsX @bugfix Codex 01/11/2026 Release packets on every exit and drain before resending rejected input.
 Bool FFmpegFile::decodePacket()
 {
 	DEBUG_ASSERTCRASH(m_fmtCtx != nullptr, ("null format context"));
 	DEBUG_ASSERTCRASH(m_packet != nullptr, ("null packet pointer"));
 
+	// The packet object is reused; only its current reference is scoped here.
+	std::unique_ptr<AVPacket, decltype(&av_packet_unref)> packet(m_packet, av_packet_unref);
 	int result = av_read_frame(m_fmtCtx, m_packet);
 	if (result == AVERROR_EOF) {
-		// GeneralsX @bugfix 14/06/2026 Record TRUE end-of-file (distinct from the
-		// decode-error returns below). Consumers use isAtEof() to know a one-shot
-		// stream is genuinely finished vs a transient/underrun condition.
 		m_atEof = true;
+		return false;
+	}
+	if (result < 0) {
+		DEBUG_LOG(("Failed 'av_read_frame': %d", result));
 		return false;
 	}
 
 	const int stream_idx = m_packet->stream_index;
-	DEBUG_ASSERTCRASH(m_streams.size() > stream_idx, ("stream index out of bounds"));
-
-	auto &stream = m_streams[stream_idx];
-	AVCodecContext *codec_ctx = stream.codec_ctx;
-	result = avcodec_send_packet(codec_ctx, m_packet);
-	// Check if we need more data
-	if (result == AVERROR(EAGAIN))
-		return true;
-
-	// Handle any other errors
-	if (result < 0) {
-		char error_buffer[1024];
-		av_strerror(result, error_buffer, sizeof(error_buffer));
-		DEBUG_LOG(("Failed 'avcodec_send_packet': %s", error_buffer));
+	if (stream_idx < 0 || static_cast<size_t>(stream_idx) >= m_streams.size()) {
+		DEBUG_LOG(("Invalid FFmpeg stream index: %d", stream_idx));
 		return false;
 	}
-	av_packet_unref(m_packet);
+	auto &stream = m_streams[stream_idx];
+	AVCodecContext *codec_ctx = stream.codec_ctx;
+	auto receiveFrames = [&]() {
+		int received;
+		while ((received = avcodec_receive_frame(codec_ctx, stream.frame)) >= 0) {
+			if (m_frameCallback != nullptr)
+				m_frameCallback(stream.frame, stream_idx, stream.stream_type, m_userData);
+		}
+		if (received != AVERROR(EAGAIN))
+			DEBUG_LOG(("Failed 'avcodec_receive_frame': %d", received));
+		return received;
+	};
 
-	// Get all frames in this packet
-	while (result >= 0) {
-		result = avcodec_receive_frame(codec_ctx, stream.frame);
-
-		// Check if we need more data
-		if (result == AVERROR(EAGAIN))
-			return true;
-
-		// Handle any other errors
-		if (result < 0) {
-			char error_buffer[1024];
-			av_strerror(result, error_buffer, sizeof(error_buffer));
-			DEBUG_LOG(("Failed 'avcodec_receive_frame': %s", error_buffer));
+	result = avcodec_send_packet(codec_ctx, m_packet);
+	if (result == AVERROR(EAGAIN)) {
+		// FFmpeg requires receiving output and then resending this same packet.
+		if (receiveFrames() != AVERROR(EAGAIN))
 			return false;
-		}
-
-		if (m_frameCallback != nullptr) {
-			m_frameCallback(stream.frame, stream_idx, stream.stream_type, m_userData);
-		}
+		result = avcodec_send_packet(codec_ctx, m_packet);
 	}
-
-	return true;
+	if (result < 0) {
+		DEBUG_LOG(("Failed 'avcodec_send_packet': %d", result));
+		return false;
+	}
+	av_packet_unref(packet.release());
+	return receiveFrames() == AVERROR(EAGAIN);
 }
 
 void FFmpegFile::seekFrame(int frame_idx)
