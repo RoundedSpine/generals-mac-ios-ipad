@@ -172,11 +172,23 @@ copied while locked, sanitized for one-line logging and flagged if truncated.
 The sampler prints after releasing the pool lock and does not allocate tracking
 storage, release empty blobs or change the game's allocation/scheduling policy.
 
-For the next focused test, pause a loaded mission for 15–20 minutes, return to the
-main menu for a few minutes, then exit through the menu and collect the log.
+For the next focused test, pause a loaded mission for 15–20 minutes, resume and
+issue a move command, then return to the main menu for a few minutes. Exit through
+the menu and collect the log.
 `game_paused`, `shell_game` and `logic_frame` help distinguish these phases.
 These rows report net live allocations, not allocation call stacks; allocations
 outside engine pools still require separate investigation if CPU heap keeps rising.
+
+Paused offline live games now coalesce repeated frame-tick and replay-camera
+metadata after all client translators run. An idle paused queue retains the
+latest tick/camera pair; real commands and changes of originating player remain
+ordering barriers. Active play, networking and recorded replay/simulation
+playback keep their prior transfers. Replay file encoding is unchanged. The next
+log should show the steady paused growth of `GameMessage`, `GameMessageArgument`
+and their argument-vector pools disappear; other CPU allocations still need
+measurement. Existing pools may retain their reserved capacity after messages
+are released. A short recorded skirmish with pause/resume and replay playback is
+also useful for verifying the final camera and command behavior on the device.
 
 For a useful comparison, record the times when you pause a stationary match,
 resume normal play, and return to the menu. A 20–30 minute session helps reproduce

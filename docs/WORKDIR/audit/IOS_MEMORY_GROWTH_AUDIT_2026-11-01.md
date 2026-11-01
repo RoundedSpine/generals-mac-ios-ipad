@@ -258,3 +258,46 @@ retention policies remain separate findings. Do not infer that these repairs
 explain or eliminate the 58.49 MiB/minute device slope. The next long-session log
 must identify which categories continue to rise. Heap, Metal, pool and footprint
 measurements overlap; texture/audio rows intentionally describe narrower coverage.
+
+## Named-pool follow-up and paused-message repair — 1 November 2026
+
+The next test, revision `b73d86a`, captures every named pool with zero omissions.
+Between 91.414 and 691.469 seconds, pause remains true, logic frame stays 1,333,
+and object/particle counts remain fixed. Over those ten minutes:
+
+| Allocation | Live-count increase | Payload increase (bytes) |
+| --- | ---: | ---: |
+| `GameMessage` (64 bytes/block) | 36,002 | 2,304,128 |
+| `GameMessageArgument` (32 bytes/block) | 162,009 | 5,184,288 |
+| `dmaPool_16` | 18,000 | 288,000 |
+| `dmaPool_64` | 18,001 | 1,152,064 |
+
+Their combined 8,928,480 bytes match the rounded engine pool payload rise from
+90.2 to 98.7 MiB. Malloc in-use rises 30.1 MiB and process footprint 22.2 MiB;
+these are different, overlapping measurements. Metal stays at 655.1 MiB and the
+PCM cache stays below 14 MiB. The game returns to the menu and exits normally.
+
+`GameClient::update()` creates a one-argument frame tick every client update.
+`LookAtTranslator` adds an eight-argument replay-camera message. Surviving messages
+transfer to `TheCommandList` after client translation, but its processing/reset
+is inside the logic update skipped while paused. Two messages and nine arguments
+per update at 30 Hz exactly match the observed 60/270-per-second growth. Final
+argument-vector storage in 16/64-byte DMA pools brings predicted retained payload
+to 496 bytes/update, or 0.85144 MiB/minute. This explains the measured pool growth;
+additional malloc growth still needs separate accounting after the repair.
+
+Repair `CommandList::appendMessageList()` in the Zero Hour message stream. While
+offline live logic is paused, replace older metadata of the same type only within
+the trailing metadata run for the same player. Treat every other command or
+player as a barrier. Run all client translators first and release replaced nodes
+through normal destruction. Active/network and recorded playback/simulation
+transfers are excluded. No timing, simulation scheduling, replay encoding or
+arbitrary queue-size limit changes are made.
+
+`test_paused_messages.py` compiles actual ownership/transfer methods and the
+client dispatcher with small game-state providers. Six cases verify bounded
+idle retention over 100,000 synthetic updates, preserved command ordering and
+typed camera payload, player barriers, translator delivery, active/network and
+playback exclusions, bulk transfer, resume/reset and tick-only streams. All pass
+normally and with ASan/UBSan. Actual replay-file playback and device memory impact
+remain unverified until the next native build is tested.

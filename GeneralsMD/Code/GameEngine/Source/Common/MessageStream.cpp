@@ -32,6 +32,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Recorder.h"
+#include "GameNetwork/NetworkDefs.h"
 
 #include "GameClient/InGameUI.h"
 #include "GameLogic/GameLogic.h"
@@ -1068,8 +1069,7 @@ Bool isInvalidDebugCommand( GameMessage::Type t )
 /**
  * Propagate messages thru attached Translators, invoking each Translator's
  * callback for each message in the stream.
- * Once all Translators have evaluated the message stream, all messages
- * in the stream are destroyed.
+ * Surviving messages transfer to the command list after all Translators run.
  */
 void MessageStream::propagateMessages()
 {
@@ -1195,10 +1195,28 @@ void CommandList::destroyAllMessages()
 void CommandList::appendMessageList( GameMessage *list )
 {
 	GameMessage *msg, *next;
+	// GeneralsX @bugfix Codex 01/11/2026 Paused single-player logic cannot drain per-render metadata; retain the latest snapshot after client translation.
+	const Bool coalescePausedMetadata = TheNetwork == nullptr && TheGameLogic != nullptr && TheGameLogic->isGamePaused() &&
+		(TheRecorder == nullptr || !TheRecorder->isPlaybackMode()); // Recorded playback input must remain verbatim.
 
 	for( msg = list; msg; msg = next )
 	{
 		next = msg->next();
+		if (coalescePausedMetadata &&
+			(msg->getType() == GameMessage::MSG_FRAME_TICK || msg->getType() == GameMessage::MSG_SET_REPLAY_CAMERA))
+		{
+			GameMessage* queued = m_lastMessage;
+			while (queued)
+			{
+				// A command or a different player is an ordering barrier. Never replace metadata across it.
+				if (queued->getPlayerIndex() != msg->getPlayerIndex() ||
+					(queued->getType() != GameMessage::MSG_FRAME_TICK && queued->getType() != GameMessage::MSG_SET_REPLAY_CAMERA))
+					break;
+				GameMessage* previous = queued->prev();
+				if (queued->getType() == msg->getType()) deleteInstance(queued);
+				queued = previous;
+			}
+		}
 		appendMessage( msg );
 	}
 }
