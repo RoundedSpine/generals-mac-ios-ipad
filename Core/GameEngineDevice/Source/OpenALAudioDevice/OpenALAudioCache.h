@@ -61,13 +61,13 @@ struct OpenAudioFile
 	ALuint m_buffer = 0;
 	FFmpegFile* m_ffmpegFile = NULL;
 	UnsignedInt m_openCount = 0;
-	UnsignedInt m_fileSize = 0;
+	UnsignedInt m_fileSize = 0; // Retained decoded PCM payload bytes, not input-file bytes.
 	UnsignedInt m_channels = 0;
 	UnsignedInt m_bitsPerSample = 0;
 	UnsignedInt m_freq = 0;
 
 	// Note: OpenAudioFile does not own this m_eventInfo, and should not delete it.
-	const AudioEventInfo* m_eventInfo;	// Not mutable, unlike the one on AudioEventRTS.
+	const AudioEventInfo* m_eventInfo = NULL;	// Not mutable, unlike the one on AudioEventRTS.
 	int m_totalSamples = 0;
 	float m_duration = 0.0f;
 };
@@ -109,6 +109,9 @@ public:
 	// outside the audio cache. They should be used as a rough estimate only.
 	UnsignedInt getCurrentlyUsedSize() const { return m_currentlyUsedSize; }
 	UnsignedInt getMaxSize() const { return m_maxSize; }
+	// GeneralsX @feature Codex 01/11/2026 Main-thread diagnostics expose residency and unmatched closes without retaining history.
+	size_t getCachedBufferCount() const { return m_openFiles.size(); }
+	UnsignedInt getUnmatchedCloseCount() const { return m_unmatchedCloses; }
 
 	static void getWaveData(void* wave_data,
 		uint8_t*& data,
@@ -129,4 +132,5 @@ protected:
 	OpenFilesHash m_openFiles;
 	UnsignedInt m_currentlyUsedSize;
 	UnsignedInt m_maxSize;
+	UnsignedInt m_unmatchedCloses = 0;
 };

@@ -11,25 +11,32 @@ extern "C" {
 
 #include <cstring>
 #include <limits>
+#include <memory>
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-OpenALAudioFileCache::OpenALAudioFileCache() : m_maxSize(14*1024*1024), m_currentlyUsedSize(0)
+OpenALAudioFileCache::OpenALAudioFileCache() : m_currentlyUsedSize(0), m_maxSize(14*1024*1024)
 {
 }
 
 Bool OpenALAudioFileCache::decodeFFmpeg(OpenAudioFile* file)
 {
 	std::vector<uint8_t> audioData;
-	auto on_frame = [&audioData](AVFrame* frame, int stream_idx, int stream_type, void* user_data) {
+	// GeneralsX @bugfix Codex 01/11/2026 Bound decoded PCM before upload, including compressed inputs and temporary storage.
+	Bool decodeFailed = false;
+	auto on_frame = [this, &audioData, &decodeFailed](AVFrame* frame, int stream_idx, int stream_type, void* user_data) {
 		OpenAudioFile* file = static_cast<OpenAudioFile*>(user_data);
 		if (stream_type != AVMEDIA_TYPE_AUDIO) {
 			return;
 		}
 
 		const int frame_data_size = file->m_ffmpegFile->getSizeForSamples(frame->nb_samples);
-		audioData.reserve(audioData.size() + frame_data_size);
+		if (frame_data_size <= 0 || static_cast<size_t>(frame_data_size) > m_maxSize ||
+			audioData.size() > m_maxSize - static_cast<size_t>(frame_data_size)) {
+			decodeFailed = true;
+			return;
+		}
 
 		if (av_sample_fmt_is_planar(static_cast<AVSampleFormat>(frame->format))) {
 			// Convert planar audio to interleaved
@@ -45,7 +52,6 @@ Bool OpenALAudioFileCache::decodeFFmpeg(OpenAudioFile* file)
 			// Directly copy interleaved audio
 			audioData.insert(audioData.end(), frame->data[0], frame->data[0] + frame_data_size);
 		}
-		file->m_fileSize += frame_data_size;
 		file->m_totalSamples += frame->nb_samples;
 		};
 
@@ -53,12 +59,16 @@ Bool OpenALAudioFileCache::decodeFFmpeg(OpenAudioFile* file)
 	file->m_ffmpegFile->setUserData(file);
 
 	// Read all packets inside the file
-	while (file->m_ffmpegFile->decodePacket()) {
+	while (!decodeFailed && file->m_ffmpegFile->decodePacket()) {
 	}
+	if (decodeFailed || audioData.empty()) return false;
 
 	// Fill the buffer with the audio data
+	(void)alGetError();
 	alBufferData(file->m_buffer, OpenALAudioManager::getALFormat(file->m_ffmpegFile->getNumChannels(), file->m_ffmpegFile->getBytesPerSample() * 8),
 		audioData.data(), audioData.size(), file->m_ffmpegFile->getSampleRate());
+	if (alGetError() != AL_NO_ERROR) return false;
+	file->m_fileSize = static_cast<UnsignedInt>(audioData.size());
 
 	// Calculate the duration in MS
 	file->m_duration = (file->m_totalSamples / (float)file->m_ffmpegFile->getSampleRate()) * 1000.0f;
@@ -132,16 +142,31 @@ ALuint OpenALAudioFileCache::getBufferForFile(const OpenFileInfo &fileInfo)
 		return 0;
 	}
 
-	UnsignedInt fileSize = file->size();
-
 	OpenAudioFile openedAudioFile;
+	// GeneralsX @bugfix Codex 01/11/2026 Roll back decoder, OpenAL handle and budget on failed or throwing admission paths.
+	Bool accounted = false;
+	auto cleanup = [this, &accounted](OpenAudioFile* pending) {
+		if (accounted) m_currentlyUsedSize -= pending->m_fileSize;
+		pending->m_openCount = 0; // Not published to a playing source yet.
+		releaseOpenAudioFile(pending);
+	};
+	std::unique_ptr<OpenAudioFile, decltype(cleanup)> pending(&openedAudioFile, cleanup);
+	(void)alGetError();
 	alGenBuffers(1, &openedAudioFile.m_buffer);
+	if (!openedAudioFile.m_buffer || alGetError() != AL_NO_ERROR) {
+		file->close();
+		return 0;
+	}
 	openedAudioFile.m_eventInfo = eventToOpenFrom ? eventToOpenFrom->getAudioEventInfo() : NULL;
-	openedAudioFile.m_ffmpegFile = new FFmpegFile();
+	try {
+		openedAudioFile.m_ffmpegFile = new FFmpegFile();
+	} catch (...) {
+		file->close();
+		throw;
+	}
 
 	// This transfer ownership of file
 	if (!openedAudioFile.m_ffmpegFile->open(file)) {
-		releaseOpenAudioFile(&openedAudioFile);
 		return 0;
 	}
 
@@ -154,26 +179,30 @@ ALuint OpenALAudioFileCache::getBufferForFile(const OpenFileInfo &fileInfo)
 	}
 
 	if (!decodeFFmpeg(&openedAudioFile)) {
-		releaseOpenAudioFile(&openedAudioFile);
 		return 0;
 	}
 
-	openedAudioFile.m_ffmpegFile->close();
-
-	openedAudioFile.m_fileSize = fileSize;
+	delete openedAudioFile.m_ffmpegFile;
+	openedAudioFile.m_ffmpegFile = NULL;
 	m_currentlyUsedSize += openedAudioFile.m_fileSize;
+	accounted = true;
 	if (m_currentlyUsedSize > m_maxSize) {
 		DEBUG_LOG(("Audio Cache is full, trying to free some space\n"));
 		// We need to free some samples, or we're not going to be able to play this sound.
 		if (!freeEnoughSpaceForSample(openedAudioFile)) {
 			DEBUG_LOG(("Couldn't free enough space for sample\n"));
-			m_currentlyUsedSize -= openedAudioFile.m_fileSize;
-			releaseOpenAudioFile(&openedAudioFile);
 			return 0;
 		}
 	}
 
-	m_openFiles[strToFind] = openedAudioFile;
+	// GeneralsX @bugfix Codex 01/11/2026 First loads own the same initial borrow as cache hits.
+	openedAudioFile.m_openCount = 1;
+	auto inserted = m_openFiles.emplace(strToFind, openedAudioFile);
+	if (!inserted.second) {
+		++inserted.first->second.m_openCount;
+		return inserted.first->second.m_buffer;
+	}
+	pending.release();
 	return openedAudioFile.m_buffer;
 }
 
@@ -187,10 +216,16 @@ void OpenALAudioFileCache::closeBuffer(ALuint bufferToClose)
 	OpenFilesHash::iterator it;
 	for (it = m_openFiles.begin(); it != m_openFiles.end(); ++it) {
 		if (it->second.m_buffer == bufferToClose) {
+			// GeneralsX @bugfix Codex 01/11/2026 Keep an unmatched close from turning an idle entry into a permanently busy one.
+			if (!it->second.m_openCount) {
+				++m_unmatchedCloses;
+				return;
+			}
 			--it->second.m_openCount;
 			return;
 		}
 	}
+	++m_unmatchedCloses;
 }
 
 float OpenALAudioFileCache::getBufferLength(ALuint handle)
